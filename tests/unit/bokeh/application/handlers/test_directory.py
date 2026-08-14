@@ -139,8 +139,7 @@ class Test_DirectoryHandler:
         assert len(doc.roots) == 2
 
     def test_directory_empty_mainipynb(self) -> None:
-        import nbformat
-
+        nbformat = pytest.importorskip("nbformat")
         doc = Document()
         source = nbformat.v4.new_notebook()
         result: dict[str, Handler] = {}
@@ -159,8 +158,7 @@ class Test_DirectoryHandler:
         assert not doc.roots
 
     def test_directory_mainipynb_adds_roots(self) -> None:
-        import nbformat
-
+        nbformat = pytest.importorskip("nbformat")
         doc = Document()
         source = nbformat.v4.new_notebook()
         code = script_adds_two_roots('SomeModelInNbTestDirectory',
@@ -182,6 +180,7 @@ class Test_DirectoryHandler:
         assert len(doc.roots) == 2
 
     def test_directory_both_mainipynb_and_mainpy(self) -> None:
+        nbformat = pytest.importorskip("nbformat")
         doc = Document()
         def load(filename: str):
             handler = bahd.DirectoryHandler(filename=filename)
@@ -189,7 +188,6 @@ class Test_DirectoryHandler:
             if handler.failed:
                 raise RuntimeError(handler.error)
 
-        import nbformat
         source = nbformat.v4.new_notebook()
 
         with_directory_contents({
@@ -272,8 +270,8 @@ some.foo = 57
 
         assert "on_server_loaded" == handler.on_server_loaded(None)
         assert "on_server_unloaded" == handler.on_server_unloaded(None)
-        assert "on_session_created" == await handler.on_session_created(None)
-        assert "on_session_destroyed" == await handler.on_session_destroyed(None)
+        assert await handler.on_session_created(None) is None
+        assert await handler.on_session_destroyed(None) is None
 
     async def test_directory_with_app_hooks(self) -> None:
         doc = Document()
@@ -297,8 +295,8 @@ some.foo = 57
 
         assert "on_server_loaded" == handler.on_server_loaded(None)
         assert "on_server_unloaded" == handler.on_server_unloaded(None)
-        assert "on_session_created" == await handler.on_session_created(None)
-        assert "on_session_destroyed" == await handler.on_session_destroyed(None)
+        assert await handler.on_session_created(None) is None
+        assert await handler.on_session_destroyed(None) is None
         assert dict(foo=10) == handler.process_request(dict(headers=dict(foo=10)))
 
     async def test_directory_with_lifecycle_and_app_hooks_errors(self) -> None:

@@ -2,7 +2,8 @@ import {default_resolver} from "../base"
 import {version as js_version} from "../version"
 import {logger} from "../core/logging"
 import type {Class} from "core/class"
-import type {HasProps} from "core/has_props"
+import type {ColorScheme} from "core/enums"
+import {HasProps} from "core/has_props"
 import type {Property} from "core/properties"
 import {ModelResolver} from "core/resolvers"
 import type {ModelRep} from "core/serialization"
@@ -20,10 +21,13 @@ import {entries, dict} from "core/util/object"
 import * as sets from "core/util/set"
 import type {CallbackLike} from "core/util/callbacks"
 import {execute} from "core/util/callbacks"
+import {assert} from "core/util/assert"
 import {Model} from "model"
+import {DocumentConfig} from "./config"
 import type {ModelDef} from "./defs"
 import {decode_def} from "./defs"
-import type {BokehEvent, BokehEventType, BokehEventMap, ModelEvent} from "core/bokeh_events"
+import type {BokehEvent, BokehEventType, BokehEventMap} from "core/bokeh_events"
+import {ModelEvent} from "core/bokeh_events"
 import {DocumentReady, LODStart, LODEnd} from "core/bokeh_events"
 import type {DocumentEvent, DocumentChangedEvent, Decoded, DocumentChanged} from "./events"
 import {DocumentEventBatch, RootRemovedEvent, TitleChangedEvent, MessageSentEvent, RootAddedEvent} from "./events"
@@ -64,6 +68,7 @@ export type DocJson = {
   version?: string
   title?: string
   defs?: ModelDef[]
+  config?: ModelRep
   roots: ModelRep[]
   callbacks?: {[key: string]: ModelRep[]}
 }
@@ -76,6 +81,12 @@ export const documents: Document[] = []
 
 export const DEFAULT_TITLE = "Bokeh Application"
 
+export type DocumentOptions = {
+  roots?: Iterable<HasProps>
+  resolver?: ModelResolver
+  recompute_timeout?: number
+}
+
 // This class should match the API of the Python Document class
 // as much as possible.
 export class Document implements Equatable {
@@ -84,12 +95,12 @@ export class Document implements Equatable {
 
   readonly event_manager: EventManager
   readonly idle: Signal0<this>
+  readonly resolver: ModelResolver
 
   protected readonly _init_timestamp: number
-  protected readonly _resolver: ModelResolver
   protected _title: string
   protected _roots: HasProps[]
-  /*protected*/ _all_models: Map<ID, Model>
+  protected _all_models: Map<ID, HasProps>
   protected _new_models: Set<HasProps>
   protected _all_models_freeze_count: number
   protected _callbacks: Map<((event: DocumentEvent) => void) | ((event: DocumentChangedEvent) => void), boolean>
@@ -99,11 +110,22 @@ export class Document implements Equatable {
   protected _interactive_timestamp: number | null
   protected _interactive_plot: Model | null
   protected _interactive_finalize: (() => void) | null
+  protected _recompute_timeout: number
+  protected _system_scheme: MediaQueryList
 
-  constructor(options: {roots?: Iterable<HasProps>, resolver?: ModelResolver} = {}) {
+  private _config?: DocumentConfig
+  get config(): DocumentConfig {
+    assert(this._config != null, "configuration is missing")
+    return this._config
+  }
+  set config(config: DocumentConfig) {
+    this.freeze_all_models(() => this._config = config)
+  }
+
+  constructor(options: DocumentOptions = {}) {
     documents.push(this)
     this._init_timestamp = Date.now()
-    this._resolver = options.resolver ?? new ModelResolver(default_resolver)
+    this.resolver = options.resolver ?? new ModelResolver(default_resolver)
     this._title = DEFAULT_TITLE
     this._roots = []
     this._all_models = new Map()
@@ -117,9 +139,19 @@ export class Document implements Equatable {
     this._idle_roots = new WeakSet()
     this._interactive_timestamp = null
     this._interactive_plot = null
+    this._recompute_timeout = options.recompute_timeout ?? 30_000 /* 30s */
     if (options.roots != null) {
       this._add_roots(...options.roots)
     }
+    this.on_message("bokeh_event", (event) => {
+      assert(event instanceof ModelEvent)
+      this.event_manager.trigger(event)
+    })
+    this._system_scheme = matchMedia("(prefers-color-scheme: dark)")
+    this.config = new DocumentConfig()
+    this.set_color_scheme(this.config.color_scheme)
+    this._system_scheme.addEventListener("change", () => this.set_color_scheme(this.config.color_scheme))
+    this.config.on_change(this.config.properties.color_scheme, () => this.set_color_scheme(this.config.color_scheme))
   }
 
   [equals](that: this, _cmp: Comparator): boolean {
@@ -132,7 +164,7 @@ export class Document implements Equatable {
 
   get is_idle(): boolean {
     // TODO: models without views, e.g. data models
-    for (const root of this._roots) {
+    for (const root of this.roots()) {
       if (!this._idle_roots.has(root)) {
         return false
       }
@@ -140,21 +172,27 @@ export class Document implements Equatable {
     return true
   }
 
+  private _notified_idle: boolean = false
   notify_idle(model: HasProps): void {
+    if (this._notified_idle || !this.roots().includes(model)) {
+      return
+    }
     this._idle_roots.add(model)
     if (this.is_idle) {
       logger.info(`document idle at ${Date.now() - this._init_timestamp} ms`)
       this.event_manager.send_event(new DocumentReady())
       this.idle.emit()
+      this._notified_idle = true
     }
   }
 
-  clear(): void {
+  clear({sync}: {sync?: boolean} = {}): void {
     this._push_all_models_freeze()
     try {
       while (this._roots.length > 0) {
-        this.remove_root(this._roots[0])
+        this.remove_root(this._roots[0], {sync})
       }
+      this._config = undefined
     } finally {
       this._pop_all_models_freeze()
     }
@@ -193,14 +231,21 @@ export class Document implements Equatable {
     if (dest_doc === this) {
       throw new Error("Attempted to overwrite a document with itself")
     }
-    dest_doc.clear()
+
+    // Don't synchronize root removal with the server, because we are rebuilding from
+    // scratch and server has the complete state. However, events will be distributed
+    // internally within bokehjs, because UI refresh depends on this (in standalone
+    // embedding and its derivatives).
+    dest_doc.clear({sync: false})
+
     // we have to remove ALL roots before adding any
     // to the new doc or else models referenced from multiple
     // roots could be in both docs at once, which isn't allowed.
+    const {config} = this
     const roots = copy(this._roots)
-    this.clear()
+    this.clear({sync: false})
 
-    for (const root of roots) {
+    for (const root of [...roots, config]) {
       if (root.document != null) {
         throw new Error(`Somehow we didn't detach ${root}`)
       }
@@ -210,6 +255,8 @@ export class Document implements Equatable {
       throw new Error(`this._all_models still had stuff in it: ${this._all_models}`)
     }
 
+    dest_doc.config = config
+
     for (const root of roots) {
       dest_doc.add_root(root)
     }
@@ -217,29 +264,64 @@ export class Document implements Equatable {
     dest_doc.set_title(this._title)
   }
 
-  // TODO other fields of doc
+  private _hold_models_freeze: boolean = false
+
+  freeze_all_models(fn: () => void): void {
+    this._push_all_models_freeze()
+    try {
+      fn()
+    } finally {
+      this._pop_all_models_freeze()
+    }
+  }
+
   protected _push_all_models_freeze(): void {
+    if (this._hold_models_freeze) {
+      return
+    }
     this._all_models_freeze_count += 1
   }
 
   protected _pop_all_models_freeze(): void {
+    if (this._hold_models_freeze) {
+      return
+    }
     this._all_models_freeze_count -= 1
     if (this._all_models_freeze_count === 0) {
       this._recompute_all_models()
     }
   }
 
-  /*protected*/ _invalidate_all_models(): void {
-    logger.debug("invalidating document models")
-    // if freeze count is > 0, we'll recompute on unfreeze
-    if (this._all_models_freeze_count === 0) {
+  protected _recompute_timer: number | null = null
+
+  protected _cancel_recompute_all_models(): void {
+    if (this._recompute_timer != null) {
+      clearTimeout(this._recompute_timer)
+      this._recompute_timer = null
+    }
+  }
+
+  protected _schedule_recompute_all_models(): void {
+    const timeout = this._recompute_timeout
+    if (isNaN(timeout) || timeout <= 0) {
       this._recompute_all_models()
+    } else if (isFinite(timeout) && this._recompute_timer == null) {
+      // Throttle, don't debounce: an already pending recomputation is left
+      // alone, so that `timeout` bounds how long unreachable models can linger
+      // in `_all_models`. Restarting the timer on every update would defer the
+      // recomputation indefinitely in a document that is updated more often
+      // than `timeout`, e.g. any server application with a periodic callback.
+      this._recompute_timer = setTimeout(() => {
+        this._recompute_all_models()
+      }, timeout)
     }
   }
 
   protected _recompute_all_models(): void {
+    this._cancel_recompute_all_models()
+
     let new_all_models_set = new Set<HasProps>()
-    for (const r of this._roots) {
+    for (const r of this.all_roots) {
       new_all_models_set = sets.union(new_all_models_set, r.references())
     }
     const old_all_models_set = new Set(this._all_models.values())
@@ -256,7 +338,28 @@ export class Document implements Equatable {
       model.attach_document(this)
       this._new_models.add(model)
     }
-    this._all_models = recomputed as any // XXX
+    this._all_models = recomputed
+  }
+
+  partially_update_all_models(value: unknown): void {
+    const refs = new Set<HasProps>()
+    HasProps._value_record_references(value, refs, {recursive: false})
+    for (const ref of refs) {
+      if (!this._all_models.has(ref.id)) {
+        ref.attach_document(this)
+        this._new_models.add(ref)
+        this._all_models.set(ref.id, ref)
+      }
+    }
+    this._schedule_recompute_all_models()
+  }
+
+  get all_roots(): HasProps[] {
+    const all_roots = [...this._roots]
+    if (this._config != null) {
+      all_roots.push(this._config)
+    }
+    return all_roots
   }
 
   roots(): HasProps[] {
@@ -427,10 +530,12 @@ export class Document implements Equatable {
 
   to_json(include_defaults: boolean = true): DocJson {
     const serializer = new Serializer({include_defaults})
+    const config = serializer.encode(this.config)
     const roots = serializer.encode(this._roots)
     return {
       version: js_version,
       title: this._title,
+      config,
       roots,
     }
   }
@@ -459,14 +564,14 @@ export class Document implements Equatable {
     }
   }
 
-  static from_json(doc_json: DocJson, events?: Out<DocumentEvent[]>): Document {
+  static from_json(doc_json: DocJson, events?: Out<DocumentEvent[]>, buffers: Map<ID, ArrayBuffer> = new Map()): Document {
     logger.debug("Creating Document from JSON")
     Document._handle_version(doc_json)
 
     const resolver = new ModelResolver(default_resolver)
     if (doc_json.defs != null) {
       const deserializer = new Deserializer(resolver)
-      deserializer.decode(doc_json.defs)
+      deserializer.decode(doc_json.defs, buffers)
     }
 
     const doc = new Document({resolver})
@@ -477,11 +582,19 @@ export class Document implements Equatable {
 
     const deserializer = new Deserializer(resolver, doc._all_models, (obj) => obj.attach_document(doc))
 
-    const roots = deserializer.decode(doc_json.roots) as Model[]
+    const config = deserializer.decode(doc_json.config, buffers)
+    assert(config instanceof DocumentConfig || config == null)
+    if (config != null) {
+      doc.config = config
+      doc.set_color_scheme(config.color_scheme)
+      config.on_change(config.properties.color_scheme, () => doc.set_color_scheme(config.color_scheme))
+    }
+
+    const roots = deserializer.decode(doc_json.roots, buffers) as Model[]
 
     const callbacks = (() => {
       if (doc_json.callbacks != null) {
-        return deserializer.decode(doc_json.callbacks) as {[key: string]: DocumentEventCallback[]}
+        return deserializer.decode(doc_json.callbacks, buffers) as {[key: string]: DocumentEventCallback[]}
       } else {
         return {}
       }
@@ -532,9 +645,23 @@ export class Document implements Equatable {
   }
 
   apply_json_patch(patch: Patch, buffers: Map<ID, ArrayBuffer> = new Map()): void {
-    this._push_all_models_freeze()
+    const {_hold_models_freeze} = this
+    this._hold_models_freeze = true
+    try {
+      this._apply_json_patch(patch, buffers)
+    } finally {
+      this._hold_models_freeze = _hold_models_freeze
+    }
+    this._schedule_recompute_all_models()
+  }
 
-    const deserializer = new Deserializer(this._resolver, this._all_models, (obj) => obj.attach_document(this))
+  protected _apply_json_patch(patch: Patch, buffers: Map<ID, ArrayBuffer> = new Map()): void {
+    const finalize = (obj: HasProps) => {
+      obj.attach_document(this)
+      this._new_models.add(obj)
+      this._all_models.set(obj.id, obj)
+    }
+    const deserializer = new Deserializer(this.resolver, this._all_models, finalize)
     const events = deserializer.decode(patch.events, buffers) as Decoded.DocumentChanged[]
 
     for (const event of events) {
@@ -592,7 +719,12 @@ export class Document implements Equatable {
         }
       }
     }
+  }
 
-    this._pop_all_models_freeze()
+  set_color_scheme(color_scheme: ColorScheme): void {
+    const system_scheme = this._system_scheme.matches ? "dark" : "light"
+    const scheme = color_scheme == "auto" ? system_scheme : color_scheme
+    // TODO: Check reliable way to update --bokeh-color-scheme without setting it in documentElement
+    document.documentElement.style.setProperty("--bokeh-color-scheme", scheme)
   }
 }

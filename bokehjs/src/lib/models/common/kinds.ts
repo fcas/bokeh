@@ -10,6 +10,7 @@ import {
   Or,
   PartialStruct,
   Percent,
+  PrefixedStr,
   Ref,
   Str,
   Tuple,
@@ -24,16 +25,17 @@ const XY = <T>(type: Kind<T>) => PartialStruct({x: type, y: type})
 
 const LRTB = <T>(type: Kind<T>) => PartialStruct({left: type, right: type, top: type, bottom: type})
 
-export const Anchor = (
-  Or(
-    enums.Anchor,
-    Tuple(
-      Or(enums.Align, enums.HAlign, Percent),
-      Or(enums.Align, enums.VAlign, Percent),
-    ),
-  )
-)
+export const HAnchor = Or(enums.Align, enums.HAlign, Percent)
+export type HAnchor = typeof HAnchor["__type__"]
+
+export const VAnchor = Or(enums.Align, enums.VAlign, Percent)
+export type VAnchor = typeof VAnchor["__type__"]
+
+export const Anchor = Or(enums.Anchor, Tuple(HAnchor, VAnchor))
 export type Anchor = typeof Anchor["__type__"]
+
+export const AutoAnchor = Or(Auto, enums.Anchor, Tuple(Or(HAnchor, Auto), Or(VAnchor, Auto)))
+export type AutoAnchor = typeof AutoAnchor["__type__"]
 
 export const TextAnchor = Or(Anchor, Auto)
 export type TextAnchor = typeof TextAnchor["__type__"]
@@ -88,3 +90,6 @@ export type TrackSizingLike = typeof TrackSizingLike["__type__"]
 
 export const TracksSizing = Or(TrackSizingLike, List(TrackSizingLike), Mapping(Int, TrackSizingLike))
 export type TracksSizing = typeof TracksSizing["__type__"]
+
+export const IconLike = Or(enums.ToolIcon, PrefixedStr("--"), PrefixedStr("."), PrefixedStr("data:image"))
+export type IconLike = typeof IconLike["__type__"]

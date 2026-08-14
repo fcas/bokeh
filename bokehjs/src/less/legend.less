@@ -1,0 +1,84 @@
+:host {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto;
+  grid-template-columns: auto;
+  pointer-events: all;
+}
+
+.bk-hidden {
+  display: none;
+}
+
+.bk-title {
+  position: relative;
+  white-space: pre;
+  cursor: auto;
+}
+.bk-title:empty {
+  display: none;
+}
+
+.bk-label {
+  position: relative;
+  white-space: pre;
+  cursor: auto;
+  width: fit-content;
+  height: fit-content;
+  display: flex;
+  align-items: center;
+}
+
+.bk-grid {
+  position: relative;
+  display: grid;
+  grid-auto-flow: row;
+  grid-template-rows: repeat(var(--nrows), max-content);
+  grid-template-columns: repeat(var(--ncols), max-content);
+  width: max-content;
+  height: max-content;
+}
+:host(.bk-vertical) {
+  .bk-grid {
+    grid-auto-flow: column;
+  }
+}
+
+.bk-item {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.bk-item.bk-styled {
+  background-color: var(--item-background-color);
+  background-image: var(--item-background-hatch);
+  background-size: var(--item-background-hatch-scale);
+}
+
+:host(.bk-interactive) .bk-item {
+  cursor: pointer;
+}
+
+.bk-glyph {
+  position: relative;
+}
+
+.bk-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.bk-item.bk-inactive {
+  .bk-overlay {
+    background-color: var(--item-background-inactive-color);
+    background-image: var(--item-background-inactive-hatch);
+    background-size: var(--item-background-inactive-hatch-scale);
+  }
+}

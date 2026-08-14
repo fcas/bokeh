@@ -1,4 +1,4 @@
-import {expect} from "assertions"
+import {expect} from "#framework/assertions"
 
 import * as tmpl from "@bokehjs/core/util/templating"
 import {keys} from "@bokehjs/core/util/object"
@@ -10,8 +10,8 @@ describe("templating module", () => {
 
   describe("DEFAULT_FORMATTERS", () => {
 
-    it("should have 3 entries", () => {
-      expect(keys(tmpl.DEFAULT_FORMATTERS).length).to.be.equal(3)
+    it("should have 5 entries", () => {
+      expect(keys(tmpl.DEFAULT_FORMATTERS).length).to.be.equal(5)
     })
 
     it("should have a numeral formatter", () => {
@@ -22,6 +22,11 @@ describe("templating module", () => {
     it("should have a datetime formatter", () => {
       const f = tmpl.DEFAULT_FORMATTERS.datetime
       expect(f(946684800000, "%m/%d/%Y", {})).to.be.equal("01/01/2000")
+
+      expect(f(NaN, "%m/%d/%Y", {})).to.be.equal("NaN")
+      expect(f(Infinity, "%m/%d/%Y", {})).to.be.equal("NaN")
+      expect(f(-Infinity, "%m/%d/%Y", {})).to.be.equal("NaN")
+      expect(f(null, "%m/%d/%Y", {})).to.be.equal("NaN")
     })
 
     it("should have a printf formatter", () => {
@@ -65,7 +70,7 @@ describe("templating module", () => {
 
     it("should return basic_formatter for null format", () => {
       const f = tmpl.get_formatter("@x")
-      expect(f).to.be.equal(tmpl.basic_formatter)
+      expect(f).to.be.equal(tmpl.DEFAULT_FORMATTERS.basic)
     })
 
     it("should return numeral formatter for specs not in formatters dict", () => {
@@ -189,25 +194,25 @@ describe("templating module", () => {
     it("should replace field names with values as-is with safe format", () => {
       const s1 = tmpl.replace_placeholders("stuff @foo{safe}", source, 0)
       const n1 = document.createTextNode("stuff 10")
-      expect(s1).to.be.equal([n1])
+      expect(s1).to.be.structurally.equal([n1])
 
       const s2 = tmpl.replace_placeholders("stuff @foo{safe}", source, 1)
       const n2 = document.createTextNode("stuff 1.002")
-      expect(s2).to.be.equal([n2])
+      expect(s2).to.be.structurally.equal([n2])
 
       const s3 = tmpl.replace_placeholders("stuff @foo{safe}", source, 2)
       const n3 = document.createTextNode("stuff NaN")
-      expect(s3).to.be.equal([n3])
+      expect(s3).to.be.structurally.equal([n3])
 
       const s4 = tmpl.replace_placeholders("stuff @bar{safe}", source, 0)
       const n4 = document.createTextNode("stuff a")
-      expect(s4).to.be.equal([n4])
+      expect(s4).to.be.structurally.equal([n4])
 
       const s5 = tmpl.replace_placeholders("stuff @bar{safe}", source, 1)
       const n5_0 = document.createTextNode("stuff ")
       const n5_1 = document.createElement("div")
       n5_1.textContent = "b"
-      expect(s5).to.be.equal([n5_0, n5_1])
+      expect(s5).to.be.structurally.equal([n5_0, n5_1])
     })
 
     it("should ignore extra/unused formatters", () => {
@@ -369,6 +374,22 @@ describe("templating module", () => {
         ["@", "x", "f"],
         ["@", "x", "format"],
         ["@", "x", ":"],
+      ])
+    })
+
+    it("should handle special @$name case", () => {
+      const found: [string, string, string?][] = []
+      /* eslint-disable no-template-curly-in-string */ // using `@\${name}` results in a different lint error
+      const result = tmpl.process_placeholders("stuff @$name @${name} @${name}{format}", (type, name, format, i) => {
+        found.push([type, name, format])
+        return `${i}`
+      })
+      /* eslint-enable no-template-curly-in-string */
+      expect(result).to.be.equal("stuff 0 1 2")
+      expect(found).to.be.equal([
+        ["@$", "name", undefined],
+        ["@$", "name", undefined],
+        ["@$", "name", "format"],
       ])
     })
   })

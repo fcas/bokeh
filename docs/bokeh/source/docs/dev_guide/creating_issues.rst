@@ -27,6 +27,11 @@ You can format any text you enter when filing an issue. To learn more about
 your formatting options, see `Writing on GitHub`_ in the
 `GitHub documentation`_.
 
+.. note::
+    If you're using AI tools to assist with reporting issues or requesting
+    features, please review our `AI Contribution Guidelines`_ to ensure your
+    contribution follows project expectations.
+
 .. _contributor_guide_issues_kinds:
 
 Kinds of issues
@@ -73,6 +78,15 @@ Software version info
     .. code-block:: sh
 
         bokeh info
+
+    or alternatively use:
+
+    .. code-block:: python
+
+        from bokeh.util.info import print_info
+        print_info()
+
+    in your scripts and/or MREs (minimal reproducible examples).
 
     This provides you with a list of the versions of relevant software packages.
     Copy and paste this information into your bug report.
@@ -153,3 +167,4 @@ information about labels and the issue management process.
 .. _file a new feature request: https://github.com/bokeh/bokeh/issues/new?assignees=&labels=TRIAGE&template=feature_request.yml&title=%5BFEATURE%5D+
 .. _Bokeh core team: https://github.com/bokeh/bokeh/wiki/BEP-4:-Project-Roles#core-team
 .. _`section "Issues" in BEP 1: Issues and PRs management`: https://github.com/bokeh/bokeh/wiki/BEP-1:-Issues-and-PRs-management
+.. _`AI Contribution Guidelines`: https://github.com/bokeh/bokeh/wiki/BEP-1:-Issues-and-PRs-management#ai-contribution-guidelines

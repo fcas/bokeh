@@ -19,14 +19,17 @@ import pytest ; pytest
 # Standard library imports
 import datetime as dt
 import io
+import warnings
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 # External imports
+import narwhals.stable.v1 as nw
 import numpy as np
-import pandas as pd
 
 # Bokeh imports
 from bokeh.models import ColumnDataSource, DataTable, Selection
+from bokeh.util.dependencies import is_installed
 from bokeh.util.serialization import convert_datetime_array
 
 # Module under test
@@ -36,7 +39,16 @@ import bokeh.models.sources as bms # isort:skip
 # Setup
 #-----------------------------------------------------------------------------
 
-df = pd.read_csv(Path(__file__).parents[1] / "auto-mpg.csv")
+if is_installed("pandas"):
+    import pandas as pd
+    df = pd.read_csv(Path(__file__).parents[1] / "auto-mpg.csv")
+else:
+    pd = None
+
+@dataclass
+class DataclassData:
+    a: list[int]
+    b: list[int]
 
 #-----------------------------------------------------------------------------
 # General API
@@ -47,6 +59,7 @@ class TestColumnDataSource:
         ds = bms.ColumnDataSource()
         assert isinstance(ds, bms.DataSource)
         assert isinstance(ds.selected, Selection)
+        assert ds.length == 0
 
     def test_selected_is_readonly(self) -> None:
         ds = bms.ColumnDataSource()
@@ -64,177 +77,90 @@ class TestColumnDataSource:
         ds = bms.ColumnDataSource(data)
         assert ds.data == data
         assert set(ds.column_names) == set(data.keys())
+        assert ds.length == 1
 
     def test_init_dict_data_kwarg(self) -> None:
         data = dict(a=[1], b=[2])
         ds = bms.ColumnDataSource(data=data)
         assert ds.data == data
         assert set(ds.column_names) == set(data.keys())
+        assert ds.length == 1
 
-    def test_init_dataframe_arg(self) -> None:
-        data = dict(a=[1, 2], b=[2, 3])
-        df = pd.DataFrame(data)
-        ds = bms.ColumnDataSource(df)
-        assert set(df.columns).issubset(set(ds.column_names))
-        for key in data.keys():
-            assert isinstance(ds.data[key], np.ndarray)
-            assert list(df[key]) == list(ds.data[key])
-        assert isinstance(ds.data['index'], np.ndarray)
-        assert [0, 1] == list(ds.data['index'])
-        assert set(ds.column_names) - set(df.columns) == {"index"}
+    def test_init_dataclass_arg(self) -> None:
+        data = DataclassData(a=[1], b=[2])
+        ds = bms.ColumnDataSource(data)
+        assert ds.data == asdict(data)
+        assert set(ds.column_names) == set(asdict(data))
+        assert ds.length == 1
 
-    def test_data_accepts_dataframe_arg(self) -> None:
+    def test_init_dataclass_data_kwarg(self) -> None:
+        data = DataclassData(a=[1], b=[2])
+        ds = bms.ColumnDataSource(data=data)
+        assert ds.data == asdict(data)
+        assert set(ds.column_names) == set(asdict(data))
+        assert ds.length == 1
+
+    def test_data_accepts_dataframe_arg(self, constructor) -> None:
         data = dict(a=[1, 2], b=[2, 3])
-        df = pd.DataFrame(data)
+        df = nw.from_native(constructor(data), eager_only=True)
         ds = bms.ColumnDataSource()
         assert ds.data == {}
-        ds.data = df
+        ds.data = df.to_native()
         assert set(df.columns).issubset(set(ds.column_names))
         for key in data.keys():
             assert isinstance(ds.data[key], np.ndarray)
-            assert list(df[key]) == list(ds.data[key])
+            assert df[key].to_list() == list(ds.data[key])
         assert isinstance(ds.data['index'], np.ndarray)
         assert [0, 1] == list(ds.data['index'])
         assert set(ds.column_names) - set(df.columns) == {"index"}
+        assert ds.length == 2
 
-    def test_init_dataframe_data_kwarg(self) -> None:
+    def test_init_dataframe_data_kwarg(self, constructor) -> None:
         data = dict(a=[1, 2], b=[2, 3])
-        df = pd.DataFrame(data)
-        ds = bms.ColumnDataSource(data=df)
+        df = nw.from_native(constructor(data), eager_only=True)
+        ds = bms.ColumnDataSource(data=df.to_native())
         assert set(df.columns).issubset(set(ds.column_names))
         for key in data.keys():
             assert isinstance(ds.data[key], np.ndarray)
-            assert list(df[key]) == list(ds.data[key])
+            assert df[key].to_list() == list(ds.data[key])
         assert isinstance(ds.data['index'], np.ndarray)
         assert [0, 1] == list(ds.data['index'])
         assert set(ds.column_names) - set(df.columns) == {"index"}
+        assert ds.length == 2
 
-    def test_init_dataframe_index_named_column(self) -> None:
+    def test_init_dataframe_index_named_column(self, constructor) -> None:
         data = dict(a=[1, 2], b=[2, 3], index=[4, 5])
-        df = pd.DataFrame(data)
-        ds = bms.ColumnDataSource(data=df)
+        df = nw.from_native(constructor(data), eager_only=True)
+        ds = bms.ColumnDataSource(data=df.to_native())
         assert set(df.columns).issubset(set(ds.column_names))
         for key in data.keys():
             assert isinstance(ds.data[key], np.ndarray)
-            assert list(df[key]) == list(ds.data[key])
+            assert df[key].to_list() == list(ds.data[key])
         assert isinstance(ds.data['level_0'], np.ndarray)
         assert [0, 1] == list(ds.data['level_0'])
         assert set(ds.column_names) - set(df.columns) == {"level_0"}
+        assert ds.length == 2
 
-    def test_data_accepts_dataframe_index_named_column(self) -> None:
+    def test_data_accepts_dataframe_index_named_column(self, constructor) -> None:
         data = dict(a=[1, 2], b=[2, 3], index=[4, 5])
-        df = pd.DataFrame(data)
+        df = nw.from_native(constructor(data), eager_only=True)
         ds = bms.ColumnDataSource()
         assert ds.data == {}
-        ds.data = df
+        ds.data = df.to_native()
         assert set(df.columns).issubset(set(ds.column_names))
         for key in data.keys():
             assert isinstance(ds.data[key], np.ndarray)
-            assert list(df[key]) == list(ds.data[key])
+            assert df[key].to_list() == list(ds.data[key])
         assert isinstance(ds.data['level_0'], np.ndarray)
         assert [0, 1] == list(ds.data['level_0'])
         assert set(ds.column_names) - set(df.columns) == {"level_0"}
+        assert ds.length == 2
 
-    def test_init_dataframe_column_categoricalindex(self) -> None:
-        columns = pd.CategoricalIndex(['a', 'b'])
-        data = [[0,2], [1,3]]
-        df = pd.DataFrame(columns=columns, data=data)
-        ds = bms.ColumnDataSource(data=df)
-        assert set(df.columns).issubset(set(ds.column_names))
-        for key in columns:
-            assert isinstance(ds.data[key], np.ndarray)
-            assert list(df[key]) == list(ds.data[key])
-        assert isinstance(ds.data['index'], np.ndarray)
-        assert [0, 1] == list(ds.data['index'])
-        assert set(ds.column_names) - set(df.columns) == {"index"}
-
-    def test_data_accepts_dataframe_column_categoricalindex(self) -> None:
-        columns = pd.CategoricalIndex(['a', 'b'])
-        data = [[0,2], [1,3]]
-        df = pd.DataFrame(columns=columns, data=data)
-        ds = bms.ColumnDataSource()
-        assert ds.data == {}
-        ds.data = df
-        assert set(df.columns).issubset(set(ds.column_names))
-        for key in columns:
-            assert isinstance(ds.data[key], np.ndarray)
-            assert list(df[key]) == list(ds.data[key])
-        assert isinstance(ds.data['index'], np.ndarray)
-        assert [0, 1] == list(ds.data['index'])
-        assert set(ds.column_names) - set(df.columns) == {"index"}
-
-    def test_init_dataframe_nonstring_named_column(self) -> None:
-        data = {1: [1, 2], 2: [2, 3]}
-        df = pd.DataFrame(data)
-        with pytest.raises(ValueError, match=r'expected a dict of type.*'):
-            bms.ColumnDataSource(data=df)
-
-    def test_init_dataframe_nonstring_named_multicolumn(self) -> None:
-        data = {(1, 2): [1, 2], (2, 3): [2, 3]}
-        df = pd.DataFrame(data)
-        with pytest.raises(TypeError, match=r'Could not flatten.*'):
-            bms.ColumnDataSource(data=df)
-
-    def test_init_groupby_arg(self) -> None:
-        group = df.groupby(by=['origin', 'cyl'])
-        ds = bms.ColumnDataSource(group)
-        s = group.describe()
-        assert len(ds.column_names) == 49
-        assert isinstance(ds.data['origin_cyl'], np.ndarray)
-        for key in s.columns.values:
-            k2 = "_".join(key)
-            assert isinstance(ds.data[k2], np.ndarray)
-            assert list(s[key]) == list(ds.data[k2])
-
-    def test_data_accepts_groupby_arg(self) -> None:
-        group = df.groupby(by=['origin', 'cyl'])
-        ds = bms.ColumnDataSource()
-        assert ds.data == {}
-        ds.data = group
-        s = group.describe()
-        assert len(ds.column_names) == 49
-        assert isinstance(ds.data['origin_cyl'], np.ndarray)
-        for key in s.columns.values:
-            k2 = "_".join(key)
-            assert isinstance(ds.data[k2], np.ndarray)
-            assert list(s[key]) == list(ds.data[k2])
-
-    def test_init_groupby_data_kwarg(self) -> None:
-        group = df.groupby(by=['origin', 'cyl'])
-        ds = bms.ColumnDataSource(data=group)
-        s = group.describe()
-        assert len(ds.column_names) == 49
-        assert isinstance(ds.data['origin_cyl'], np.ndarray)
-        for key in s.columns.values:
-            k2 = "_".join(key)
-            assert isinstance(ds.data[k2], np.ndarray)
-            assert list(s[key]) == list(ds.data[k2])
-
-    def test_init_groupby_with_None_subindex_name(self) -> None:
-        df = pd.DataFrame({"A": [1, 2, 3, 4] * 2, "B": [10, 20, 30, 40] * 2, "C": range(8)})
-        group = df.groupby(['A', [10, 20, 30, 40] * 2])
-        ds = bms.ColumnDataSource(data=group)
-        s = group.describe()
-        assert len(ds.column_names) == 17
-        assert isinstance(ds.data['index'], np.ndarray)
-        for key in s.columns.values:
-            k2 = "_".join(key)
-            assert isinstance(ds.data[k2], np.ndarray)
-            assert list(s[key]) == list(ds.data[k2])
-
-    def test_data_accepts_groupby_with_None_subindex_name(self) -> None:
-        df = pd.DataFrame({"A": [1, 2, 3, 4] * 2, "B": [10, 20, 30, 40] * 2, "C": range(8)})
-        group = df.groupby(['A', [10, 20, 30, 40] * 2])
-        ds = bms.ColumnDataSource()
-        assert ds.data == {}
-        ds.data = group
-        s = group.describe()
-        assert len(ds.column_names) == 17
-        assert isinstance(ds.data['index'], np.ndarray)
-        for key in s.columns.values:
-            k2 = "_".join(key)
-            assert isinstance(ds.data[k2], np.ndarray)
-            assert list(s[key]) == list(ds.data[k2])
+    def test_init_dataframe_index_named_column_level_0(self, constructor) -> None:
+        data = dict(a=[1, 2], b=[2, 3], index=[4, 5], level_0=[2, 1])
+        df = nw.from_native(constructor(data), eager_only=True)
+        with pytest.raises(ValueError):
+            bms.ColumnDataSource(data=df.to_native())
 
     def test_init_propertyvaluecolumndata_copy(self) -> None:
         data = dict(a=[1], b=[2])
@@ -272,14 +198,16 @@ class TestColumnDataSource:
         assert name
         ds.remove("foo")
         assert ds.column_names == []
+        assert ds.length == 0
 
     def test_remove_exists2(self) -> None:
         with pytest.warns(UserWarning, match=r"Unable to find column 'foo' in data source") as w:
             ds = bms.ColumnDataSource()
             ds.remove("foo")
             assert ds.column_names == []
+            assert ds.length == 0
             assert len(w) == 1
-            assert w[0].category == UserWarning
+            assert w[0].category is UserWarning
             assert str(w[0].message) == "Unable to find column 'foo' in data source"
 
     def test_stream_bad_data(self) -> None:
@@ -298,33 +226,49 @@ class TestColumnDataSource:
         with pytest.raises(ValueError, match=r"stream\(...\) only supports 1d sequences, got ndarray with size \(.*"):
             ds.stream(dict(a=[10], b=np.ones((1,1))))
 
-    def test__df_index_name_with_named_index(self) -> None:
-        df = pd.DataFrame(dict(a=[10], b=[20], c=[30])).set_index('c')
-        assert bms.ColumnDataSource._df_index_name(df) == "c"
+    def test_stream_array_to_empty_list(self) -> None:
+        import numpy as np
 
-    def test__df_index_name_with_unnamed_index(self) -> None:
-        df = pd.DataFrame(dict(a=[10], b=[20], c=[30]))
-        assert bms.ColumnDataSource._df_index_name(df) == "index"
+        array = np.array([np.datetime64("2024-08-01T08:05:28")])
+        source = ColumnDataSource(data=dict(foo=[]))
 
-    def test__df_index_name_with_named_multi_index(self) -> None:
-        data = io.StringIO("""\
-Fruit,Color,Count,Price
-Apple,Red,3,$1.29
-Apple,Green,9,$0.99
-Pear,Red,25,$2.59
-Pear,Green,26,$2.79
-Lime,Green,99,$0.39
-""")
-        df = pd.read_csv(data).set_index(['Fruit', 'Color'])
-        assert df.index.names == ['Fruit', 'Color']
-        assert bms.ColumnDataSource._df_index_name(df) == "Fruit_Color"
+        source.stream(dict(foo=array))
+        assert source.data["foo"] is array
 
-    def test__df_index_name_with_unnamed_multi_index(self) -> None:
-        arrays = [np.array(['bar', 'bar', 'baz', 'baz', 'foo', 'foo', 'qux', 'qux']),
-                  np.array(['one', 'two', 'one', 'two', 'one', 'two', 'one', 'two'])]
-        df = pd.DataFrame(np.random.randn(8, 4), index=arrays)
-        assert df.index.names == [None, None]
-        assert bms.ColumnDataSource._df_index_name(df) == "index"
+    def test_stream_empty_list_to_array(self) -> None:
+        import numpy as np
+
+        array = np.array([np.datetime64("2024-08-01T08:05:28")])
+        source = ColumnDataSource(data=dict(foo=array))
+
+        source.stream(dict(foo=[]))
+        assert source.data["foo"] is array
+
+    def test_stream_to_empty_cds(self) -> None:
+        source = ColumnDataSource()
+        source.stream(dict(foo=[1]))
+
+        assert source.data["foo"] == [1]
+
+    def test_stream_to_empty_cds_dict(self) -> None:
+        source1 = ColumnDataSource(data=dict())
+        source1.stream(dict(foo=[1]))
+
+        assert source1.data["foo"] == [1]
+
+        source2 = ColumnDataSource(data=dict())
+        source2.stream(dict(foo=[1, 2], bar=[3, 4]))
+
+        assert source2.data["foo"] == [1, 2]
+        assert source2.data["bar"] == [3, 4]
+
+    def test_empty_stream_to_empty_cds(self) -> None:
+        source = ColumnDataSource()
+        source.stream(dict())
+        assert len(source.data.keys()) == 0
+        source.stream(dict(foo=[1]))
+
+        assert source.data["foo"] == [1]
 
     def test__stream_good_data(self) -> None:
         ds = bms.ColumnDataSource(data=dict(a=[10], b=[20]))
@@ -390,6 +334,292 @@ Lime,Green,99,$0.39
         ds._stream(dict(index=new_date, b=[10]), "foo", mock_setter)
         transformed_date = convert_datetime_array(new_date)
         assert np.array_equal(stuff['args'][2]['index'], transformed_date)
+
+    def test_patch_bad_columns(self) -> None:
+        ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
+        with pytest.raises(ValueError, match=r"Can only patch existing columns \(extra: c\)"):
+            ds.patch(dict(c=[(0, 100)]))
+        with pytest.raises(ValueError, match=r"Can only patch existing columns \(extra: c, d\)"):
+            ds.patch(dict(a=[(0,100)], c=[(0, 100)], d=[(0, 100)]))
+
+    def test_patch_bad_simple_indices(self) -> None:
+        ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
+        with pytest.raises(ValueError, match=r"Out-of bounds index \(3\) in patch for column: a"):
+            ds.patch(dict(a=[(3, 100)]))
+
+    def test_patch_good_simple_indices(self) -> None:
+        ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
+        ds._document = "doc"
+        stuff = {}
+        mock_setter = object()
+        def mock(*args, **kw):
+            stuff['args'] = args
+            stuff['kw'] = kw
+        ds.data._patch = mock
+        ds.patch(dict(a=[(0,100), (1,101)], b=[(0,200)]), mock_setter)
+        assert stuff['args'] == ("doc", ds, dict(a=[(0,100), (1,101)], b=[(0,200)]), mock_setter)
+        assert stuff['kw'] == {}
+
+    def test_patch_bad_slice_indices(self) -> None:
+        ds = bms.ColumnDataSource(data=dict(a=[10, 11, 12, 13, 14, 15], b=[20, 21, 22, 23, 24, 25]))
+        with pytest.raises(ValueError, match=r"Out-of bounds slice index stop \(10\) in patch for column: a"):
+            ds.patch(dict(a=[(slice(10), list(range(10)))]))
+        with pytest.raises(ValueError, match=r"Patch slices must have start < end, got slice\(10, 1, None\)"):
+            ds.patch(dict(a=[(slice(10, 1), list(range(10)))]))
+        with pytest.raises(ValueError, match=r"Patch slices must have non-negative \(start, stop, step\) values, got slice\(None, 10, -1\)"):
+            ds.patch(dict(a=[(slice(None, 10, -1), list(range(10)))]))
+        with pytest.raises(ValueError, match=r"Patch slices must have start < end, got slice\(10, 1, 1\)"):
+            ds.patch(dict(a=[(slice(10, 1, 1), list(range(10)))]))
+        with pytest.raises(ValueError, match=r"Patch slices must have start < end, got slice\(10, 1, -1\)"):
+            ds.patch(dict(a=[(slice(10, 1, -1), list(range(10)))]))
+        with pytest.raises(ValueError, match=r"Patch slices must have non-negative \(start, stop, step\) values, got slice\(1, 10, -1\)"):
+            ds.patch(dict(a=[(slice(1, 10, -1), list(range(10)))]))
+
+    def test_bad_multi_index(self) -> None:
+        ds = ColumnDataSource(data=dict(foo=[1]))
+        with pytest.raises(ValueError, match=r"Empty \(length zero\) patch multi-index"):
+            ds.patch(dict(foo=[[[], 5]]))
+        with pytest.raises(ValueError, match=r"Patch multi-index must contain more than one subindex"):
+            ds.patch(dict(foo=[[[2], 5]]))
+        with pytest.raises(ValueError, match=r"Initial patch sub-index may only be integer, got: spam"):
+            ds.patch(dict(foo=[[["spam", 3], 5]]))
+        with pytest.raises(ValueError, match=r"Out-of bounds initial sub-index \(-1\) in patch for column: foo"):
+            ds.patch(dict(foo=[[[-1, 3], 5]]))
+        with pytest.raises(ValueError, match=r"Can only sub-patch into columns with NumPy array items"):
+            ds.patch(dict(foo=[[[0, 3], 5]]))
+        with pytest.raises(ValueError, match=r"Invalid patch index: {}"):
+            ds.patch(dict(foo=[[{}, 5]]))
+
+    def test_patch_good_slice_indices(self) -> None:
+        ds = bms.ColumnDataSource(data=dict(a=[10, 11, 12, 13, 14, 15], b=[20, 21, 22, 23, 24, 25]))
+        ds._document = "doc"
+        stuff = {}
+        mock_setter = object()
+        def mock(*args, **kw):
+            stuff['args'] = args
+            stuff['kw'] = kw
+        ds.data._patch = mock
+        ds.patch(dict(a=[(slice(2), [100, 101]), (slice(3, 5), [100, 101])], b=[(slice(0, None, 2), [100, 101, 102])]), mock_setter)
+        assert stuff['args'] == ("doc", ds, dict(a=[(slice(2), [100, 101]), (slice(3, 5), [100, 101])], b=[(slice(0, None, 2), [100, 101, 102])]), mock_setter)
+        assert stuff['kw'] == {}
+
+    def test_immutable_data(self) -> None:
+        a = [1, 2, 3, 4]
+        b = (1, 2, 3, 4)
+        c = np.array([1, 2, 3, 4])
+        d = np.array([1, 2, 3, 4])
+        e = np.array([[1, 2], [3, 4], [5, 6], [7, 8]])
+        f = np.array([[1, 2], [3, 4], [5, 6], [7, 8]])
+
+        d.flags.writeable = False
+        f.flags.writeable = False
+
+        ds = ColumnDataSource(data=dict(a=a, b=b, c=c, d=d, e=e, f=f))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            ds.patch(dict(a=[(1, 2000)]))
+        assert ds.data["a"] == [1, 2000, 3, 4]
+
+        with pytest.warns(UserWarning) as warns_b:
+            ds.patch(dict(b=[(1, 2000)]))
+        assert ds.data["b"] == (1, 2, 3, 4)
+        assert len(warns_b) == 1
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            ds.patch(dict(c=[(1, 2000)]))
+        assert (ds.data["c"] == np.array([1, 2000, 3, 4])).all()
+
+        with pytest.warns(UserWarning) as warns_d:
+            ds.patch(dict(d=[(1, 2000)]))
+        assert (ds.data["d"] == np.array([1, 2, 3, 4])).all()
+        assert len(warns_d) == 1
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            ds.patch(dict(e=[((0, 1), 2000)]))
+        assert (ds.data["e"] == np.array([[1, 2000], [3, 4], [5, 6], [7, 8]])).all()
+
+        with pytest.warns(UserWarning) as warns_f:
+            ds.patch(dict(f=[((0, 1), 2000)]))
+        assert (ds.data["f"] == np.array([[1, 2], [3, 4], [5, 6], [7, 8]])).all()
+        assert len(warns_f) == 1
+
+    def test_data_column_lengths(self) -> None:
+        # TODO: use this when soft=False
+        #
+        #with pytest.raises(ValueError):
+        #    bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21, 22]))
+        #
+        #ds = bms.ColumnDataSource()
+        #with pytest.raises(ValueError):
+        #    ds.data = dict(a=[10, 11], b=[20, 21, 22])
+        #
+        #ds = bms.ColumnDataSource(data=dict(a=[10, 11]))
+        #with pytest.raises(ValueError):
+        #    ds.data["b"] = [20, 21, 22]
+        #
+        #ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
+        #with pytest.raises(ValueError):
+        #    ds.data.update(dict(a=[10, 11, 12]))
+
+        with pytest.warns(UserWarning) as warns:
+            bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21, 22]))
+        assert len(warns) == 1
+        assert str(warns[0].message) == "ColumnDataSource's columns must be of the same length. Current lengths: ('a', 2), ('b', 3)"
+
+        ds = bms.ColumnDataSource()
+        with pytest.warns(UserWarning) as warns:
+            ds.data = dict(a=[10, 11], b=[20, 21, 22])
+        assert len(warns) == 1
+        assert str(warns[0].message) == "ColumnDataSource's columns must be of the same length. Current lengths: ('a', 2), ('b', 3)"
+
+        ds = bms.ColumnDataSource(data=dict(a=[10, 11]))
+        with pytest.warns(UserWarning) as warns:
+            ds.data["b"] = [20, 21, 22]
+        assert len(warns) == 1
+        assert str(warns[0].message) == "ColumnDataSource's columns must be of the same length. Current lengths: ('a', 2), ('b', 3)"
+
+        ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
+        with pytest.warns(UserWarning) as warns:
+            ds.data.update(dict(a=[10, 11, 12]))
+        assert len(warns) == 1
+        assert str(warns[0].message) == "ColumnDataSource's columns must be of the same length. Current lengths: ('a', 3), ('b', 2)"
+
+
+class TestColumnDataSourcePandas:
+    __test__ = is_installed("pandas")
+
+    def test_init_dataframe_arg(self) -> None:
+        data = dict(a=[1, 2], b=[2, 3])
+        df = pd.DataFrame(data)
+        ds = bms.ColumnDataSource(df)
+        assert set(df.columns).issubset(set(ds.column_names))
+        for key in data.keys():
+            assert isinstance(ds.data[key], np.ndarray)
+            assert list(df[key]) == list(ds.data[key])
+        assert isinstance(ds.data['index'], np.ndarray)
+        assert [0, 1] == list(ds.data['index'])
+        assert set(ds.column_names) - set(df.columns) == {"index"}
+        assert ds.length == 2
+
+    def test_init_produces_writable_arrays_with_Pandas3_CoW(self) -> None:
+        data = dict(a=[1, 2], b=[2, 3])
+        df = pd.DataFrame(data)
+        ds = bms.ColumnDataSource(df)
+        a = ds.data["a"]
+        b = ds.data["b"]
+        assert isinstance(a, np.ndarray) and a.flags.writeable is True
+        assert isinstance(b, np.ndarray) and b.flags.writeable is True
+
+    def test_init_dataframe_column_categoricalindex(self) -> None:
+        columns = pd.CategoricalIndex(['a', 'b'])
+        data = [[0,2], [1,3]]
+        df = pd.DataFrame(columns=columns, data=data)
+        ds = bms.ColumnDataSource(data=df)
+        assert set(df.columns).issubset(set(ds.column_names))
+        for key in columns:
+            assert isinstance(ds.data[key], np.ndarray)
+            assert list(df[key]) == list(ds.data[key])
+        assert isinstance(ds.data['index'], np.ndarray)
+        assert [0, 1] == list(ds.data['index'])
+        assert set(ds.column_names) - set(df.columns) == {"index"}
+        assert ds.length == 2
+
+    def test_data_accepts_dataframe_column_categoricalindex(self) -> None:
+        columns = pd.CategoricalIndex(['a', 'b'])
+        data = [[0,2], [1,3]]
+        df = pd.DataFrame(columns=columns, data=data)
+        ds = bms.ColumnDataSource()
+        assert ds.data == {}
+        ds.data = df
+        assert set(df.columns).issubset(set(ds.column_names))
+        for key in columns:
+            assert isinstance(ds.data[key], np.ndarray)
+            assert list(df[key]) == list(ds.data[key])
+        assert isinstance(ds.data['index'], np.ndarray)
+        assert [0, 1] == list(ds.data['index'])
+        assert set(ds.column_names) - set(df.columns) == {"index"}
+        assert ds.length == 2
+
+    def test_init_dataframe_nonstring_named_column(self) -> None:
+        data = {1: [1, 2], 2: [2, 3]}
+        df = pd.DataFrame(data)
+        with pytest.raises(ValueError, match=r'expected a dict of type.*'):
+            bms.ColumnDataSource(data=df)
+
+    def test_init_dataframe_nonstring_named_multicolumn(self) -> None:
+        data = {(1, 2): [1, 2], (2, 3): [2, 3]}
+        df = pd.DataFrame(data)
+        with pytest.raises(TypeError, match=r'Could not flatten.*'):
+            bms.ColumnDataSource(data=df)
+
+    def test_init_groupby_arg(self) -> None:
+        group = df.groupby(by=['origin', 'cyl'])
+        ds = bms.ColumnDataSource(group)
+        s = group.describe()
+        assert len(ds.column_names) == 49
+        assert ds.length == 9
+        assert isinstance(ds.data['origin_cyl'], np.ndarray)
+        for key in s.columns.values:
+            k2 = "_".join(key)
+            assert isinstance(ds.data[k2], np.ndarray)
+            assert list(s[key]) == list(ds.data[k2])
+
+    def test_data_accepts_groupby_arg(self) -> None:
+        group = df.groupby(by=['origin', 'cyl'])
+        ds = bms.ColumnDataSource()
+        assert ds.data == {}
+        ds.data = group
+        s = group.describe()
+        assert len(ds.column_names) == 49
+        assert ds.length == 9
+        assert isinstance(ds.data['origin_cyl'], np.ndarray)
+        for key in s.columns.values:
+            k2 = "_".join(key)
+            assert isinstance(ds.data[k2], np.ndarray)
+            assert list(s[key]) == list(ds.data[k2])
+
+    def test_init_groupby_data_kwarg(self) -> None:
+        group = df.groupby(by=['origin', 'cyl'])
+        ds = bms.ColumnDataSource(data=group)
+        s = group.describe()
+        assert len(ds.column_names) == 49
+        assert ds.length == 9
+        assert isinstance(ds.data['origin_cyl'], np.ndarray)
+        for key in s.columns.values:
+            k2 = "_".join(key)
+            assert isinstance(ds.data[k2], np.ndarray)
+            assert list(s[key]) == list(ds.data[k2])
+
+    def test_init_groupby_with_None_subindex_name(self) -> None:
+        df = pd.DataFrame({"A": [1, 2, 3, 4] * 2, "B": [10, 20, 30, 40] * 2, "C": range(8)})
+        group = df.groupby(['A', [10, 20, 30, 40] * 2])
+        ds = bms.ColumnDataSource(data=group)
+        s = group.describe()
+        assert len(ds.column_names) == 17
+        assert ds.length == 4
+        assert isinstance(ds.data['index'], np.ndarray)
+        for key in s.columns.values:
+            k2 = "_".join(key)
+            assert isinstance(ds.data[k2], np.ndarray)
+            assert list(s[key]) == list(ds.data[k2])
+
+    def test_data_accepts_groupby_with_None_subindex_name(self) -> None:
+        df = pd.DataFrame({"A": [1, 2, 3, 4] * 2, "B": [10, 20, 30, 40] * 2, "C": range(8)})
+        group = df.groupby(['A', [10, 20, 30, 40] * 2])
+        ds = bms.ColumnDataSource()
+        assert ds.data == {}
+        ds.data = group
+        s = group.describe()
+        assert len(ds.column_names) == 17
+        assert ds.length == 4
+        assert isinstance(ds.data['index'], np.ndarray)
+        for key in s.columns.values:
+            k2 = "_".join(key)
+            assert isinstance(ds.data[k2], np.ndarray)
+            assert list(s[key]) == list(ds.data[k2])
 
     def test__stream_good_df_with_date_index_data(self) -> None:
         df = pd.DataFrame(
@@ -467,7 +697,7 @@ Lime,Green,99,$0.39
     def _assert_equal_dicts_of_arrays(self, d1, d2):
         assert d1.keys() == d2.keys()
         for k, v in d1.items():
-            assert type(v) == np.ndarray
+            assert type(v) is np.ndarray
             assert np.array_equal(v, d2[k])
 
     def test_stream_dict_to_ds_created_from_df(self) -> None:
@@ -683,104 +913,38 @@ Lime,Green,99,$0.39
                                                 c=np.array([30, 31, 32]),
                                                 index=np.array([0, 0, 1])))
 
-    def test_patch_bad_columns(self) -> None:
-        ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
-        with pytest.raises(ValueError, match=r"Can only patch existing columns \(extra: c\)"):
-            ds.patch(dict(c=[(0, 100)]))
-        with pytest.raises(ValueError, match=r"Can only patch existing columns \(extra: c, d\)"):
-            ds.patch(dict(a=[(0,100)], c=[(0, 100)], d=[(0, 100)]))
+    def test__df_index_name_with_named_index(self) -> None:
+        df = pd.DataFrame(dict(a=[10], b=[20], c=[30])).set_index('c')
+        assert bms.ColumnDataSource._df_index_name(df) == "c"
 
+    def test__df_index_name_with_unnamed_index(self) -> None:
+        df = pd.DataFrame(dict(a=[10], b=[20], c=[30]))
+        assert bms.ColumnDataSource._df_index_name(df) == "index"
 
-    def test_patch_bad_simple_indices(self) -> None:
-        ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
-        with pytest.raises(ValueError, match=r"Out-of bounds index \(3\) in patch for column: a"):
-            ds.patch(dict(a=[(3, 100)]))
+    def test__df_index_name_with_named_multi_index(self) -> None:
+        data = io.StringIO("""\
+Fruit,Color,Count,Price
+Apple,Red,3,$1.29
+Apple,Green,9,$0.99
+Pear,Red,25,$2.59
+Pear,Green,26,$2.79
+Lime,Green,99,$0.39
+""")
+        df = pd.read_csv(data).set_index(['Fruit', 'Color'])
+        assert df.index.names == ['Fruit', 'Color']
+        assert bms.ColumnDataSource._df_index_name(df) == "Fruit_Color"
 
-    def test_patch_good_simple_indices(self) -> None:
-        ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
-        ds._document = "doc"
-        stuff = {}
-        mock_setter = object()
-        def mock(*args, **kw):
-            stuff['args'] = args
-            stuff['kw'] = kw
-        ds.data._patch = mock
-        ds.patch(dict(a=[(0,100), (1,101)], b=[(0,200)]), mock_setter)
-        assert stuff['args'] == ("doc", ds, dict(a=[(0,100), (1,101)], b=[(0,200)]), mock_setter)
-        assert stuff['kw'] == {}
+    def test__df_index_name_with_unnamed_multi_index(self) -> None:
+        arrays = [np.array(['bar', 'bar', 'baz', 'baz', 'foo', 'foo', 'qux', 'qux']),
+                  np.array(['one', 'two', 'one', 'two', 'one', 'two', 'one', 'two'])]
+        df = pd.DataFrame(np.random.randn(8, 4), index=arrays)
+        assert df.index.names == [None, None]
+        assert bms.ColumnDataSource._df_index_name(df) == "index"
 
-    def test_patch_bad_slice_indices(self) -> None:
-        ds = bms.ColumnDataSource(data=dict(a=[10, 11, 12, 13, 14, 15], b=[20, 21, 22, 23, 24, 25]))
-        with pytest.raises(ValueError, match=r"Out-of bounds slice index stop \(10\) in patch for column: a"):
-            ds.patch(dict(a=[(slice(10), list(range(10)))]))
-        with pytest.raises(ValueError, match=r"Patch slices must have start < end, got slice\(10, 1, None\)"):
-            ds.patch(dict(a=[(slice(10, 1), list(range(10)))]))
-        with pytest.raises(ValueError, match=r"Patch slices must have non-negative \(start, stop, step\) values, got slice\(None, 10, -1\)"):
-            ds.patch(dict(a=[(slice(None, 10, -1), list(range(10)))]))
-        with pytest.raises(ValueError, match=r"Patch slices must have start < end, got slice\(10, 1, 1\)"):
-            ds.patch(dict(a=[(slice(10, 1, 1), list(range(10)))]))
-        with pytest.raises(ValueError, match=r"Patch slices must have start < end, got slice\(10, 1, -1\)"):
-            ds.patch(dict(a=[(slice(10, 1, -1), list(range(10)))]))
-        with pytest.raises(ValueError, match=r"Patch slices must have non-negative \(start, stop, step\) values, got slice\(1, 10, -1\)"):
-            ds.patch(dict(a=[(slice(1, 10, -1), list(range(10)))]))
-
-
-    def test_patch_good_slice_indices(self) -> None:
-        ds = bms.ColumnDataSource(data=dict(a=[10, 11, 12, 13, 14, 15], b=[20, 21, 22, 23, 24, 25]))
-        ds._document = "doc"
-        stuff = {}
-        mock_setter = object()
-        def mock(*args, **kw):
-            stuff['args'] = args
-            stuff['kw'] = kw
-        ds.data._patch = mock
-        ds.patch(dict(a=[(slice(2), [100, 101]), (slice(3, 5), [100, 101])], b=[(slice(0, None, 2), [100, 101, 102])]), mock_setter)
-        assert stuff['args'] == ("doc", ds, dict(a=[(slice(2), [100, 101]), (slice(3, 5), [100, 101])], b=[(slice(0, None, 2), [100, 101, 102])]), mock_setter)
-        assert stuff['kw'] == {}
-
-    def test_data_column_lengths(self) -> None:
-        # TODO: use this when soft=False
-        #
-        #with pytest.raises(ValueError):
-        #    bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21, 22]))
-        #
-        #ds = bms.ColumnDataSource()
-        #with pytest.raises(ValueError):
-        #    ds.data = dict(a=[10, 11], b=[20, 21, 22])
-        #
-        #ds = bms.ColumnDataSource(data=dict(a=[10, 11]))
-        #with pytest.raises(ValueError):
-        #    ds.data["b"] = [20, 21, 22]
-        #
-        #ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
-        #with pytest.raises(ValueError):
-        #    ds.data.update(dict(a=[10, 11, 12]))
-
-        with pytest.warns(UserWarning) as warns:
-            bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21, 22]))
-        assert len(warns) == 1
-        assert str(warns[0].message) == "ColumnDataSource's columns must be of the same length. Current lengths: ('a', 2), ('b', 3)"
-
-        ds = bms.ColumnDataSource()
-        with pytest.warns(UserWarning) as warns:
-            ds.data = dict(a=[10, 11], b=[20, 21, 22])
-        assert len(warns) == 1
-        assert str(warns[0].message) == "ColumnDataSource's columns must be of the same length. Current lengths: ('a', 2), ('b', 3)"
-
-        ds = bms.ColumnDataSource(data=dict(a=[10, 11]))
-        with pytest.warns(UserWarning) as warns:
-            ds.data["b"] = [20, 21, 22]
-        assert len(warns) == 1
-        assert str(warns[0].message) == "ColumnDataSource's columns must be of the same length. Current lengths: ('a', 2), ('b', 3)"
-
-        ds = bms.ColumnDataSource(data=dict(a=[10, 11], b=[20, 21]))
-        with pytest.warns(UserWarning) as warns:
-            ds.data.update(dict(a=[10, 11, 12]))
-        assert len(warns) == 1
-        assert str(warns[0].message) == "ColumnDataSource's columns must be of the same length. Current lengths: ('a', 3), ('b', 2)"
 
 class TestDataTable:
     def test_from_data_with_dataframe(self):
+        pd = pytest.importorskip("pandas")
         df = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})
         table = DataTable.from_data(df)
         assert isinstance(table, DataTable)
@@ -799,7 +963,7 @@ class TestDataTable:
         assert set(table.source.data) == {'A', 'B'}
         assert source is not table.source
 
-    @pytest.mark.parametrize("typ", (dict, pd.DataFrame, ColumnDataSource))
+    @pytest.mark.parametrize("typ", (dict, *((pd.DataFrame,) if pd else ()), ColumnDataSource))
     def test_from_data_with_columns(self, typ):
         data = typ({'A': [1, 2, 3], 'B': [4, 5, 6], 'C': [7, 8, 9]})
         table = DataTable.from_data(data, columns=['A', 'B'])

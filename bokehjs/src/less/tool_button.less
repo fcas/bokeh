@@ -1,13 +1,9 @@
 @import "./_mixins.less";
 
 :host {
-  --button-width: 30px;
-  --button-height: 30px;
-  --button-color: lightgray;
   --button-border: 2px;
 
-  --active-tool-highlight: #26aae1;
-  --active-tool-border: var(--button-border) solid transparent;
+  --tool-border: var(--button-border) solid transparent;
 }
 
 :host {
@@ -28,25 +24,39 @@
   width: calc(var(--button-width) - var(--button-border));
   height: calc(var(--button-height) - var(--button-border));
 
-  mask-size: 60% 60%;
-  mask-position: center center;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 60% 60%;
-  -webkit-mask-position: center center;
-  -webkit-mask-repeat: no-repeat;
-
-  /* for PNG icons; remove when dropped */
-  background-size: 60% 60%;
-  background-origin: border-box;
-  background-position: center center;
-  background-repeat: no-repeat;
+  .mask-size(60% 60%);
+  .mask-position(center center);
+  .mask-repeat(no-repeat);
+  background-color: var(--icon-color);
 }
 
 :host(.bk-disabled) {
   .bk-tool-icon {
-    background-color: var(--bokeh-icon-color-disabled);
+    background-color: var(--icon-color-disabled);
     cursor: not-allowed;
   }
+  background-color: var(--disabled-tool-color);
+}
+
+:host(.bk-hidden) {
+  display: none;
+}
+
+.bk-count {
+  position: absolute;
+  top: 0;
+  right: 0;
+
+  --height: 1.1em;
+  height: var(--height);
+  line-height: var(--height); // needed for vertical alignment
+  text-align: center;
+  aspect-ratio: 1 / 1;
+  font-size: 80%;
+  border-radius: 50%;
+
+  color: white;
+  background-color: var(--icon-color);
 }
 
 .bk-tool-chevron {
@@ -55,13 +65,6 @@
 
   width: 8px;
   height: 8px;
-
-  mask-size: 100% 100%;
-  mask-position: center center;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 100% 100%;
-  -webkit-mask-position: center center;
-  -webkit-mask-repeat: no-repeat;
 }
 
 :host(:hover) .bk-tool-chevron {
@@ -71,33 +74,33 @@
 :host(.bk-above) .bk-tool-chevron {
   right: 0;
   bottom: 0;
-  .tool-icon-mask(var(--bokeh-icon-chevron-down));
+  .icon-mask(var(--bokeh-icon-chevron-down));
 }
 
 :host(.bk-below) .bk-tool-chevron {
   right: 0;
   top: 0;
-  .tool-icon-mask(var(--bokeh-icon-chevron-up));
+  .icon-mask(var(--bokeh-icon-chevron-up));
 }
 
 :host(.bk-left) .bk-tool-chevron {
   right: 0;
   bottom: 0;
-  .tool-icon-mask(var(--bokeh-icon-chevron-right));
+  .icon-mask(var(--bokeh-icon-chevron-right));
 }
 
 :host(.bk-right) .bk-tool-chevron {
   left: 0;
   bottom: 0;
-  .tool-icon-mask(var(--bokeh-icon-chevron-left));
+  .icon-mask(var(--bokeh-icon-chevron-left));
 }
 
 :host(:hover) {
-  background-color: rgba(192, 192, 192, 0.15);
+  background-color: var(--hover-color);
 }
 
 :host(:focus), :host(:focus-visible) {
-  outline: 1px dotted var(--active-tool-highlight);
+  outline: 1px dotted var(--highlight-color);
   outline-offset: -1px;
 }
 
@@ -106,11 +109,11 @@
 }
 
 .tool-button-border(@side) {
-  border-@{side}: var(--active-tool-border);
+  border-@{side}: var(--tool-border);
 }
 
 .tool-button-border-active(@side) {
-  border-@{side}-color: var(--active-tool-highlight);
+  border-@{side}-color: var(--active-tool-border-color);
 }
 
 :host(.bk-above) {

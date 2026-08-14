@@ -13,6 +13,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAssignmentType=false, reportMissingImports=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -22,22 +24,19 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 import pathlib
-from typing import TYPE_CHECKING, Any as any
+import sys
+from typing import TYPE_CHECKING, Any
 
 # Bokeh imports
 from ..core.has_props import HasProps, abstract
-from ..core.properties import (
-    Any,
-    AnyRef,
-    Auto,
-    Bool,
-    Dict,
-    Either,
-    Instance,
-    Required,
-    String,
-)
+from ..core.property.any import AnyRef
+from ..core.property.auto import Auto
 from ..core.property.bases import Init
+from ..core.property.container import Dict
+from ..core.property.either import Either
+from ..core.property.instance import Instance
+from ..core.property.primitive import Bool, String
+from ..core.property.required import Required
 from ..core.property.singletons import Intrinsic
 from ..core.validation import error
 from ..core.validation.errors import INVALID_PROPERTY_VALUE, NOT_A_PROPERTY_OF
@@ -71,7 +70,7 @@ class Callback(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class OpenURL(Callback):
@@ -80,7 +79,7 @@ class OpenURL(Callback):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     url = String("http://", help="""
@@ -94,11 +93,12 @@ class OpenURL(Callback):
     dependent.
     """)
 
+@abstract
 class CustomCode(Callback):
     """ """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class CustomJS(CustomCode):
@@ -113,7 +113,7 @@ class CustomJS(CustomCode):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     args = Dict(String, AnyRef)(default={}, help="""
@@ -176,7 +176,7 @@ class CustomJS(CustomCode):
     """)
 
     @classmethod
-    def from_file(cls, path: PathLike, **args: any) -> CustomJS:
+    def from_file(cls, path: PathLike, **args: Any) -> CustomJS:
         """
         Construct a ``CustomJS`` instance from a ``*.js`` or ``*.mjs`` file.
 
@@ -205,11 +205,49 @@ class CustomJS(CustomCode):
 
         return CustomJS(code=code, args=args, module=module)
 
+    if sys.version_info[:2] >= (3, 14):
+        if TYPE_CHECKING:
+            from string.templatelib import Template  # novermin
+
+        @classmethod
+        def from_template(cls, template: Template) -> CustomJS: # pyright: ignore[reportInvalidTypeForm]
+            """
+            Construct a ``CustomJS`` instance from an interpolated string.
+
+            This allows to fill ``CustomJS.args`` by simply referring to Bokeh models
+            and other values from within interpolations.
+
+            .. code-block: python
+
+                from bokeh.models import CustomJS, Slider
+                slider = Slider(start=0, end=10)
+                CustomJS.from_template(t"console.log('Slider value: ' + {slider}.value)")
+
+            .. note::
+
+                This requires Python 3.14 and above to work.
+
+            """
+            from string.templatelib import Interpolation  # novermin
+
+            args: dict[str, Any] = {}
+            code = ""
+
+            for item in template:
+                if isinstance(item, Interpolation):
+                    name = item.expression
+                    args[name] = item.value
+                    code += name
+                else:
+                    code += item
+
+            return CustomJS(args=args, code=code)
+
 class SetValue(Callback):
     """ Allows to update a property of an object. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, obj: Init[HasProps] = Intrinsic, attr: Init[str] = Intrinsic, value: Init[any] = Intrinsic, **kwargs) -> None:
+    def __init__(self, obj: Init[HasProps] = Intrinsic, attr: Init[str] = Intrinsic, value: Init[Any] = Intrinsic, **kwargs: Any) -> None:
         super().__init__(obj=obj, attr=attr, value=value, **kwargs)
 
     obj: HasProps = Required(Instance(HasProps), help="""
@@ -220,7 +258,7 @@ class SetValue(Callback):
     The property to modify.
     """)
 
-    value = Required(Any, help="""
+    value = Required(AnyRef, help="""
     The value to set.
     """)
 
@@ -244,7 +282,7 @@ class ToggleVisibility(Callback):
     """ Toggle visibility of a UI element. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     target = Required(Instance(".models.ui.UIElement"), help="""
@@ -255,7 +293,7 @@ class OpenDialog(Callback):
     """ Open a dialog box. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     dialog = Required(Instance(".models.ui.Dialog"), help="""
@@ -273,7 +311,7 @@ class CloseDialog(Callback):
     """ Close a dialog box. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     dialog = Required(Instance(".models.ui.Dialog"), help="""

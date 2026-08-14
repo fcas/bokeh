@@ -13,12 +13,17 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false, reportArgumentType=false, reportAssignmentType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
 #-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
+
+# Standard library imports
+from typing import Any
 
 # Bokeh imports
 from ...core.enums import (
@@ -28,25 +33,24 @@ from ...core.enums import (
     RoundingFunction,
 )
 from ...core.has_props import abstract
-from ...core.properties import (
+from ...core.property.container import List
+from ...core.property.dataspec import ColorSpec, FontStyleSpec, TextAlignSpec
+from ...core.property.either import Either
+from ...core.property.enum import Enum
+from ...core.property.instance import Instance, InstanceDefault
+from ...core.property.nullable import Nullable
+from ...core.property.override import Override
+from ...core.property.primitive import (
     Bool,
-    ColorSpec,
-    Either,
-    Enum,
     Float,
-    FontStyleSpec,
-    Instance,
-    InstanceDefault,
     Int,
-    List,
-    Nullable,
-    Override,
-    Required,
     String,
-    TextAlignSpec,
 )
+from ...core.property.required import Required
 from ...core.property.singletons import Intrinsic
 from ...model import Model
+from ..comparisons import Comparison
+from ..dom import HTML
 from ..sources import CDSView, ColumnDataSource, DataSource
 from .widget import Widget
 
@@ -94,7 +98,7 @@ class CellFormatter(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 @abstract
@@ -104,7 +108,7 @@ class CellEditor(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 @abstract
@@ -114,7 +118,7 @@ class RowAggregator(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     field_ = String('', help="""
@@ -131,7 +135,7 @@ class StringFormatter(CellFormatter):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     font_style = FontStyleSpec(default="normal", help="""
@@ -150,8 +154,12 @@ class StringFormatter(CellFormatter):
     An optional background color.
     """)
 
-    nan_format = String("-", help="""
-    Formatting to apply to NaN and None values.
+    nan_format = String("NaN", help="""
+    Formatting to apply to NaN and NaT values.
+    """)
+
+    null_format = String("(null)", help="""
+    Formatting to apply to None / null values.
     """)
 
 
@@ -162,7 +170,7 @@ class ScientificFormatter(StringFormatter):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     precision = Int(10, help="""
@@ -179,13 +187,17 @@ class ScientificFormatter(StringFormatter):
         log(x) <= power_limit_low
     """)
 
+    nan_format = Override(default="-")
+
+    null_format = Override(default="-")
+
 class NumberFormatter(StringFormatter):
     ''' Number cell formatter.
 
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     format = String("0,0", help="""
@@ -272,13 +284,17 @@ class NumberFormatter(StringFormatter):
     Rounding functions (round, floor, ceil) and their synonyms (nearest, rounddown, roundup).
     """)
 
+    nan_format = Override(default="-")
+
+    null_format = Override(default="-")
+
 class BooleanFormatter(CellFormatter):
     ''' Boolean (check mark) cell formatter.
 
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     icon = Enum('check', 'check-circle', 'check-circle-o', 'check-square', 'check-square-o', help="""
@@ -291,7 +307,7 @@ class DateFormatter(StringFormatter):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     format = Either(Enum(DateFormat), String, default='ISO-8601', help="""
@@ -306,7 +322,7 @@ class DateFormatter(StringFormatter):
     ``RFC-850``                                      ``"%A, %d-%b-%y"`` Saturday, 01-Mar-14
     ``RFC-1123`` / ``RFC-2822``                      ``"%a, %e %b %Y"`` Sat, 1 Mar 2014
     ``RSS`` / ``RFC-822`` / ``RFC-1036``             ``"%a, %e %b %y"`` Sat, 1 Mar 14
-    ``TIMESTAMP``                                    (ms since epoch)   1393632000000
+    ``TIMESTAMP`` (ms since epoch)                   ``"@"``            1393632000000
     ================================================ ================== ===================
 
     Note that in the table some of the format names are synonymous, with
@@ -499,6 +515,10 @@ class DateFormatter(StringFormatter):
 
     """)
 
+    nan_format = Override(default="-")
+
+    null_format = Override(default="-")
+
 
 class HTMLTemplateFormatter(CellFormatter):
     ''' HTML formatter using a template.
@@ -530,7 +550,7 @@ class HTMLTemplateFormatter(CellFormatter):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     template = String('<%= value %>', help="""
@@ -543,7 +563,7 @@ class StringEditor(CellEditor):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     completions = List(String, help="""
@@ -556,7 +576,7 @@ class TextEditor(CellEditor):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class SelectEditor(CellEditor):
@@ -565,7 +585,7 @@ class SelectEditor(CellEditor):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     options = List(String, help="""
@@ -578,7 +598,7 @@ class PercentEditor(CellEditor):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class CheckboxEditor(CellEditor):
@@ -587,7 +607,7 @@ class CheckboxEditor(CellEditor):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class IntEditor(CellEditor):
@@ -596,7 +616,7 @@ class IntEditor(CellEditor):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     step = Int(1, help="""
@@ -609,7 +629,7 @@ class NumberEditor(CellEditor):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     step = Float(0.01, help="""
@@ -622,7 +642,7 @@ class TimeEditor(CellEditor):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class DateEditor(CellEditor):
@@ -631,7 +651,7 @@ class DateEditor(CellEditor):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class AvgAggregator(RowAggregator):
@@ -640,7 +660,7 @@ class AvgAggregator(RowAggregator):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class MinAggregator(RowAggregator):
@@ -649,7 +669,7 @@ class MinAggregator(RowAggregator):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class MaxAggregator(RowAggregator):
@@ -658,7 +678,7 @@ class MaxAggregator(RowAggregator):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class SumAggregator(RowAggregator):
@@ -667,7 +687,7 @@ class SumAggregator(RowAggregator):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class TableColumn(Model):
@@ -676,16 +696,16 @@ class TableColumn(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     field = Required(String, help="""
     The name of the field mapping to a column in the data source.
     """)
 
-    title = Nullable(String, help="""
-    The title of this column. If not set, column's data field is
-    used instead.
+    title = Nullable(Either(String, Instance(HTML)), help="""
+    The title of this column. May be a plain string or an HTML element.
+    If not set, column's data field is used instead.
     """)
 
     width = Int(300, help="""
@@ -713,7 +733,10 @@ class TableColumn(Model):
     """)
 
     visible = Bool(True, help="""
-    Whether this column shold be displayed or not.
+    Whether this column should be displayed or not.
+    """)
+
+    sorter = Nullable(Instance(Comparison), help="""
     """)
 
 @abstract
@@ -723,7 +746,7 @@ class TableWidget(Widget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     source = Instance(DataSource, default=InstanceDefault(ColumnDataSource), help="""
@@ -743,7 +766,7 @@ class DataTable(TableWidget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     autosize_mode = Enum(AutosizeMode, default="force_fit", help="""
@@ -751,9 +774,8 @@ class DataTable(TableWidget):
 
     ``"fit_columns"``
         Compute column widths based on cell contents but ensure the
-        table fits into the available viewport. This results in no
-        horizontal scrollbar showing up, but data can get unreadable
-        if there is not enough space available.
+        table fits into the available viewport. A horizontal scrollbar may
+        appear to ensure readability of contents in all rows.
 
     ``"fit_viewport"``
         Adjust the viewport size after computing columns widths based
@@ -764,6 +786,12 @@ class DataTable(TableWidget):
         the columns equally (equivalent to `fit_columns=True`).
         This results in no horizontal scrollbar showing up, but data
         can get unreadable if there is not enough space available.
+
+    ``"ignore_viewport"``
+        Similarly to ``"fit_columns"``, the column widths are computed based on the cell
+        contents. However, the viewport width is ignored, so that if the
+        columns are smaller than the viewport, there is empty space at the right,
+        or if the columns are larger than the viewport, there is a scrollbar.
 
     ``"none"``
         Do not automatically compute column widths.
@@ -863,6 +891,10 @@ class DataTable(TableWidget):
     The height of each row in pixels.
     """)
 
+    multi_selectable = Bool(True, help="""
+    Whether multiple rows can be selected.
+    """)
+
     @staticmethod
     def from_data(data, columns=None, formatters={}, **kwargs) -> DataTable:
         """ Create a simple table from a pandas dataframe, dictionary or ColumnDataSource.
@@ -917,7 +949,7 @@ class GroupingInfo(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     getter = String('', help="""
@@ -938,7 +970,7 @@ class DataCube(DataTable):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     grouping = List(Instance(GroupingInfo), help="""

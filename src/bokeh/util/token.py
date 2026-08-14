@@ -34,12 +34,13 @@ import hmac
 import json
 import time
 import zlib
-from typing import Any, TypeAlias
+from typing import TYPE_CHECKING, Any
 
 # Bokeh imports
-from ..core.types import ID
 from ..settings import settings
-from .warnings import warn
+
+if TYPE_CHECKING:
+    from ..core.types import ID
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -61,7 +62,7 @@ _TOKEN_ZLIB_KEY = "__bk__zlib_"
 # General API
 #-----------------------------------------------------------------------------
 
-TokenPayload: TypeAlias = dict[str, Any]
+type TokenPayload = dict[str, Any]
 
 def generate_secret_key() -> str:
     ''' Generate a new securely-generated secret key appropriate for SHA-256
@@ -80,6 +81,8 @@ def generate_session_id(secret_key: bytes | None = settings.secret_key_bytes(),
     random and unguessable - otherwise users of the app could interfere with one
     another.
     '''
+    from ..core.types import ID
+
     session_id = _get_random_string()
     if signed:
         session_id = '.'.join([session_id, _signature(session_id, secret_key)])
@@ -112,8 +115,8 @@ def generate_jwt_token(session_id: ID,
     Returns:
         str
     """
-    now = calendar.timegm(dt.datetime.now(tz=dt.timezone.utc).timetuple())
-    payload = {'session_id': session_id, 'session_expiry': now + expiration}
+    now = calendar.timegm(dt.datetime.now(tz=dt.UTC).timetuple())
+    payload: TokenPayload = {'session_id': session_id, 'session_expiry': now + expiration}
     if extra_payload:
         if "session_id" in extra_payload:
             raise RuntimeError("extra_payload for session tokens may not contain 'session_id'")
@@ -254,6 +257,8 @@ def _get_sysrandom() -> tuple[Any, bool]:
         using_sysrandom = True
         return sysrandom, using_sysrandom
     except NotImplementedError:
+        from .warnings import warn
+
         warn('A secure pseudo-random number generator is not available '
              'on your system. Falling back to Mersenne Twister.')
         if settings.secret_key() is None:

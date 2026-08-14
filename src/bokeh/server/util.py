@@ -27,9 +27,6 @@ from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:
     from socket import socket
 
-# External imports
-from tornado import netutil
-
 #-----------------------------------------------------------------------------
 # Globals and constants
 #-----------------------------------------------------------------------------
@@ -65,14 +62,8 @@ def bind_sockets(address: str | None, port: int) -> tuple[list[socket], int]:
         (socket, port)
 
     '''
-    ss = netutil.bind_sockets(port=port or 0, address=address)
-    assert len(ss)
-    ports = {s.getsockname()[1] for s in ss}
-    assert len(ports) == 1, "Multiple ports assigned??"
-    actual_port = ports.pop()
-    if port:
-        assert actual_port == port
-    return ss, actual_port
+    from .server import bind_sockets
+    return bind_sockets(address, port)
 
 def check_allowlist(host: str, allowlist: Sequence[str]) -> bool:
     ''' Check a given request host against a allowlist.
@@ -175,8 +166,10 @@ def match_host(host: str, pattern: str) -> bool:
             wildcards for ip address octets or ports.
 
     This function will return ``True`` if the hostname matches the pattern,
-    including any wildcards. If the pattern contains a port, the host string
-    must also contain a matching port.
+    including any wildcards. If the pattern does not include any wildcards,
+    then the length the host parts and pattern parts must match identically.
+    If the pattern contains a port, the host string must also contain a
+    matching port.
 
     Returns:
         bool
@@ -199,7 +192,9 @@ def match_host(host: str, pattern: str) -> bool:
         True
         >>> match_host('alice', 'bob')
         False
-        >>> match_host('foo.example.com', 'foo.example.com.net')
+        >>> match_host('example.com', 'example.com.net')
+        False
+        >>> match_host('example.com.bad.com', 'example.com')
         False
         >>> match_host('alice', '*')
         True
@@ -213,6 +208,10 @@ def match_host(host: str, pattern: str) -> bool:
         False
 
     '''
+    # This is for a wildcard match without any port restriction
+    if pattern == "*":
+        return True
+
     host_port: str | None = None
     if ':' in host:
         host, host_port = host.rsplit(':', 1)
@@ -226,10 +225,17 @@ def match_host(host: str, pattern: str) -> bool:
     if pattern_port is not None and host_port != pattern_port:
         return False
 
+    # This is for a wildcard match including any port restriction
+    if pattern == "*":
+        return True
+
     host_parts = host.split('.')
     pattern_parts = pattern.split('.')
 
-    if len(pattern_parts) > len(host_parts):
+    # since the pattern is not '*', we must enforce that the host and
+    # pattern have the same number of parts, to avoid matching subdomains
+    # unintentionally.
+    if len(pattern_parts) != len(host_parts):
         return False
 
     for h, p in zip(host_parts, pattern_parts):

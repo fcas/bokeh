@@ -1,7 +1,6 @@
 import {TextAnnotation, TextAnnotationView} from "./text_annotation"
 import {VerticalAlign, TextAlign} from "core/enums"
 import type {Size, Layoutable} from "core/layout"
-import type {SidePanel} from "core/layout/side_panel"
 import type * as p from "core/properties"
 import type {XY, SXY} from "core/util/bbox"
 import type {Position} from "core/graphics"
@@ -11,7 +10,6 @@ export class TitleView extends TextAnnotationView {
   declare model: Title
   declare visuals: Title.Visuals
   declare layout: Layoutable
-  declare panel: SidePanel
 
   protected _get_position(): Position {
     const hmargin = this.model.offset
@@ -22,7 +20,7 @@ export class TitleView extends TextAnnotationView {
     let sx: number, sy: number
     const {bbox} = this.layout
 
-    switch (this.panel.side) {
+    switch (this.panel!.side) {
       case "above":
       case "below": {
         switch (vertical_align) {
@@ -81,17 +79,15 @@ export class TitleView extends TextAnnotationView {
   }
 
   get angle(): number {
-    return this.panel.get_label_angle_heuristic("parallel")
+    return this.panel!.get_label_angle_heuristic("parallel")
   }
 
   protected override _get_size(): Size {
     const offset = (value: number) => {
-      // XXX: The magic 2px is for backwards compatibility. This will be removed at
-      // some point, but currently there is no point breaking half of visual tests.
-      return value == 0 ? 0 : 2 + value + this.model.standoff
+      return value == 0 ? 0 : value + this.model.standoff
     }
     const {width, height} = super._get_size()
-    if (this.panel.is_horizontal) {
+    if (this.panel!.is_horizontal) {
       return {width, height: offset(height)}
     } else {
       return {width: offset(width), height}

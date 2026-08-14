@@ -1,5 +1,4 @@
 import {Model} from "../../model"
-import type {Legend} from "./legend"
 import {GlyphRenderer} from "../renderers/glyph_renderer"
 import {ColumnarDataSource} from "../sources/columnar_data_source"
 import {isValue, isField} from "core/vectorization"
@@ -22,8 +21,6 @@ export interface LegendItem extends LegendItem.Attrs {}
 
 export class LegendItem extends Model {
   declare properties: LegendItem.Props
-
-  legend: Legend | null
 
   constructor(attrs?: Partial<LegendItem.Attrs>) {
     super(attrs)
@@ -68,22 +65,21 @@ export class LegendItem extends Model {
     return true
   }
 
-  override initialize(): void {
-    super.initialize()
-    this.legend = null
-    this.connect(this.change, () => this.legend?.item_change.emit())
-
+  protected _validate_integrity(): void {
     // Validate data_sources match
-    const data_source_validation = this._check_data_sources_on_renderers()
-    if (!data_source_validation) {
+    if (!this._check_data_sources_on_renderers()) {
       logger.error("Non matching data sources on legend item renderers")
     }
 
     // Validate label in data_source
-    const field_validation = this._check_field_label_on_data_source()
-    if (!field_validation) {
+    if (!this._check_field_label_on_data_source()) {
       logger.error(`Bad column name on label: ${this.label}`)
     }
+  }
+
+  override initialize(): void {
+    super.initialize()
+    this._validate_integrity() // TODO should validate after update
   }
 
   get_field_from_label_prop(): string | null {
@@ -97,7 +93,7 @@ export class LegendItem extends Model {
     }
 
     const {index} = this
-    if (index != null && this.renderers.every((r) => !r.view.indices_map.has(index))) {
+    if (index != null && this.renderers.every((r) => !r.view.has_subset_index(index))) {
       // this index points to nowhere, so skip this item altogether from its legend
       return []
     }
@@ -109,17 +105,21 @@ export class LegendItem extends Model {
 
     const field = this.get_field_from_label_prop()
     if (field != null) {
-      let source: ColumnarDataSource
-      if (this.renderers.length != 0) {
-        source = this.renderers[0].data_source
-      } else {
+      if (this.renderers.length === 0) {
         return ["No source found"]
       }
+      const renderer = this.renderers[0]
+      const source = renderer.data_source
+      const view_indices = renderer.view.indices
 
       if (source instanceof ColumnarDataSource) {
         const data = source.get_column(field)
         if (data != null) {
-          return uniq(Array.from(data))
+          const filtered_data = []
+          for (const i of view_indices) {
+            filtered_data.push(data[i])
+          }
+          return uniq(filtered_data)
         } else {
           return ["Invalid field"]
         }

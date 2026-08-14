@@ -1,4 +1,4 @@
-import {expect, expect_not_null} from "assertions"
+import {expect, expect_not_null} from "#framework/assertions"
 
 import * as p from "@bokehjs/core/properties"
 import * as enums from "@bokehjs/core/enums"
@@ -110,6 +110,13 @@ class Some extends HasProps {
 }
 
 describe("properties module", () => {
+
+  describe("Property", () => {
+    it("validate() should throw an instance of ValidationError", () => {
+      const obj = new Some()
+      expect(() => obj.properties.int.validate(0.5)).to.throw(p.ValidationError)
+    })
+  })
 
   function enum_validation_errors(prop: p.Property<unknown>): void {
     expect(prop.valid(true)).to.be.false

@@ -2,7 +2,7 @@ import {AbstractButton, AbstractButtonView} from "./abstract_button"
 import type {TooltipView} from "../ui/tooltip"
 import {Tooltip} from "../ui/tooltip"
 import {BuiltinIcon} from "../ui/icons/builtin_icon"
-import type {IterViews} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import {build_view} from "core/build_views"
 import type * as p from "core/properties"
 
@@ -11,20 +11,14 @@ export class HelpButtonView extends AbstractButtonView {
 
   protected tooltip: TooltipView
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield this.tooltip
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this.tooltip]
   }
 
   override async lazy_initialize(): Promise<void> {
     await super.lazy_initialize()
     const {tooltip} = this.model
     this.tooltip = await build_view(tooltip, {parent: this})
-  }
-
-  override remove(): void {
-    this.tooltip.remove()
-    super.remove()
   }
 
   override render(): void {
@@ -66,11 +60,11 @@ export class HelpButtonView extends AbstractButtonView {
         persistent = false
         toggle(false)
       }
-    })
+    }, {signal: this.abort_signal})
     window.addEventListener("blur", () => {
       persistent = false
       toggle(false)
-    })
+    }, {signal: this.abort_signal})
   }
 }
 

@@ -1,11 +1,11 @@
 @import "./_mixins.less";
 
 :host {
-  --bokeh-bg-color: white;
-  --bokeh-border-color: #e5e5e5;
-  --bokeh-shadow-color: #e5e5e5;
+  --bokeh-bg-color: var(--background-color);
+  --bokeh-border-color: var(--divider-color);
+  --bokeh-shadow-color: var(--divider-color);
   --bokeh-ctrl-size: 16px;
-  --bokeh-ctrl-color: gray;
+  --bokeh-ctrl-color: var(--shortcut-color);
 }
 
 :host {
@@ -42,7 +42,7 @@
   flex: 0;
   gap: 1em;
   padding: 5px;
-  background-color: lightgray;
+  background-color: var(--border-color);
 }
 
 .bk-content {
@@ -68,7 +68,7 @@
   width: var(--bokeh-ctrl-size);
   height: var(--bokeh-ctrl-size);
   background-color: var(--bokeh-ctrl-color);
-  .icon-mask(var(--bokeh-icon-y-grip));
+  .icon-mask(var(--bokeh-icon-y-grip), var(--color));
 }
 
 .bk-title {
@@ -88,16 +88,13 @@
 .bk-ctrl {
   width: var(--bokeh-ctrl-size);
   height: var(--bokeh-ctrl-size);
-  cursor: pointer;
 
-  .mask-size(100% 100%);
-  .mask-position(center center);
-  .mask-repeat(no-repeat);
-
-  background-color: var(--bokeh-ctrl-color);
+  .icon-mask-base(var(--bokeh-ctrl-color));
   &:hover {
-    background-color: red;
+    background-color: var(--hover-color);
   }
+
+  cursor: pointer;
 }
 
 .bk-pin {
@@ -137,7 +134,7 @@
 }
 
 :host {
-  --resize-radius: 3px;
+  --resize-radius: 6px;
   --resize-depth: calc(2*var(--resize-radius));
 }
 

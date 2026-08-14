@@ -1,6 +1,6 @@
-import {display, fig, row, column} from "../_util"
+import {display, fig, row, column} from "#framework/layouts"
 
-import {Range1d, HoverTool, ColumnDataSource, Circle, Rect, GlyphRenderer} from "@bokehjs/models"
+import {Range1d, HoverTool, ColumnDataSource, Circle, Rect, GlyphRenderer, Scatter, HBar, Annulus, Wedge, AnnularWedge} from "@bokehjs/models"
 import type {DisplayMode} from "@bokehjs/models/glyphs/tex_glyph"
 import type {Direction, OutputBackend} from "@bokehjs/core/enums"
 import type {Color} from "@bokehjs/core/types"
@@ -289,7 +289,7 @@ describe("Glyph models", () => {
 
       return p
     }
-    await display(row([p("canvas"), p("svg")]))
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
   })
 
   it("should support Patches", async () => {
@@ -311,7 +311,7 @@ describe("Glyph models", () => {
 
       return p
     }
-    await display(row([p("canvas"), p("svg")]))
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
   })
 
   it("should support Quad", async () => {
@@ -355,6 +355,28 @@ describe("Glyph models", () => {
       return p
     }
     await display(row([p("canvas"), p("svg")]))
+  })
+
+  it("should support Ngon", async () => {
+    function p(output_backend: OutputBackend) {
+      const p = fig([300, 300], {x_range: [0, 6], y_range: [0, 4], output_backend, title: output_backend})
+      p.ngon({
+        x: [1, 2, 3], y,
+        radius: 1,
+        n: 3,
+        fill_color, alpha: 0.8,
+        line_width: 10, line_join: ["round", "miter", "bevel"],
+        angle: [0, 45, 90], angle_units: "deg",
+      })
+      p.ngon({
+        x: [3, 4, 5], y,
+        radius: [1, 0.6, 0.9],
+        n: [4, 5, 6],
+        fill_color, alpha: 0.6, hatch_pattern,
+      })
+      return p
+    }
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
   })
 
   it("should support Rect", async () => {
@@ -435,6 +457,44 @@ describe("Glyph models", () => {
     await display(row([p("canvas"), p("svg"), p("webgl")]))
   })
 
+  it("should support Step with pad_before", async () => {
+    const x0 = [0, 1, 2]
+
+    function p(output_backend: OutputBackend) {
+      const p = fig([200, 300], {output_backend, title: output_backend})
+      p.step({x: x0, y: [0.2, 1.2, 0.0], line_width: 5, line_cap: "round", mode: "before", line_color: "red", pad_before: 0.25})
+      p.step({x: x0, y: [0.1, 1.1, 0.1], line_width: 5, line_cap: "round", mode: "center", line_color: "green", pad_before: 0.25})
+      p.step({x: x0, y: [0.0, 1.0, 0.2], line_width: 5, line_cap: "round", mode: "after", line_color: "blue", pad_before: 0.25})
+      return p
+    }
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
+  })
+
+  it("should support Step with pad_after", async () => {
+    const x0 = [0, 1, 2]
+
+    function p(output_backend: OutputBackend) {
+      const p = fig([200, 300], {output_backend, title: output_backend})
+      p.step({x: x0, y: [0.2, 1.2, 0.0], line_width: 5, line_cap: "round", mode: "before", line_color: "red", pad_after: 0.25})
+      p.step({x: x0, y: [0.1, 1.1, 0.1], line_width: 5, line_cap: "round", mode: "center", line_color: "green", pad_after: 0.25})
+      p.step({x: x0, y: [0.0, 1.0, 0.2], line_width: 5, line_cap: "round", mode: "after", line_color: "blue", pad_after: 0.25})
+      return p
+    }
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
+  })
+
+  it("should support Step with pad_before and pad_after", async () => {
+    const x0 = [0, 1, 2]
+
+    function p(output_backend: OutputBackend) {
+      const p = fig([200, 300], {output_backend, title: output_backend})
+      p.step({x: x0, y: [0.2, 1.2, 0.0], line_width: 5, line_cap: "round", mode: "before", line_color: "red", pad_before: 0.25, pad_after: 0.25})
+      p.step({x: x0, y: [0.1, 1.1, 0.1], line_width: 5, line_cap: "round", mode: "center", line_color: "green", pad_before: 0.25, pad_after: 0.25})
+      p.step({x: x0, y: [0.0, 1.0, 0.2], line_width: 5, line_cap: "round", mode: "after", line_color: "blue", pad_before: 0.25, pad_after: 0.25})
+      return p
+    }
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
+  })
   it("should support MathMLGlyph", async () => {
     const p = fig([200, 200])
     p.mathml({
@@ -698,6 +758,24 @@ describe("Glyph models", () => {
         p.text({
           x, y,
           text: ["One line", "Two short\nlines", "Three\nshort\nlines"],
+          text_outline_color: "black", text_color: "yellow",
+          text_font_size: "30px", text_font_style: "bold",
+        })
+        return p
+      }
+      await display(row([p("canvas"), p("svg")]))
+    })
+
+    it("with variable text_outline_width", async () => {
+      function p(output_backend: OutputBackend) {
+        const p = fig([200, 300], {
+          x_range: [0, 4], y_range: [0, 5],
+          output_backend, title: output_backend,
+        })
+        p.text({
+          x, y,
+          text: ["Very thin outline", "Default outline", "Bigger outline"],
+          text_outline_width: [0.5, 1, 2],
           text_outline_color: "black", text_color: "yellow",
           text_font_size: "30px", text_font_style: "bold",
         })
@@ -984,8 +1062,232 @@ describe("Glyph models", () => {
         },
       })
       data_source.selected.indices = range(N).filter((i) => i % 2 == 0)
-      const glyph = new Circle({fill_color: {field: "color"}})
+      const glyph = new Circle({radius: {field: "radius"}, fill_color: {field: "color"}})
       const selection_glyph = new Circle({radius: {field: "selection_radius"}, fill_color: {field: "color"}})
+      const glyph_renderer = new GlyphRenderer({data_source, glyph, selection_glyph})
+      p.renderers.push(glyph_renderer)
+      return p
+    }
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
+  })
+
+  it("should allow to override Scatter.size", async () => {
+    function p(output_backend: OutputBackend) {
+      const p = fig([300, 300], {output_backend, title: output_backend})
+      const N = 11
+      const markers = ["circle", "square", "triangle", "diamond", "hex", "star", "circle_cross", "square_x", "inverted_triangle", "cross", "asterisk"]
+      const data_source = new ColumnDataSource({
+        data: {
+          x: range(N),
+          y: range(N),
+          marker: markers,
+          size: repeat(20, N),
+          selection_size: repeat(30, N),
+          color: Spectral11,
+        },
+      })
+      data_source.selected.indices = range(N).filter((i) => i % 2 == 0)
+      const glyph = new Scatter({
+        x: {field: "x"},
+        y: {field: "y"},
+        marker: {field: "marker"},
+        size: {field: "size"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const selection_glyph = new Scatter({
+        size: {field: "selection_size"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const glyph_renderer = new GlyphRenderer({data_source, glyph, selection_glyph})
+      p.renderers.push(glyph_renderer)
+      return p
+    }
+    // Note: WebGL does not support size overrides for multi-marker (Scatter) glyphs
+    // because marker type metadata cannot be correctly populated from derived glyphs.
+    // See multi_marker.ts lines 31-35 for architectural explanation.
+    // WebGL is included in the baseline to document the issue.
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
+  })
+
+  it("should allow to override HBar.height", async () => {
+    function p(output_backend: OutputBackend) {
+      const p = fig([300, 300], {output_backend, title: output_backend})
+      const N = 11
+      const data_source = new ColumnDataSource({
+        data: {
+          y: range(N),
+          right: range(N).map((i) => i + 1),
+          height: repeat(0.8, N),
+          selection_height: repeat(0.4, N),
+          color: Spectral11,
+        },
+      })
+      data_source.selected.indices = range(N).filter((i) => i % 2 == 0)
+      const glyph = new HBar({
+        y: {field: "y"},
+        right: {field: "right"},
+        height: {field: "height"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const selection_glyph = new HBar({
+        height: {field: "selection_height"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const glyph_renderer = new GlyphRenderer({data_source, glyph, selection_glyph})
+      p.renderers.push(glyph_renderer)
+      return p
+    }
+    // Note: HBar width is derived from left/right coordinates, not a direct property.
+    // This test validates height override only. Rect.width/height test covers direct
+    // width/height properties on LRTB-style glyphs.
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
+  })
+
+  it("should allow to override Rect.width and Rect.height", async () => {
+    function p(output_backend: OutputBackend) {
+      const p = fig([300, 300], {output_backend, title: output_backend})
+      const N = 11
+      const data_source = new ColumnDataSource({
+        data: {
+          x: range(N),
+          y: range(N),
+          width: repeat(0.8, N),
+          height: repeat(0.8, N),
+          selection_width: repeat(1.2, N),
+          selection_height: repeat(0.4, N),
+          color: Spectral11,
+        },
+      })
+      data_source.selected.indices = range(N).filter((i) => i % 2 == 0)
+      const glyph = new Rect({
+        x: {field: "x"},
+        y: {field: "y"},
+        width: {field: "width"},
+        height: {field: "height"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const selection_glyph = new Rect({
+        width: {field: "selection_width"},
+        height: {field: "selection_height"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const glyph_renderer = new GlyphRenderer({data_source, glyph, selection_glyph})
+      p.renderers.push(glyph_renderer)
+      return p
+    }
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
+  })
+
+  it("should allow to override Annulus.inner_radius and Annulus.outer_radius", async () => {
+    function p(output_backend: OutputBackend) {
+      const p = fig([300, 300], {output_backend, title: output_backend})
+      const N = 11
+      const data_source = new ColumnDataSource({
+        data: {
+          x: range(N),
+          y: range(N),
+          inner_radius: repeat(0.2, N),
+          outer_radius: repeat(0.5, N),
+          selection_inner_radius: repeat(0.3, N),
+          selection_outer_radius: repeat(0.7, N),
+          color: Spectral11,
+        },
+      })
+      data_source.selected.indices = range(N).filter((i) => i % 2 == 0)
+      const glyph = new Annulus({
+        x: {field: "x"},
+        y: {field: "y"},
+        inner_radius: {field: "inner_radius"},
+        outer_radius: {field: "outer_radius"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const selection_glyph = new Annulus({
+        inner_radius: {field: "selection_inner_radius"},
+        outer_radius: {field: "selection_outer_radius"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const glyph_renderer = new GlyphRenderer({data_source, glyph, selection_glyph})
+      p.renderers.push(glyph_renderer)
+      return p
+    }
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
+  })
+
+  it("should allow to override Wedge.radius", async () => {
+    function p(output_backend: OutputBackend) {
+      const p = fig([300, 300], {output_backend, title: output_backend})
+      const N = 11
+      const data_source = new ColumnDataSource({
+        data: {
+          x: range(N),
+          y: range(N),
+          radius: repeat(0.5, N),
+          selection_radius: repeat(0.7, N),
+          color: Spectral11,
+        },
+      })
+      data_source.selected.indices = range(N).filter((i) => i % 2 == 0)
+      const glyph = new Wedge({
+        x: {field: "x"},
+        y: {field: "y"},
+        radius: {field: "radius"},
+        start_angle: {value: 0},
+        end_angle: {value: Math.PI},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const selection_glyph = new Wedge({
+        radius: {field: "selection_radius"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const glyph_renderer = new GlyphRenderer({data_source, glyph, selection_glyph})
+      p.renderers.push(glyph_renderer)
+      return p
+    }
+    await display(row([p("canvas"), p("svg"), p("webgl")]))
+  })
+
+  it("should allow to override AnnularWedge.inner_radius and AnnularWedge.outer_radius", async () => {
+    function p(output_backend: OutputBackend) {
+      const p = fig([300, 300], {output_backend, title: output_backend})
+      const N = 11
+      const data_source = new ColumnDataSource({
+        data: {
+          x: range(N),
+          y: range(N),
+          inner_radius: repeat(0.2, N),
+          outer_radius: repeat(0.5, N),
+          selection_inner_radius: repeat(0.3, N),
+          selection_outer_radius: repeat(0.7, N),
+          color: Spectral11,
+        },
+      })
+      data_source.selected.indices = range(N).filter((i) => i % 2 == 0)
+      const glyph = new AnnularWedge({
+        x: {field: "x"},
+        y: {field: "y"},
+        inner_radius: {field: "inner_radius"},
+        outer_radius: {field: "outer_radius"},
+        start_angle: {value: 0},
+        end_angle: {value: Math.PI},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
+      const selection_glyph = new AnnularWedge({
+        inner_radius: {field: "selection_inner_radius"},
+        outer_radius: {field: "selection_outer_radius"},
+        fill_color: {field: "color"},
+        line_color: {field: "color"},
+      })
       const glyph_renderer = new GlyphRenderer({data_source, glyph, selection_glyph})
       p.renderers.push(glyph_renderer)
       return p
@@ -1031,7 +1333,7 @@ describe("Glyph models", () => {
         },
       })
       data_source.selected.indices = range(N).filter((i) => i % 2 == 0)
-      const glyph = new Circle({fill_color: {field: "color"}})
+      const glyph = new Circle({radius: {field: "radius"}, fill_color: {field: "color"}})
       const selection_glyph = new Rect({fill_color: {field: "color"}})
       const glyph_renderer = new GlyphRenderer({data_source, glyph, selection_glyph})
       p.renderers.push(glyph_renderer)

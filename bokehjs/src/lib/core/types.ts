@@ -1,3 +1,5 @@
+import type {Anchor} from "./enums"
+
 export const GeneratorFunction: GeneratorFunctionConstructor = Object.getPrototypeOf(function* () {}).constructor
 export const AsyncGeneratorFunction: AsyncGeneratorFunctionConstructor = Object.getPrototypeOf(async function* () {}).constructor
 
@@ -20,17 +22,17 @@ export const RGBAArray = Uint8ClampedArray
 export type DataType = "uint8" | "int8" | "uint16" | "int16" | "uint32" | "int32" /*"uint64" | "int64"*/ | "float32" | "float64"
 export type NDDataType = "bool" | DataType | "object"
 
-export type TypedArray =
-  Uint8Array   | Int8Array    |
-  Uint16Array  | Int16Array   |
-  Uint32Array  | Int32Array   |
-  Float32Array | Float64Array
-
 export type FloatArray = Float32Array | Float64Array
 export type FloatArrayConstructor = Float32ArrayConstructor | Float64ArrayConstructor
 
 export type IntArray = Int8Array | Int16Array | Int32Array
 export type IntArrayConstructor = Int8ArrayConstructor | Int16ArrayConstructor | Int32ArrayConstructor
+
+export type UintArray = Uint8Array  | Uint16Array | Uint32Array
+export type UintArrayConstructor = Uint8ArrayConstructor | Uint16ArrayConstructor | Uint32ArrayConstructor
+
+export type TypedArray = FloatArray | IntArray | UintArray
+export type TypedArrayConstructor = FloatArrayConstructor | IntArrayConstructor | UintArrayConstructor
 
 export function infer_type(a0: Float64Array, a1?: FloatArray): Float64ArrayConstructor
 export function infer_type(a0: FloatArray, a1: Float64Array): Float64ArrayConstructor
@@ -74,7 +76,9 @@ export type ArrayableOf<T> = T extends unknown ? Arrayable<T> : never
 
 export type PlainObject<T = unknown> = {[key: string]: T}
 
-export type Dict<T> = PlainObject<T> | Map<string, T>
+export type KeyVal<K extends string, V> = {[key in K]: V} | Map<K, V>
+
+export type Dict<T> = KeyVal<string, T>
 
 export type Data<T = unknown> = Dict<Arrayable<T>>
 
@@ -90,6 +94,7 @@ export type Box = {
   y: number
   width: number
   height: number
+  origin?: Anchor
 }
 
 export type Rect = {

@@ -24,10 +24,11 @@ log = logging.getLogger(__name__)
 # Standard library imports
 import sys
 import weakref
-from types import ModuleType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from .document import Document
 
 #-----------------------------------------------------------------------------
@@ -110,8 +111,12 @@ class DocumentModuleManager:
             # leaked. Here we perform a detailed check that the only referrers are expected
             # ones. Otherwise issue an error log message with details.
             referrers = get_referrers(module)
-            referrers = [x for x in referrers if x is not sys.modules]  # lgtm [py/comparison-using-is]
-            referrers = [x for x in referrers if x is not self._modules]  # lgtm [py/comparison-using-is]
+            referrers = [x for x in referrers if x is not sys.modules]
+            # Python introspection utilities, including inspect.getmodule(),
+            # make shallow snapshots of sys.modules. A snapshot held during
+            # document cleanup isn't an application module leak.
+            referrers = [x for x in referrers if not _is_sys_modules_snapshot(x)]
+            referrers = [x for x in referrers if x is not self._modules]
             referrers = [x for x in referrers if not isinstance(x, FrameType)]
             if len(referrers) != 0:
                 log.error(f"Module {module!r} has extra unexpected referrers! This could indicate a serious memory leak. Extra referrers: {referrers!r}")
@@ -137,6 +142,17 @@ class DocumentModuleManager:
 #-----------------------------------------------------------------------------
 # Private API
 #-----------------------------------------------------------------------------
+
+def _is_sys_modules_snapshot(referrer: object) -> bool:
+    ''' Whether a referrer is a shallow snapshot of ``sys.modules``. '''
+    if not isinstance(referrer, dict) or referrer.get("sys") is not sys:
+        return False
+
+    missing = object()
+    return all(
+        isinstance(name, str) and sys.modules.get(name, missing) is value
+        for name, value in referrer.items()
+    )
 
 #-----------------------------------------------------------------------------
 # Code

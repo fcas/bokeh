@@ -12,20 +12,22 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false, reportArgumentType=false, reportAssignmentType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
 #-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
+
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
-from ...core.properties import (
-    Bool,
-    Float,
-    Instance,
-    InstanceDefault,
-    Override,
-)
+from ...core.property.instance import Instance, InstanceDefault
+from ...core.property.override import Override
+from ...core.property.primitive import Bool, Float
 from ..tiles import TileSource, WMTSTileSource
 from .renderer import Renderer
 
@@ -47,7 +49,7 @@ class TileRenderer(Renderer):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     tile_source = Instance(TileSource, default=InstanceDefault(WMTSTileSource), help="""

@@ -1,19 +1,16 @@
 import type * as ts from "typescript"
 
-import * as cp from "child_process"
-import {join, dirname, basename, relative} from "path"
+import * as cp from "node:child_process"
+import {join, dirname, basename, relative} from "node:path"
 
-import type {Path} from "./sys"
-import {read, read_json, write, rename, file_exists, directory_exists, hash, hash_file} from "./sys"
-import {
-  compile_files, read_tsconfig, parse_tsconfig, is_failed,
-  default_transformers, compiler_host, report_diagnostics,
-} from "./compiler"
-import {Linker} from "./linker"
-import {collect_styles, compile_styles, wrap_css_modules} from "./styles"
-import * as preludes from "./prelude"
+import type {Path} from "./sys.js"
+import {read, read_json, write, rename, file_exists, directory_exists, hash, hash_file} from "./sys.js"
+import {compile_files, read_tsconfig, parse_tsconfig, is_failed, compiler_host, report_diagnostics} from "./compiler.js"
+import {Linker} from "./linker.js"
+import {collect_styles, compile_styles, wrap_css_modules} from "./styles.js"
+import * as preludes from "./prelude.js"
 
-import * as tsconfig_json from "./tsconfig.ext.json"
+import tsconfig_json from "./tsconfig.ext.json" with {type: "json"}
 
 import chalk from "chalk"
 const {cyan, magenta, red} = chalk
@@ -123,9 +120,13 @@ export type InitOptions = {
 export async function init(base_dir: Path, _bokehjs_dir: Path, base_setup: InitOptions): Promise<boolean> {
   preamble(base_dir)
 
+  const to_npm_version = (v: string) => {
+    return v.replace(/\+.*$/, "").replace(/\.?(dev|rc|a|b)(\d*)$/, (_, p1, p2) => `-${p1}${p2 ? `.${p2}` : ""}`)
+  }
+
   const setup: Required<InitOptions> = {
     interactive: base_setup.interactive ?? false,
-    bokehjs_version: base_setup.bokehjs_version ?? base_setup.bokeh_version.split("-")[0],
+    bokehjs_version: base_setup.bokehjs_version ?? to_npm_version(base_setup.bokeh_version),
     bokeh_version: base_setup.bokeh_version,
   }
 
@@ -309,7 +310,6 @@ export async function build(base_dir: Path, bokehjs_dir: Path, base_setup: Build
   }
 
   const preconfigure: ts.CompilerOptions = {
-    baseUrl: base_dir,
     paths: {
       "@bokehjs/*": [
         join(bokehjs_dir, "js/lib/*"),
@@ -362,14 +362,13 @@ export async function build(base_dir: Path, bokehjs_dir: Path, base_setup: Build
 
   const {files} = tsconfig2
 
-  const transformers = default_transformers(options)
   const host = compiler_host(new Map(), options, tslib_dir)
 
   print(`Compiling TypeScript (${magenta(count_files(files))})`)
   if (setup.verbose) {
     print_files(files)
   }
-  const tsoutput = compile_files(files, options, transformers, host)
+  const tsoutput = compile_files(files, options, undefined, host)
 
   if (is_failed(tsoutput)) {
     print(report_diagnostics(tsoutput.diagnostics).text)
@@ -392,7 +391,7 @@ export async function build(base_dir: Path, bokehjs_dir: Path, base_setup: Build
     cache: join(dist_dir, `${artifact}.json`),
     excluded: (dep) => dep == "tslib" || dep.startsWith("@bokehjs/"),
     plugin: true,
-    target: "ES2020",
+    target: "ES2024",
   })
 
   print("Linking modules")

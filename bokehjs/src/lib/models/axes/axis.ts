@@ -4,12 +4,13 @@ import {TickFormatter} from "../formatters/tick_formatter"
 import type {DistanceMeasure} from "../policies/labeling"
 import {LabelingPolicy, AllLabels} from "../policies/labeling"
 import type {Range} from "../ranges/range"
+import {AxisClick} from "core/bokeh_events"
 import type * as visuals from "core/visuals"
 import * as mixins from "core/property_mixins"
 import type * as p from "core/properties"
 import type {HAlign, VAlign} from "core/enums"
-import {Align, Face, LabelOrientation} from "core/enums"
-import type {Size, Layoutable} from "core/layout"
+import {Align, Face, LabelOrientation, AxisLabelStandoffMode} from "core/enums"
+import type {Size} from "core/layout"
 import {Indices} from "core/types"
 import type {Orient, Normal, Dimension} from "core/layout/side_panel"
 import {SidePanel, SideLayout} from "core/layout/side_panel"
@@ -22,9 +23,9 @@ import type {Factor} from "models/ranges/factor_range"
 import {FactorRange} from "models/ranges/factor_range"
 import type {BaseTextView} from "../text/base_text"
 import {BaseText} from "../text/base_text"
-import type {IterViews} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import {build_view} from "core/build_views"
-import {unreachable} from "core/util/assert"
+import {logger} from "core/logging"
 import {isString} from "core/util/types"
 import {BBox} from "core/util/bbox"
 import {parse_delimited_string} from "models/text/utils"
@@ -53,17 +54,16 @@ export type TickCoords = {
   minor: Coords
 }
 
-export class AxisView extends GuideRendererView {
+export abstract class AxisView extends GuideRendererView {
   declare model: Axis
   declare visuals: Axis.Visuals
 
-  layout?: Layoutable
+  declare readonly RangeType: Range
 
-  private _panel: SidePanel
-  get panel(): SidePanel {
-    return this._panel
+  override get panel(): SidePanel {
+    return this._panel!
   }
-  set panel(panel: SidePanel) {
+  override set panel(panel: SidePanel) {
     this._panel = new SidePanel(panel.side, this.model.face)
   }
 
@@ -71,8 +71,9 @@ export class AxisView extends GuideRendererView {
   /*private*/ _major_label_views: Map<string | number, BaseTextView> = new Map()
 
   override get bbox(): BBox {
-    // TODO Fixed axes should not participate in layout at all.
-    if (this.layout != null && this.model.fixed_location == null) {
+    if (this.model.fixed_location != null) {
+      return new BBox()
+    } else if (this.layout != null) {
       return this.layout.bbox
     } else if (this.is_renderable) {
       const {extents} = this
@@ -100,12 +101,8 @@ export class AxisView extends GuideRendererView {
     }
   }
 
-  override *children(): IterViews {
-    yield* super.children()
-    if (this._axis_label_view != null) {
-      yield this._axis_label_view
-    }
-    yield* this._major_label_views.values()
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this._axis_label_view, ...this._major_label_views.values()]
   }
 
   override async lazy_initialize(): Promise<void> {
@@ -151,13 +148,28 @@ export class AxisView extends GuideRendererView {
 
   override get is_renderable(): boolean {
     const [range, cross_range] = this.ranges
-    return super.is_renderable && range.is_valid && cross_range.is_valid && range.span > 0 && cross_range.span > 0
+    return super.is_renderable && range.is_valid && cross_range.is_valid && range.span > 0 && cross_range.span > 0 && !isNaN(this.loc)
   }
 
-  protected _paint(): void {
-    const {tick_coords, extents} = this
-    const ctx = this.layer.ctx
+  protected abstract _hit_value(sx: number, sy: number): number | Factor | null
 
+  override interactive_hit(sx: number, sy: number): boolean {
+    return this.bbox.contains(sx, sy)
+  }
+
+  override on_hit(sx: number, sy: number): boolean {
+    const value = this._hit_value(sx, sy)
+
+    if (value != null) {
+      this.model.trigger_event(new AxisClick(this.model, value))
+      return true
+    }
+
+    return false
+  }
+
+  protected _paint(ctx: Context2d): void {
+    const {tick_coords, extents} = this
     this._draw_background(ctx, extents)
     this._draw_rule(ctx, extents)
     this._draw_major_ticks(ctx, extents, tick_coords)
@@ -184,6 +196,8 @@ export class AxisView extends GuideRendererView {
     })
 
     this.connect(this.model.change, () => this.plot_view.request_layout())
+    this.connect(this.model.ticker.change, () => this.plot_view.request_layout())
+    this.connect(this.model.formatter.change, () => this.plot_view.request_layout())
   }
 
   override get needs_clip(): boolean {
@@ -193,7 +207,7 @@ export class AxisView extends GuideRendererView {
   // drawing sub functions -----------------------------------------------------
 
   protected _draw_background(ctx: Context2d, _extents: Extents): void {
-    if (!this.visuals.background_fill.doit) {
+    if (!this.visuals.background_fill.doit && !this.visuals.background_hatch.doit) {
       return
     }
 
@@ -201,6 +215,7 @@ export class AxisView extends GuideRendererView {
     const {x, y, width, height} = this.bbox
     ctx.rect(x, y, width, height)
     this.visuals.background_fill.apply(ctx)
+    this.visuals.background_hatch.apply(ctx)
   }
 
   protected _draw_rule(ctx: Context2d, _extents: Extents): void {
@@ -258,7 +273,15 @@ export class AxisView extends GuideRendererView {
 
     const size = axis_label_graphics.size()
     const extent = this.dimension == 0 ? size.height : size.width
-    const standoff = this.model.axis_label_standoff
+    const standoff_offset = (() => {
+      switch (this.model.axis_label_standoff_mode) {
+        case "tick_labels":
+          return 0
+        case "axis":
+          return sum(this._tick_label_extents()) + this._tick_extent()
+      }
+    })()
+    const standoff = this.model.axis_label_standoff - standoff_offset
 
     return extent > 0 ? standoff + extent + padding : 0
   }
@@ -304,7 +327,16 @@ export class AxisView extends GuideRendererView {
 
     const [nx, ny] = this.normals
     const orient = this.model.axis_label_orientation
-    const standoff = extents.tick + extents.tick_label + this.model.axis_label_standoff
+    const standoff_mode = this.model.axis_label_standoff_mode
+    const standoff_offset = (() => {
+      switch (standoff_mode) {
+        case "tick_labels":
+          return extents.tick + extents.tick_label
+        case "axis":
+          return 0
+      }
+    })()
+    const standoff = this.model.axis_label_standoff + standoff_offset
     const {vertical_align, align} = this.panel.get_label_text_heuristics(orient)
 
     const position = {
@@ -332,10 +364,9 @@ export class AxisView extends GuideRendererView {
 
     const [sxs, sys]   = this.scoords(coords)
     const [nx, ny]     = this.normals
-    const [xoff, yoff] = this.offsets
 
-    const [nxin,  nyin]  = [nx * (xoff-tin),  ny * (yoff-tin)]
-    const [nxout, nyout] = [nx * (xoff+tout), ny * (yoff+tout)]
+    const [nxin,  nyin]  = [nx * -tin, ny * -tin]
+    const [nxout, nyout] = [nx * tout, ny * tout]
 
     visuals.set_value(ctx)
 
@@ -360,12 +391,11 @@ export class AxisView extends GuideRendererView {
     }
 
     const [sxs, sys] = this.scoords(coords)
-    const [xoff, yoff] = this.offsets
 
     const [nx, ny] = this.normals
 
-    const nxd = nx*(xoff + standoff)
-    const nyd = ny*(yoff + standoff)
+    const nxd = nx*standoff
+    const nyd = ny*standoff
 
     const {vertical_align, align} = this.panel.get_label_text_heuristics(orient)
     const angle = this.panel.get_label_angle_heuristic(orient)
@@ -406,7 +436,7 @@ export class AxisView extends GuideRendererView {
     const {major_label_policy} = this.model
     const selected = major_label_policy.filter(indices, bboxes, dist)
 
-    const ids = [...selected.ones()]
+    const ids = [...selected]
     if (ids.length != 0) {
       const cbox = this.canvas.bbox
 
@@ -557,12 +587,7 @@ export class AxisView extends GuideRendererView {
     }
   }
 
-  // TODO Remove this.
-  get offsets(): [number, number] {
-    return [0, 0]
-  }
-
-  get ranges(): [Range, Range] {
+  get ranges(): [typeof this["RangeType"], typeof this["RangeType"]] {
     const i = this.dimension
     const j = 1 - i
     const {ranges} = this.coordinates
@@ -671,6 +696,7 @@ export class AxisView extends GuideRendererView {
     }
   }
 
+  private _warned_bad_loc = false
   get loc(): number {
     const {fixed_location} = this.model
     if (fixed_location != null) {
@@ -683,7 +709,11 @@ export class AxisView extends GuideRendererView {
         return cross_range.synthetic(fixed_location)
       }
 
-      unreachable()
+      if (!this._warned_bad_loc) {
+        this._warned_bad_loc = true
+        logger.warn("cannot determine location of axis based on its fixed_location")
+      }
+      return NaN
     }
 
     const [, cross_range] = this.ranges
@@ -703,16 +733,6 @@ export class AxisView extends GuideRendererView {
   }
 
   // }}}
-
-  override remove(): void {
-    this._axis_label_view?.remove()
-
-    for (const label_view of this._major_label_views.values()) {
-      label_view.remove()
-    }
-
-    super.remove()
-  }
 
   override has_finished(): boolean {
     if (!super.has_finished()) {
@@ -746,6 +766,7 @@ export namespace Axis {
     formatter: p.Property<TickFormatter>
     axis_label: p.Property<string | BaseText | null>
     axis_label_standoff: p.Property<number>
+    axis_label_standoff_mode: p.Property<AxisLabelStandoffMode>
     axis_label_orientation: p.Property<LabelOrientation | number>
     axis_label_align: p.Property<Align>
     major_label_standoff: p.Property<number>
@@ -765,7 +786,8 @@ export namespace Axis {
     mixins.MinorTickLine  &
     mixins.MajorLabelText &
     mixins.AxisLabelText  &
-    mixins.BackgroundFill
+    mixins.BackgroundFill &
+    mixins.BackgroundHatch
 
   export type Visuals = GuideRenderer.Visuals & {
     axis_line: visuals.Line
@@ -774,12 +796,13 @@ export namespace Axis {
     major_label_text: visuals.Text
     axis_label_text: visuals.Text
     background_fill: visuals.Fill
+    background_hatch: visuals.Hatch
   }
 }
 
 export interface Axis extends Axis.Attrs {}
 
-export class Axis extends GuideRenderer {
+export abstract class Axis extends GuideRenderer {
   declare properties: Axis.Props
   declare __view_type__: AxisView
 
@@ -788,8 +811,6 @@ export class Axis extends GuideRenderer {
   }
 
   static {
-    this.prototype.default_view = AxisView
-
     this.mixins<Axis.Mixins>([
       ["axis_",        mixins.Line],
       ["major_tick_",  mixins.Line],
@@ -797,27 +818,29 @@ export class Axis extends GuideRenderer {
       ["major_label_", mixins.Text],
       ["axis_label_",  mixins.Text],
       ["background_",  mixins.Fill],
+      ["background_",  mixins.Hatch],
     ])
 
     this.define<Axis.Props>(({Any, Int, Float, Str, Ref, Tuple, Or, Nullable, Auto, Enum}) => ({
-      dimension:               [ Or(Enum(0, 1), Auto), "auto" ],
-      face:                    [ Or(Face, Auto), "auto" ],
-      bounds:                  [ Or(Tuple(Float, Float), Auto), "auto" ],
-      ticker:                  [ Ref(Ticker) ],
-      formatter:               [ Ref(TickFormatter) ],
-      axis_label:              [ Nullable(Or(Str, Ref(BaseText))), null],
-      axis_label_standoff:     [ Int, 5 ],
-      axis_label_orientation:  [ Or(LabelOrientation, Float), "parallel" ],
-      axis_label_align:        [ Align, "center" ],
-      major_label_standoff:    [ Int, 5 ],
-      major_label_orientation: [ Or(LabelOrientation, Float), "horizontal" ],
-      major_label_overrides:   [ LabelOverrides, new Map() ],
-      major_label_policy:      [ Ref(LabelingPolicy), () => new AllLabels() ],
-      major_tick_in:           [ Float, 2 ],
-      major_tick_out:          [ Float, 6 ],
-      minor_tick_in:           [ Float, 0 ],
-      minor_tick_out:          [ Float, 4 ],
-      fixed_location:          [ Nullable(Or(Float, Any)), null ],
+      dimension:                [ Or(Enum(0, 1), Auto), "auto" ],
+      face:                     [ Or(Face, Auto), "auto" ],
+      bounds:                   [ Or(Tuple(Float, Float), Auto), "auto" ],
+      ticker:                   [ Ref(Ticker) ],
+      formatter:                [ Ref(TickFormatter) ],
+      axis_label:               [ Nullable(Or(Str, Ref(BaseText))), null],
+      axis_label_standoff:      [ Int, 5 ],
+      axis_label_standoff_mode: [ AxisLabelStandoffMode, "tick_labels"],
+      axis_label_orientation:   [ Or(LabelOrientation, Float), "parallel" ],
+      axis_label_align:         [ Align, "center" ],
+      major_label_standoff:     [ Int, 5 ],
+      major_label_orientation:  [ Or(LabelOrientation, Float), "horizontal" ],
+      major_label_overrides:    [ LabelOverrides, new Map() ],
+      major_label_policy:       [ Ref(LabelingPolicy), () => new AllLabels() ],
+      major_tick_in:            [ Float, 2 ],
+      major_tick_out:           [ Float, 6 ],
+      minor_tick_in:            [ Float, 0 ],
+      minor_tick_out:           [ Float, 4 ],
+      fixed_location:           [ Nullable(Or(Float, Any)), null ],
     }))
 
     this.override<Axis.Props>({

@@ -13,6 +13,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false, reportArgumentType=false, reportAssignmentType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -22,6 +24,7 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 from math import inf
+from typing import Any
 
 # Bokeh imports
 from ...core.enums import (
@@ -30,23 +33,18 @@ from ...core.enums import (
     Movable,
     Resizable,
 )
-from ...core.properties import (
-    Bool,
-    CoordinateLike,
-    Enum,
-    Float,
-    Include,
-    Instance,
-    InstanceDefault,
-    NonNegative,
-    Null,
-    Nullable,
-    Override,
-    Positive,
-    Seq,
-    UnitsSpec,
-    field,
-)
+from ...core.property.aliases import CoordinateLike
+from ...core.property.container import Seq
+from ...core.property.dataspec import UnitsSpec
+from ...core.property.enum import Enum
+from ...core.property.include import Include
+from ...core.property.instance import Instance, InstanceDefault
+from ...core.property.nullable import Nullable
+from ...core.property.numeric import NonNegative, Positive
+from ...core.property.override import Override
+from ...core.property.primitive import Bool, Float, Null
+from ...core.property.required import Required
+from ...core.property.vectorization import field
 from ...core.property_aliases import BorderRadius
 from ...core.property_mixins import (
     LineProps,
@@ -54,6 +52,7 @@ from ...core.property_mixins import (
     ScalarHatchProps,
     ScalarLineProps,
 )
+from ...model import Model
 from ..common.properties import Coordinate
 from ..nodes import BoxNodes, Node
 from .annotation import Annotation, DataAnnotation
@@ -66,6 +65,7 @@ from .arrows import ArrowHead, TeeHead
 __all__ = (
     "Band",
     "BoxAnnotation",
+    "BoxInteractionHandles",
     "PolyAnnotation",
     "Slope",
     "Span",
@@ -76,7 +76,77 @@ __all__ = (
 # General API
 #-----------------------------------------------------------------------------
 
-class BoxAnnotation(Annotation):
+class AreaVisuals(Model):
+    """ Allows to style line, fill and hatch visuals. """
+
+    # explicit __init__ to support Init signatures
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+    line_props = Include(ScalarLineProps, help="""
+    The {prop} values for the box.
+    """)
+
+    fill_props = Include(ScalarFillProps, help="""
+    The {prop} values for the box.
+    """)
+
+    hatch_props = Include(ScalarHatchProps, help="""
+    The {prop} values for the box.
+    """)
+
+    hover_line_props = Include(ScalarLineProps, prefix="hover", help="""
+    The {prop} values for the box when hovering over.
+    """)
+
+    hover_fill_props = Include(ScalarFillProps, prefix="hover", help="""
+    The {prop} values for the box when hovering over.
+    """)
+
+    hover_hatch_props = Include(ScalarHatchProps, prefix="hover", help="""
+    The {prop} values for the box when hovering over.
+    """)
+
+class BoxInteractionHandles(Model):
+    """ Defines interaction handles for box-like annotations.
+
+    """
+
+    # explicit __init__ to support Init signatures
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+    all          = Required(Instance(AreaVisuals)) # move, resize
+
+    move         = Nullable(Instance(AreaVisuals))
+    resize       = Nullable(Instance(AreaVisuals)) # sides, corners
+
+    sides        = Nullable(Instance(AreaVisuals)) # left, right, top, bottom
+    corners      = Nullable(Instance(AreaVisuals)) # top_left, top_right, bottom_left, bottom_right
+
+    left         = Nullable(Instance(AreaVisuals))
+    right        = Nullable(Instance(AreaVisuals))
+    top          = Nullable(Instance(AreaVisuals))
+    bottom       = Nullable(Instance(AreaVisuals))
+
+    top_left     = Nullable(Instance(AreaVisuals))
+    top_right    = Nullable(Instance(AreaVisuals))
+    bottom_left  = Nullable(Instance(AreaVisuals))
+    bottom_right = Nullable(Instance(AreaVisuals))
+
+DEFAULT_BOX_ANNOTATION_HANDLES = lambda: \
+    BoxInteractionHandles(
+        all=AreaVisuals(
+            fill_color="white",
+            fill_alpha=1.0,
+            line_color="black",
+            line_alpha=1.0,
+            hover_fill_color="lightgray",
+            hover_fill_alpha=1.0,
+        ),
+    )
+
+class BoxAnnotation(Annotation, AreaVisuals):
     ''' Render a shaded rectangular region as an annotation.
 
     See :ref:`ug_basic_annotations_box_annotations` for information on plotting box annotations.
@@ -84,7 +154,7 @@ class BoxAnnotation(Annotation):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     left = Coordinate(default=lambda: Node.frame.left, help="""
@@ -152,7 +222,7 @@ class BoxAnnotation(Annotation):
     """)
 
     min_width = NonNegative(Float, default=0, help="""
-    Allows to set the minium width of the box.
+    Allows to set the minimum width of the box.
 
     .. note::
         This property is experimental and may change at any point.
@@ -166,7 +236,7 @@ class BoxAnnotation(Annotation):
     """)
 
     max_width = Positive(Float, default=inf, help="""
-    Allows to set the minium height of the box.
+    Allows to set the minimum height of the box.
 
     .. note::
         This property is experimental and may change at any point.
@@ -217,34 +287,35 @@ class BoxAnnotation(Annotation):
         This property is experimental and may change at any point.
     """)
 
+    use_handles = Bool(default=False, help="""
+    Whether to show interaction (move, resize, etc.) handles.
+
+    If handles aren't used, then the whole annotation, its borders and corners
+    act as if they were interaction handles.
+
+    .. note::
+        This property is experimental and may change at any point.
+    """)
+
+    handles = Instance(BoxInteractionHandles, default=DEFAULT_BOX_ANNOTATION_HANDLES, help="""
+    Configure appearance of interaction handles.
+
+    Handles can be configured in bulk in an increasing level of specificity,
+    were each level, if defined, overrides the more generic setting:
+
+    - `all`     -> `move`, `resize`
+    - `resize`  -> `sides`, `corners`
+    - `sides`   -> `left`, `right`, `top`, `bottom`
+    - `corners` -> `top_left`, `top_right`, `bottom_left`, `bottom_right`
+
+    .. note::
+        This property is experimental and may change at any point.
+    """).accepts(Instance(AreaVisuals), lambda obj: BoxInteractionHandles(all=obj))
+
     inverted = Bool(default=False, help="""
     Inverts the geometry of the box, i.e. applies fill and hatch visuals
     to the outside of the box instead of the inside. Visuals are applied
     between the box and its parent, e.g. the frame.
-    """)
-
-    line_props = Include(ScalarLineProps, help="""
-    The {prop} values for the box.
-    """)
-
-    fill_props = Include(ScalarFillProps, help="""
-    The {prop} values for the box.
-    """)
-
-    hatch_props = Include(ScalarHatchProps, help="""
-    The {prop} values for the box.
-    """)
-
-    hover_line_props = Include(ScalarLineProps, prefix="hover", help="""
-    The {prop} values for the box when hovering over.
-    """)
-
-    hover_fill_props = Include(ScalarFillProps, prefix="hover", help="""
-    The {prop} values for the box when hovering over.
-    """)
-
-    hover_hatch_props = Include(ScalarHatchProps, prefix="hover", help="""
-    The {prop} values for the box when hovering over.
     """)
 
     line_color = Override(default="#cccccc")
@@ -271,7 +342,7 @@ class Band(DataAnnotation):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     lower = UnitsSpec(default=field("lower"), units_enum=CoordinateUnits, units_default="data", help="""
@@ -303,6 +374,10 @@ class Band(DataAnnotation):
     The {prop} values for the band.
     """)
 
+    hatch_props = Include(ScalarHatchProps, help="""
+    The {prop} values for the band.
+    """)
+
     fill_alpha = Override(default=0.4)
 
     fill_color = Override(default="#fff9ba")
@@ -317,7 +392,7 @@ class PolyAnnotation(Annotation):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     xs = Seq(CoordinateLike, default=[], help="""
@@ -389,7 +464,7 @@ class Slope(Annotation):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     gradient = Nullable(Float, help="""
@@ -434,7 +509,7 @@ class Span(Annotation):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     location = Nullable(CoordinateLike, help="""
@@ -477,7 +552,7 @@ class Whisker(DataAnnotation):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     lower = UnitsSpec(default=field("lower"), units_enum=CoordinateUnits, units_default="data", help="""

@@ -13,6 +13,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAttributeAccessIssue=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -24,31 +26,27 @@ log = logging.getLogger(__name__)
 import json
 import os
 import urllib
+from collections.abc import Sequence
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
     Literal,
     Protocol,
-    TypeAlias,
     TypedDict,
     cast,
     overload,
 )
 from uuid import uuid4
 
-## External imports
+# Bokeh imports
+from ..util.serialization import make_id
+
 if TYPE_CHECKING:
     from ipykernel.comm import Comm
 
-# Bokeh imports
-from ..core.types import ID
-from ..util.serialization import make_id
-from ..util.warnings import warn
-from .state import curstate
-
-if TYPE_CHECKING:
     from ..application.application import Application
+    from ..core.types import ID
     from ..document.document import Document
     from ..document.events import (
         ColumnDataChangedEvent,
@@ -59,6 +57,7 @@ if TYPE_CHECKING:
     )
     from ..embed.bundle import Bundle
     from ..model import Model
+    from ..models.ui import UIElement
     from ..resources import Resources
     from .state import State
 
@@ -94,7 +93,7 @@ __all__ = (
 # General API
 #-----------------------------------------------------------------------------
 
-NotebookType = Literal["jupyter", "zeppelin"]
+type NotebookType = Literal["jupyter", "zeppelin"]
 
 class CommsHandle:
     '''
@@ -295,7 +294,7 @@ def push_notebook(*, document: Document | None = None, state: State | None = Non
             output_notebook()
 
             plot = figure()
-            plot.circle([1,2,3], [4,6,5])
+            plot.scatter([1,2,3], [4,6,5])
 
             handle = show(plot, notebook_handle=True)
 
@@ -305,6 +304,7 @@ def push_notebook(*, document: Document | None = None, state: State | None = Non
 
     '''
     from ..protocol import Protocol as BokehProtocol
+    from .state import curstate
 
     if state is None:
         state = curstate()
@@ -313,6 +313,8 @@ def push_notebook(*, document: Document | None = None, state: State | None = Non
         document = state.document
 
     if not document:
+        from ..util.warnings import warn
+
         warn("No document to push")
         return
 
@@ -320,6 +322,8 @@ def push_notebook(*, document: Document | None = None, state: State | None = Non
         handle = state.last_comms_handle
 
     if not handle:
+        from ..util.warnings import warn
+
         warn("Cannot find a last shown plot to update. Call output_notebook() and show(..., notebook_handle=True) before push_notebook()")
         return
 
@@ -379,6 +383,8 @@ def destroy_server(server_id: ID) -> None:
     notebook, destroy the corresponding server sessions and stop it.
 
     '''
+    from .state import curstate
+
     server = curstate().uuid_to_server.get(server_id, None)
     if server is None:
         log.debug(f"No server instance found for uuid: {server_id!r}")
@@ -504,14 +510,14 @@ def publish_display_data(data: dict[str, Any], metadata: dict[Any, Any] | None =
     publish_display_data(data, metadata, transient=transient, **kwargs)
 
 
-ProxyUrlFunc: TypeAlias = Callable[[int | None], str]
+type ProxyUrlFunc = Callable[[int | None], str]
 
 def show_app(
-        app: Application,
-        state: State,
-        notebook_url: str | ProxyUrlFunc = DEFAULT_JUPYTER_URL,
-        port: int = 0,
-        **kw: Any,
+    app: Application,
+    state: State,
+    notebook_url: str | ProxyUrlFunc = DEFAULT_JUPYTER_URL,
+    port: int = 0,
+    **kw: Any,
 ) -> None:
     ''' Embed a Bokeh server application in a Jupyter Notebook output cell.
 
@@ -554,7 +560,9 @@ def show_app(
 
     from tornado.ioloop import IOLoop
 
+    from ..core.types import ID
     from ..server.server import Server
+    from .state import curstate
 
     loop = IOLoop.current()
 
@@ -591,14 +599,22 @@ def show_app(
     })
 
 @overload
-def show_doc(obj: Model, state: State) -> None: ...
+def show_doc(obj: Model | Sequence[UIElement], state: State) -> None: ...
 @overload
-def show_doc(obj: Model, state: State, notebook_handle: CommsHandle) -> CommsHandle: ...
+def show_doc(obj: Model | Sequence[UIElement], state: State, notebook_handle: CommsHandle) -> CommsHandle: ...
 
-def show_doc(obj: Model, state: State, notebook_handle: CommsHandle | None = None) -> CommsHandle | None:
+def show_doc(obj: Model | Sequence[UIElement], state: State, notebook_handle: CommsHandle | None = None) -> CommsHandle | None:
     '''
 
     '''
+    # Notebook output only supports a single document root, but ``show`` accepts
+    # a sequence of UIElements (which file and server output render directly).
+    # Wrap such a sequence in a column layout here so the same call works in all
+    # output modes instead of raising an opaque error. See issue #14861.
+    if isinstance(obj, Sequence):
+        from ..layouts import column
+        obj = column(*obj)
+
     if obj not in state.document.roots:
         state.document.add_root(obj)
 

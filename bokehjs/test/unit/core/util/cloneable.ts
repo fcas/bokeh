@@ -1,4 +1,4 @@
-import {expect} from "assertions"
+import {expect} from "#framework/assertions"
 
 import type {Cloneable, CloneableType} from "@bokehjs/core/util/cloneable"
 import {Cloner, clone} from "@bokehjs/core/util/cloneable"
@@ -44,6 +44,14 @@ describe("core/util/cloneable module", () => {
 
     it("that supports strings", () => {
       const v0 = "abc"
+      const r0 = copy(v0)
+
+      expect(r0).to.be.equal(v0)
+      expect(r0).to.be.identical(v0)
+    })
+
+    it("that supports functions", () => {
+      const v0 = (a: number) => a + 1
       const r0 = copy(v0)
 
       expect(r0).to.be.equal(v0)

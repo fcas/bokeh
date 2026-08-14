@@ -39,8 +39,6 @@ from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop
 from tornado.wsgi import WSGIContainer
 
-from bokeh.util.tornado import fixup_windows_event_loop_policy
-
 IOLOOP = None
 HOST = "localhost"
 PORT = 5009
@@ -55,13 +53,15 @@ def root():
     return redirect("en/latest/index.html")
 
 
-@app.route("/switcher.json")
+@app.route("/en/switcher.json")
 def switcher():
-    return flask.send_from_directory(SPHINX_TOP / "build" / "html" / "_static", "switcher.json")
+    return flask.send_from_directory(SPHINX_TOP, "switcher.json")
 
 
 @app.route("/en/latest/<path:filename>")
 def docs(filename):
+    if filename.endswith("/"):
+        filename += "index.html"
     return flask.send_from_directory(SPHINX_TOP / "build" / "html", filename)
 
 
@@ -78,8 +78,6 @@ def serve_http():
 
 
 if __name__ == "__main__":
-    fixup_windows_event_loop_policy()
-
     print(f"\nStarting Bokeh plot server on port {PORT}...")
     print(f"Visit {VISIT_URL} to see plots\n")
 
@@ -92,7 +90,7 @@ if __name__ == "__main__":
     browser.start()
 
     try:
-        input("Press <ENTER> to exit...\n")  # lgtm [py/use-of-input]
+        input("Press <ENTER> to exit...\n")
     except KeyboardInterrupt:
         pass
 

@@ -1,19 +1,24 @@
 import {ActionTool, ActionToolView} from "./action_tool"
+import {MenuItem} from "../../ui/menus"
+import type {MenuItemLike} from "../../ui/menus"
 import type * as p from "core/properties"
-import {tool_icon_save} from "styles/icons.css"
-import type {MenuItem} from "core/util/menus"
+import * as icons from "styles/icons.css"
 
 export class SaveToolView extends ActionToolView {
   declare model: SaveTool
 
+  protected async _export(): Promise<Blob> {
+    return this.parent.export().to_blob()
+  }
+
   async copy(): Promise<void> {
-    const blob = await this.parent.export().to_blob()
+    const blob = await this._export()
     const item = new ClipboardItem({[blob.type]: blob})
     await navigator.clipboard.write([item])
   }
 
   async save(name: string): Promise<void> {
-    const blob = await this.parent.export().to_blob()
+    const blob = await this._export()
     const link = document.createElement("a")
     link.href = URL.createObjectURL(blob)
     link.download = name // + ".png" | "svg" (inferred from MIME type)
@@ -21,7 +26,13 @@ export class SaveToolView extends ActionToolView {
     link.dispatchEvent(new MouseEvent("click"))
   }
 
-  doit(action: "save" | "copy" = "save"): void {
+  async open(): Promise<void> {
+    const blob = await this._export()
+    const url = URL.createObjectURL(blob)
+    open(url)
+  }
+
+  doit(action: "save" | "copy" | "open" = "save"): void {
     switch (action) {
       case "save": {
         const filename = this.model.filename ?? prompt("Enter filename", "bokeh_plot")
@@ -32,6 +43,10 @@ export class SaveToolView extends ActionToolView {
       }
       case "copy": {
         void this.copy()
+        break
+      }
+      case "open": {
+        void this.open()
         break
       }
     }
@@ -67,18 +82,35 @@ export class SaveTool extends ActionTool {
   }
 
   override tool_name = "Save"
-  override tool_icon = tool_icon_save
+  override tool_icon = icons.tool_icon_save
 
-  override get menu(): MenuItem[] | null {
+  override get menu(): MenuItemLike[] {
     return [
-      {
-        icon: "bk-tool-icon-copy",
+      new MenuItem({
+        icon: `.${icons.tool_icon_save}`,
+        label: "Save",
+        tooltip: "Save image as a local file",
+        action: () => {
+          this.do.emit("save")
+        },
+      }),
+      new MenuItem({
+        icon: `.${icons.tool_icon_copy}`,
+        label: "Copy",
         tooltip: "Copy image to clipboard",
-        if: () => typeof ClipboardItem !== "undefined",
-        handler: () => {
+        disabled: () => typeof ClipboardItem === "undefined",
+        action: () => {
           this.do.emit("copy")
         },
-      },
+      }),
+      new MenuItem({
+        icon: `.${icons.tool_icon_open}`,
+        label: "Open",
+        tooltip: "Open image in a new tab",
+        action: () => {
+          this.do.emit("open")
+        },
+      }),
     ]
   }
 }

@@ -1,7 +1,7 @@
-import {describe, it} from "../framework"
-export * from "../framework"
+export * from "#framework/framework"
+import {describe, it} from "#framework/framework"
 
-import {ExpectationError} from "../unit/assertions"
+import {ExpectationError} from "#framework/assertions"
 
 import {HasProps} from "@bokehjs/core/has_props"
 import {unset} from "@bokehjs/core/properties"
@@ -10,6 +10,7 @@ import {values, entries, dict} from "@bokehjs/core/util/object"
 import {is_equal} from "@bokehjs/core/util/eq"
 import {to_string} from "@bokehjs/core/util/pretty"
 import {Serializer} from "@bokehjs/core/serialization"
+import {unique_id} from "@bokehjs/core/util/string"
 
 import {default_resolver} from "@bokehjs/base"
 import {settings} from "@bokehjs/core/settings"
@@ -123,7 +124,7 @@ function check_matching_defaults(context: string[], name: string, python_default
   for (const [k, js_v] of entries(bokehjs_defaults)) {
     console.log(`${context.join(" -> ")} ${name}.${k}`)
 
-    // node_renderer/edge_renderer are configured dynamicaly in bokehjs
+    // node_renderer/edge_renderer are configured dynamically in bokehjs
     if (name == "GraphRenderer" && (k == "node_renderer" || k == "edge_renderer")) {
       continue
     }
@@ -175,33 +176,66 @@ function check_matching_defaults(context: string[], name: string, python_default
       }
 
       if (!is_equal(py_v, js_v)) {
-        // compare arrays of objects
-        if (isArray(js_v) && isArray(py_v)) {
+        function compare_recursively(js_v: unknown, py_v: unknown): boolean {
           let equal = true
 
-          if (js_v.length != py_v.length) {
-            equal = false
-          } else {
-            for (let i = 0; i < js_v.length; i++) {
-              const js_vi = js_v[i]
-              const py_vi = py_v[i]
+          if (isArray(js_v) && isArray(py_v)) {
+            if (js_v.length != py_v.length) {
+              equal = false
+            } else {
+              for (let i = 0; i < js_v.length; i++) {
+                const js_vi = js_v[i]
+                const py_vi = py_v[i]
 
-              if (is_object(js_vi) && is_object(py_vi) && js_vi.name == py_vi.name) {
-                const py_attrs = {...get_defaults(py_vi.name), ...py_vi.attributes}
-                if (!check_matching_defaults([...context, `${name}.${k}[${i}]`], js_vi.name, py_attrs, js_vi.attributes)) {
+                if (is_object(js_vi) && is_object(py_vi) && js_vi.name == py_vi.name) {
+                  const py_attrs = {...get_defaults(py_vi.name), ...py_vi.attributes}
+                  if (!check_matching_defaults([...context, `${name}.${k}[${i}]`], js_vi.name, py_attrs, js_vi.attributes)) {
+                    equal = false
+                    break
+                  }
+                } else if ((isArray(js_vi) && isArray(py_vi)) || (isPlainObject(js_vi) && isPlainObject(py_vi))) {
+                  equal = compare_recursively(js_vi, py_vi)
+                } else if (!is_equal(js_vi, py_vi)) {
                   equal = false
                   break
                 }
-              } else if (!is_equal(js_vi, py_vi)) {
-                equal = false
-                break
               }
             }
+          } else if (isPlainObject(js_v) && isPlainObject(py_v)) {
+            const js_d = dict(js_v)
+            const py_d = dict(py_v)
+
+            if (!is_equal(new Set(js_d.keys()), new Set(py_d.keys()))) { // TODO can't compare objects of type [object Generator]
+              equal = false
+            } else {
+              for (const key of js_d.keys()) {
+                const js_vi = js_v[key]
+                const py_vi = py_v[key]
+
+                if (is_object(js_vi) && is_object(py_vi) && js_vi.name == py_vi.name) {
+                  const py_attrs = {...get_defaults(py_vi.name), ...py_vi.attributes}
+                  if (!check_matching_defaults([...context, `${name}.${k}[${key}]`], js_vi.name, py_attrs, js_vi.attributes)) {
+                    equal = false
+                    break
+                  }
+                } else if ((isArray(js_vi) && isArray(py_vi)) || (isPlainObject(js_vi) && isPlainObject(py_vi))) {
+                  equal = compare_recursively(js_vi, py_vi)
+                } else if (!is_equal(js_vi, py_vi)) {
+                  equal = false
+                  break
+                }
+              }
+            }
+          } else {
+            equal = false
           }
 
-          if (equal) {
-            continue
-          }
+          return equal
+        }
+
+        const equal = compare_recursively(js_v, py_v)
+        if (equal) {
+          continue
         }
 
         different.push(`${[...context, `${name}.${k}`].join(" -> ")}: bokehjs defaults to ${to_string(js_v)} but python defaults to ${to_string(py_v)}`)
@@ -251,6 +285,7 @@ function diff<T>(a: Set<T>, b: Set<T>): Set<T> {
 describe("Defaults", () => {
   const internal_models = new Set([
     "Canvas",
+    "CanvasPanel",
     "CartesianFrame",
     "CenterRotatable",
     "ClickButton",
@@ -297,7 +332,13 @@ describe("Defaults", () => {
 
     fn(`bokehjs should implement serializable ${name} model and match defaults with bokeh`, () => {
       const model = default_resolver.get(name)
-      const obj: HasProps = new (model as any)() // TODO: instantiating a possibly abstract class?
+
+      // This will initialize abstract classes, which can lead to errors.
+      // However, given this is only partial initialization, i.e. we
+      // don't finalize instances or connect signals, then any code that
+      // may depend on fully initialized state will not run.
+      const obj: HasProps = new (model as any)({id: unique_id()})
+      obj.initialize_props({})
 
       const serializer = new DefaultsSerializer()
       const defaults = serializer.encode(obj)

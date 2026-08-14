@@ -1,8 +1,13 @@
 import sinon from "sinon"
 
-import {expect, expect_instanceof, expect_not_null} from "assertions"
-import {display, fig, restorable} from "./_util"
-import {PlotActions, actions, xy, line, tap, mouse_click} from "../interactive"
+import {expect, expect_instanceof, expect_not_null} from "#framework/assertions"
+import {display, fig} from "#framework/layouts"
+import {restorable} from "#framework/util"
+import {PlotActions, actions, xy, line, tap, mouse_click, scroll_up, scroll_down} from "#framework/interactive"
+import {convert_to_uint32_palette} from "@bokehjs/models/mappers/color_mapper"
+import type {PlotView} from "@bokehjs/models/plots/plot"
+import type {ViewOf} from "@bokehjs/core/build_views"
+import {build_view} from "@bokehjs/core/build_views"
 
 import {
   AllIndices,
@@ -11,34 +16,43 @@ import {
   BoxEditTool,
   BoxSelectTool,
   CDSView,
+  Canvas,
   CategoricalColorMapper,
-  Circle,
+  ColorBar,
   Column,
   ColumnDataSource,
   CopyTool,
   CustomJS,
   DataRange1d,
+  EqHistColorMapper,
+  FactorRange,
   GlyphRenderer,
   HoverTool,
+  Image,
   IndexFilter,
   Legend,
   LegendItem,
   Line,
   LinearColorMapper,
+  LogColorMapper,
   Node,
+  PanTool,
   Pane,
+  Patches,
   Plot,
   Range1d,
   RangeTool,
   Rect,
   Row,
   Scatter,
+  Spacer,
   TablerIcon,
   TapTool,
   TileRenderer,
   Title,
   Toolbar,
   WMTSTileSource,
+  WheelZoomTool,
 } from "@bokehjs/models"
 
 import {
@@ -50,17 +64,18 @@ import {
 
 import {
   Button,
+  CategoricalSlider,
 } from "@bokehjs/models/widgets"
 
 import {version} from "@bokehjs/version"
 import {Model} from "@bokehjs/model"
 import * as p from "@bokehjs/core/properties"
 import {is_equal} from "@bokehjs/core/util/eq"
-import {linspace} from "@bokehjs/core/util/array"
+import {linspace, logspace, range} from "@bokehjs/core/util/array"
 import {keys} from "@bokehjs/core/util/object"
 import {ndarray} from "@bokehjs/core/util/ndarray"
 import {BitSet} from "@bokehjs/core/util/bitset"
-import {base64_to_buffer} from "@bokehjs/core/util/buffer"
+import {b64decode} from "@bokehjs/core/util/buffer"
 import type {XY} from "@bokehjs/core/util/bbox"
 import {div} from "@bokehjs/core/dom"
 import type {Color, Arrayable} from "@bokehjs/core/types"
@@ -68,13 +83,15 @@ import type {DocJson, DocumentEvent} from "@bokehjs/document"
 import {Document, ModelChangedEvent, MessageSentEvent} from "@bokehjs/document"
 import {DocumentReady, RangesUpdate} from "@bokehjs/core/bokeh_events"
 import {gridplot} from "@bokehjs/api/gridplot"
-import {Spectral11, Viridis256} from "@bokehjs/api/palettes"
+import {Spectral11, Spectral6, Viridis11, Viridis256} from "@bokehjs/api/palettes"
 import {defer, paint, poll} from "@bokehjs/core/util/defer"
 import type {Field} from "@bokehjs/core/vectorization"
+import type {AxisType, ToolName} from "@bokehjs/api/figure"
 
 import {UIElement, UIElementView} from "@bokehjs/models/ui/ui_element"
 import type {GlyphRendererView} from "@bokehjs/models/renderers/glyph_renderer"
 import {ImageURLView} from "@bokehjs/models/glyphs/image_url"
+import {ImageView} from "@bokehjs/models/glyphs/image"
 import {CopyToolView} from "@bokehjs/models/tools/actions/copy_tool"
 import {TableDataProvider, DataTable} from "@bokehjs/models/widgets/tables/data_table"
 import {TableColumn} from "@bokehjs/models/widgets/tables/table_column"
@@ -197,7 +214,7 @@ describe("Bug", () => {
     it("prevents initializing GlyphRenderer with an empty data source", async () => {
       const plot = fig([200, 200])
       const data_source = new ColumnDataSource({data: {}})
-      const glyph = new Circle({x: {field: "x_field"}, y: {field: "y_field"}})
+      const glyph = new Scatter({x: {field: "x_field"}, y: {field: "y_field"}})
       const renderer = new GlyphRenderer({data_source, glyph})
       plot.add_renderers(renderer)
       const {view} = await display(plot)
@@ -318,7 +335,7 @@ describe("Bug", () => {
                         type: "ndarray",
                         array: {
                           type: "bytes",
-                          data: "AAAAAAAAAACHROdKGFfWP4dE50oYV+Y/ZXMtOFLB8D+HROdKGFf2P6kVoV3e7Ps/ZXMtOFLBAED2W4pBNYwDQIdE50oYVwZAGC1EVPshCUA=",
+                          data: "H4sIAAAAAAACE2NggIB2l+deEuHX7CH0M/vUYl2LoIMfoPxv9itFF8bee/MbKs7g8C26y9G0h9kBIs/mIKHrEvJbkdMBAOE1l61QAAAA",
                         },
                         dtype: "float64",
                         order: "little",
@@ -328,7 +345,7 @@ describe("Bug", () => {
                         type: "ndarray",
                         array: {
                           type: "bytes",
-                          data: "AAAAAAAA8D+Mcwt+GjrGPxstUkL2Ee6/BAAAAAAA4L83UM+ib4PoPzpQz6Jvg+g/8v//////378eLVJC9hHuv3NzC34aOsY/AAAAAAAA8D8=",
+                          data: "H4sIAAAAAAACE2NgAIEP9j3F3HVSVsfspXWDnL4JvtvPAhZ/sN884Pyi/OYX9lZQ+tN/ELi/Xw6qrhiqjwFqDgAXT+ECUAAAAA==",
                         },
                         dtype: "float64",
                         order: "little",
@@ -338,7 +355,7 @@ describe("Bug", () => {
                         type: "ndarray",
                         array: {
                           type: "bytes",
-                          data: "AAAAAAAAAAAcFjxSt5HkPxccgYyLg+8/q0xY6Hq26z/4C4p0qOPVP/QLinSo49W/qExY6Hq2678YHIGMi4Pvvx8WPFK3keS/B1wUMyamsbw=",
+                          data: "H4sIAAAAAAACE2NggAAZMZug7ROf2IvLNPZ0N7+3X+0T8aJq22v7H9xdJSseX7X/AqH3r4CI75eAqNsvD9G3nz1GxFht2cY9ABjYpdhQAAAA",
                         },
                         dtype: "float64",
                         order: "little",
@@ -401,7 +418,7 @@ describe("Bug", () => {
           },
         }],
         title: "Bokeh Application",
-        version: "3.1.0",
+        version,
       }
 
       const events0: DocumentEvent[] = []
@@ -455,7 +472,7 @@ describe("Bug", () => {
       expect(render.callCount).to.be.equal(1)
       render.resetHistory()
 
-      const url = URL.createObjectURL(new Blob([base64_to_buffer(png)]))
+      const url = URL.createObjectURL(new Blob([b64decode(png)]))
       const p2 = fig([200, 200])
       p2.image_url([url], 0, 0, 10, 10)
       await display(p2)
@@ -706,9 +723,12 @@ describe("Bug", () => {
       const indices = BitSet.from_indices(6, [0, 1, 2, 3, 4, 5])
       const view = new CDSView({indices})
       const provider = new TableDataProvider(source, view)
-      const column = new TableColumn({field: "words"}).toColumn()
 
-      provider.sort([{sortCol: column, sortAsc: true}])
+      const table_column = new TableColumn({field: "words"})
+      const table_column_view = await build_view(table_column, {parent: null})
+      const column = table_column_view.toColumn()
+
+      provider.sort_data([{columnId: column.id, sortCol: column, sortAsc: true}])
       const records_asc = provider.getRecords()
       expect(records_asc).to.be.equal([
         {words: "met",   [DTINDEX_NAME]: 0},
@@ -719,7 +739,7 @@ describe("Bug", () => {
         {words: "no",    [DTINDEX_NAME]: 1},
       ])
 
-      provider.sort([{sortCol: column, sortAsc: false}])
+      provider.sort_data([{columnId: column.id, sortCol: column, sortAsc: false}])
       const records_dsc = provider.getRecords()
       expect(records_dsc).to.be.equal([
         {words: "no",    [DTINDEX_NAME]: 1},
@@ -863,6 +883,43 @@ describe("Bug", () => {
       expect(doc.to_json()).to.be.equal({
         version,
         title: "Bokeh Application",
+        config: {
+          type: "object",
+          name: "DocumentConfig",
+          id: doc.config.id,
+          attributes: {
+            tags: [],
+            name: null,
+            js_property_callbacks: {type: "map"},
+            js_event_callbacks: {type: "map"},
+            subscribed_events: {type: "set"},
+            syncable: true,
+            reconnect_session: true,
+            notify_connection_status: true,
+            notifications: {
+              type: "object",
+              name: "Notifications",
+              id: doc.config.notifications!.id,
+              attributes: {
+                tags: [],
+                name: null,
+                js_property_callbacks: {type: "map"},
+                js_event_callbacks: {type: "map"},
+                subscribed_events: {type: "set"},
+                syncable: true,
+                html_attributes: {type: "map"},
+                html_id: null,
+                css_classes: [],
+                css_variables: {type: "map"},
+                styles: {type: "map"},
+                stylesheets: [],
+                visible: true,
+                context_menu: null,
+              },
+            },
+            color_scheme: "auto",
+          },
+        },
         roots: [{
           type: "object",
           name: "ModelWithUnsetReadonly",
@@ -889,7 +946,7 @@ describe("Bug", () => {
       })
 
       const data = ["a", "c", "a", "b", null, "b", "a", NaN]
-      const result = ["red", "black", "red", "green", "black", "green", "red", "black"]
+      const result = convert_to_uint32_palette(["red", "black", "red", "green", "black", "green", "red", "black"])
 
       expect(mapper.v_compute(data)).to.be.equal(result)
     })
@@ -987,11 +1044,15 @@ describe("Bug", () => {
       expect(document.head.querySelectorAll("link[href='/assets/css/global.css']").length).to.be.equal(1)
       expect(view.shadow_el.querySelectorAll("link[href='/assets/css/local.css']").length).to.be.equal(1)
 
-      expect([...document.head.querySelectorAll("style")].filter((el) => el.textContent?.includes("--global-inline: 1")).length).to.be.equal(1)
-      expect([...view.shadow_el.querySelectorAll("style")].filter((el) => el.textContent?.includes("--local-inline: 1")).length).to.be.equal(1)
+      const to_css = (stylesheet: CSSStyleSheet) => {
+        return [...stylesheet.cssRules].map((r) => r.cssText).join("\n")
+      }
 
-      await poll(() => [...document.styleSheets].some((style) => style.href?.includes("global.css")))
-      await poll(() => [...view.shadow_el.styleSheets].some((style) => style.href?.includes("global.css")))
+      expect([...document.head.querySelectorAll("style")].filter((el) => el.textContent.includes("--global-inline: 1")).length).to.be.equal(1)
+      expect(view.shadow_el.adoptedStyleSheets.map(to_css).filter((css) => css.includes("--local-inline: 1")).length).to.be.equal(1)
+
+      await poll(() => [...document.styleSheets].some((style) => style.href?.includes("global.css") ?? false))
+      await poll(() => [...view.shadow_el.styleSheets].some((style) => style.href?.includes("global.css") ?? false))
 
       expect(getComputedStyle(document.documentElement).getPropertyValue("--global-imported")).to.be.equal("1")
       expect(getComputedStyle(view.el).getPropertyValue("--local-imported")).to.be.equal("1")
@@ -1330,6 +1391,84 @@ describe("Bug", () => {
     })
   })
 
+  describe("in issue #9663", () => {
+    it("doesn't allow to compute correct image index for log scales", async () => {
+      const n = 5
+
+      async function plot(x_axis_type: AxisType, y_axis_type: AxisType) {
+        const x = x_axis_type == "log" ? logspace(0, n-1, n) : linspace(0, n-1, n)
+        const dw = x[n-1] - x[0]
+
+        const y = y_axis_type == "log" ? logspace(0, n-1, n) : linspace(0, n-1, n)
+        const dh = y[n-1] - y[0]
+
+        const values: number[] = []
+        for (const yi of y) {
+          for (const xi of x) {
+            values.push(xi + yi)
+          }
+        }
+        const image = ndarray(values, {dtype: "float64", shape: [n, n]})
+
+        const x_range = new DataRange1d()
+        const y_range = new DataRange1d()
+
+        const p = fig([300, 300], {x_range, y_range, toolbar_location: "right", x_axis_type, y_axis_type})
+
+        const color_mapper = new LinearColorMapper({palette: Viridis256})
+        const img = p.image({image: [image], x: x[0], y: y[0], dw, dh, color_mapper})
+
+        const hover = new TapTool({renderers: [img], behavior: "select"})
+        p.add_tools(hover)
+
+        const {view} = await display(p)
+        return {view, img}
+      }
+
+      function image_index(i: number, j: number) {
+        return [{index: 0, i, j, flat_index: j*n + i}]
+      }
+
+      async function test(options: {x_axis_type: AxisType, y_axis_type: AxisType}) {
+        const {x_axis_type, y_axis_type} = options
+
+        const x = x_axis_type == "log" ? logspace(0, n-1, n) : linspace(0, n-1, n)
+        const y = y_axis_type == "log" ? logspace(0, n-1, n) : linspace(0, n-1, n)
+
+        const {view, img} = await plot(x_axis_type, y_axis_type)
+        const actions = new PlotActions(view)
+
+        await actions.tap({x: x[0]+0.1, y: y[0]+0.1})
+        await view.ready
+        expect(img.data_source.selected.image_indices).to.be.equal(image_index(0, 0))
+        img.data_source.selected.clear()
+        await view.ready
+
+        await actions.tap({x: x[n-1]-0.1, y: y[0]+0.1})
+        await view.ready
+        expect(img.data_source.selected.image_indices).to.be.equal(image_index(n-1, 0))
+        img.data_source.selected.clear()
+        await view.ready
+
+        await actions.tap({x: x[0]+0.1, y: y[n-1]-0.1})
+        await view.ready
+        expect(img.data_source.selected.image_indices).to.be.equal(image_index(0, n-1))
+        img.data_source.selected.clear()
+        await view.ready
+
+        await actions.tap({x: x[n-1]-0.1, y: y[n-1]-0.1})
+        await view.ready
+        expect(img.data_source.selected.image_indices).to.be.equal(image_index(n-1, n-1))
+        img.data_source.selected.clear()
+        await view.ready
+      }
+
+      await test({x_axis_type: "log", y_axis_type: "linear"})
+      await test({x_axis_type: "linear", y_axis_type: "log"})
+      await test({x_axis_type: "log", y_axis_type: "log"})
+    })
+  })
+
   describe("in issue #13293", () => {
     function indices(gv: GlyphRendererView, {x, y}: XY) {
       const sx = gv.coordinates.x_scale.compute(x)
@@ -1533,19 +1672,499 @@ describe("Bug", () => {
       table.view.filter = new IndexFilter({indices: [0, 1]})
 
       expect(view.get_selected_rows()).to.be.equal([])
-      expect(table.source.selected.indices).to.be.equal([])
+      expect(table.source.selected.indices).to.be.equal([2])
 
       const checkbox2 = view.shadow_el.querySelectorAll(".slick-cell.l1.r1.bk-cell-select")[0]
       const checkbox2_el = checkbox2.querySelector('input[type="checkbox"]')
       expect_not_null(checkbox2_el)
       await mouse_click(checkbox2_el)
       expect(view.get_selected_rows()).to.be.equal([0])
-      expect(table.source.selected.indices).to.be.equal([0])
+      expect(table.source.selected.indices).to.be.equal([0, 2])
 
       table.view.filter = new IndexFilter({indices: [0, 1, 2]})
 
       expect(view.get_selected_rows().slice().sort()).to.be.equal([0, 2].sort())
       expect(table.source.selected.indices.slice().sort()).to.be.equal([0, 2].sort())
+    })
+  })
+
+  describe("in issue #13831", () => {
+    it("allows addition of new indices to selection by default", async () => {
+      const tap_tool = new TapTool()
+      const p = fig([200, 200], {tools: [tap_tool]})
+      const cr = p.circle({x: [0, 1, 2, 3], y: [0, 1, 2, 3], radius: [0.5, 0.75, 1.0, 1.25], color: ["red", "green", "blue", "yellow"], alpha: 0.8})
+      const ds = cr.data_source
+
+      const {view} = await display(p)
+      const pv = actions(view)
+
+      expect(ds.selected.indices).to.be.equal([])
+
+      async function tap_at(x: number, y: number) {
+        await pv.tap(xy(x, y))
+        await view.ready
+      }
+
+      await tap_at(0, 0)     // select red
+      expect(ds.selected.indices).to.be.equal([0])
+
+      await tap_at(0, 0)     // deselect red
+      expect(ds.selected.indices).to.be.equal([])
+
+      await tap_at(0, 0)     // select red
+      expect(ds.selected.indices).to.be.equal([0])
+
+      await tap_at(1, 1)     // select green
+      expect(ds.selected.indices).to.be.equal([1])
+
+      await tap_at(2, 2)     // select blue
+      expect(ds.selected.indices).to.be.equal([2])
+
+      await tap_at(3, 3)     // select yellow
+      expect(ds.selected.indices).to.be.equal([3])
+
+      await tap_at(4, 0)     // deselect
+      expect(ds.selected.indices).to.be.equal([])
+
+      await tap_at(2.5, 2.5) // select blue and yellow
+      expect(ds.selected.indices).to.be.equal([2, 3])
+
+      await tap_at(2.5, 2.5) // deselect blue and yellow
+      expect(ds.selected.indices).to.be.equal([])
+
+      await tap_at(2, 2)     // select blue
+      expect(ds.selected.indices).to.be.equal([2])
+
+      await tap_at(2.5, 2.5) // deselect blue and select yellow
+      expect(ds.selected.indices).to.be.equal([3])
+    })
+  })
+
+  describe("in issue #13951", () => {
+    it("doesn't allow inheriting image data in Image-like glyphs", async () => {
+      const p = fig([400, 400])
+
+      const color_mapper = new EqHistColorMapper({palette: Spectral11})
+      const gr = p.image({image: [scalar_image()], x: 0, y: 0, dw: 10, dh: 10, color_mapper})
+
+      const nonselection_color_mapper = new EqHistColorMapper({palette: Viridis11})
+      gr.nonselection_glyph = new Image({x: 0, y: 0, dw: 10, dh: 10, color_mapper: nonselection_color_mapper})
+
+      const {view} = await display(p)
+      const grv = view.views.get_one(gr)
+
+      expect_instanceof(grv.glyph, ImageView)
+      expect_instanceof(grv.selection_glyph, ImageView)
+      expect_instanceof(grv.nonselection_glyph, ImageView)
+      expect_instanceof(grv.decimated_glyph, ImageView)
+      expect_instanceof(grv.hover_glyph, ImageView)
+      expect_instanceof(grv.muted_glyph, ImageView)
+
+      expect(grv.glyph.inherited_image_data).to.be.false
+      expect(grv.selection_glyph.inherited_image_data).to.be.true
+      expect(grv.nonselection_glyph.inherited_image_data).to.be.false
+      expect(grv.decimated_glyph.inherited_image_data).to.be.true
+      expect(grv.hover_glyph.inherited_image_data).to.be.true
+      expect(grv.muted_glyph.inherited_image_data).to.be.true
+
+      expect(grv.glyph.inherited_image_width).to.be.false
+      expect(grv.selection_glyph.inherited_image_width).to.be.true
+      expect(grv.nonselection_glyph.inherited_image_width).to.be.false
+      expect(grv.decimated_glyph.inherited_image_width).to.be.true
+      expect(grv.hover_glyph.inherited_image_width).to.be.true
+      expect(grv.muted_glyph.inherited_image_width).to.be.true
+
+      expect(grv.glyph.inherited_image_height).to.be.false
+      expect(grv.selection_glyph.inherited_image_height).to.be.true
+      expect(grv.nonselection_glyph.inherited_image_height).to.be.false
+      expect(grv.decimated_glyph.inherited_image_height).to.be.true
+      expect(grv.hover_glyph.inherited_image_height).to.be.true
+      expect(grv.muted_glyph.inherited_image_height).to.be.true
+    })
+  })
+
+  describe("in issue #13965 and #14645", () => {
+    it("doesn't allow to correctly index categories in CategoricalSlider", async () => {
+      const categories = range(0, 20).map((i) => `${i}`)
+      const slider = new CategoricalSlider({categories, value: "0"})
+      const {view} = await display(slider, [300, 50])
+
+      const el = view.shadow_el.querySelector(".noUi-handle")
+      expect_not_null(el)
+      expect(slider.value).to.be.equal("0")
+
+      // The expectation is that no errors accumulate during sliding.
+      for (const c of categories.slice(1)) {
+        el.dispatchEvent(new KeyboardEvent("keydown", {key: "ArrowRight"}))
+        await view.ready
+        // After an event the tooltip and the slider value should be updated.
+        // The displayed string shouldn't be "undefiend".
+        expect(el.ariaValueText).to.be.equal(c)
+        expect(slider.value).to.be.equal(c)
+      }
+    })
+  })
+
+  describe("in issue #14058", () => {
+    it("doesn't allow emitting UI events for all but the first tool", async () => {
+      async function test(tools: ToolName[], active_drag: ToolName) {
+        const p = fig([200, 200], {tools, active_drag})
+        const gr = p.scatter([1, 2, 3], [1, 2, 3], {size: 20})
+        gr.data_source.selected.indices = [1]
+        const {view} = await display(p)
+        view.canvas_view.events_el.focus()
+        expect(gr.data_source.selected.indices).to.be.equal([1])
+        const ev = new KeyboardEvent("keyup", {key: "Escape"})
+        view.canvas_view.events_el.dispatchEvent(ev)
+        await view.ready
+        expect(gr.data_source.selected.indices).to.be.equal([])
+      }
+
+      await test(["box_select", "lasso_select"], "box_select")
+      await test(["box_select", "lasso_select"], "lasso_select")
+      await test(["lasso_select", "box_select"], "box_select")
+      await test(["lasso_select", "box_select"], "lasso_select")
+    })
+  })
+
+  describe("in issue #14072", () => {
+    it("doesn't allow Spinner widget to react to wheel events when focused", async () => {
+      const spinner = new Spinner({value: 0, step: 1, width: 100})
+      const {view} = await display(spinner, [150, 100])
+      expect(spinner.value).to.be.equal(0)
+
+      window.focus() // make sure spinner doesn't have focus
+      await scroll_up(view.input_el)
+      await view.ready
+      await scroll_up(view.input_el)
+      await view.ready
+      expect(spinner.value).to.be.equal(0)
+      await scroll_down(view.input_el)
+      await view.ready
+      expect(spinner.value).to.be.equal(0)
+
+      view.input_el.focus()
+      await scroll_up(view.input_el)
+      await view.ready
+      await scroll_up(view.input_el)
+      await view.ready
+      expect(spinner.value).to.be.equal(2)
+      await scroll_down(view.input_el)
+      await view.ready
+      expect(spinner.value).to.be.equal(1)
+    })
+  })
+
+  describe("in issue #14107", () => {
+    it("doesn't allow for default browser touch actions when no tools are enabled", async () => {
+      const p0 = fig([200, 200], {tools: [], toolbar_location: "right"})
+      p0.scatter([1, 2, 3], [1, 2, 3], {size: 20})
+      const {view: pv0} = await display(p0)
+      expect(getComputedStyle(pv0.canvas.events_el).touchAction).to.be.equal("auto")
+
+      const pan1 = new PanTool()
+      const p1 = fig([200, 200], {tools: [pan1], active_drag: pan1, toolbar_location: "right"})
+      p1.scatter([1, 2, 3], [1, 2, 3], {size: 20})
+      const {view: pv1} = await display(p1)
+      expect(getComputedStyle(pv1.canvas.events_el).touchAction).to.be.equal("pinch-zoom")
+
+      const zoom2 = new WheelZoomTool()
+      const p2 = fig([200, 200], {tools: [zoom2], active_scroll: zoom2, toolbar_location: "right"})
+      p2.scatter([1, 2, 3], [1, 2, 3], {size: 20})
+      const {view: pv2} = await display(p2)
+      expect(getComputedStyle(pv2.canvas.events_el).touchAction).to.be.equal("pan-x pan-y")
+
+      const pan3 = new PanTool()
+      const zoom3 = new WheelZoomTool()
+      const p3 = fig([200, 200], {tools: [pan3, zoom3], active_drag: pan3, active_scroll: zoom3, toolbar_location: "right"})
+      p3.scatter([1, 2, 3], [1, 2, 3], {size: 20})
+      const {view: pv3} = await display(p3)
+      expect(getComputedStyle(pv3.canvas.events_el).touchAction).to.be.equal("none")
+    })
+  })
+
+  describe("in issue #14164", () => {
+    it("doesn't allow to use the correct CSS color syntax in SVG output", async () => {
+      const canvas = new Canvas({
+        stylesheets: [":host {width: 100px; height: 100px}"],
+        output_backend: "svg",
+      })
+      const {view} = await display(canvas, [100, 100])
+
+      const {ctx} = view.primary
+      ctx.fillStyle = "rgb(0 128 255 / 0.5)"
+      ctx.fillRect(0, 0, 100, 100)
+
+      const blob = await view.to_blob()
+      const svg = await blob.text()
+
+      expect(svg).to.be.equal('\
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="100" height="100">\
+<defs/>\
+<path fill="rgb(0,128,255)" stroke="none" paint-order="stroke" d="M 0 0 L 100 0 L 100 100 L 0 100 L 0 0 Z" fill-opacity="0.5"/>\
+</svg>\
+')
+    })
+  })
+
+  describe("in issue #14424", () => {
+    it("doesn't allow render a plot with Patches glyph and an empty data source", async () => {
+      const data_source = new ColumnDataSource({data: {}})
+
+      const plot = new Plot()
+      const glyph = new Patches({xs: {field: "xs"}, ys: {field: "ys"}})
+      const renderer = new GlyphRenderer({data_source, glyph})
+      plot.renderers.push(renderer)
+
+      await display(plot)
+    })
+  })
+
+  describe("in issue #14435", () => {
+    it("doesn't allow maintain parent layout styles after child re-renders", async () => {
+      const s0 = new Spacer({width: 50, height: 50, stylesheets: [":host { background-color: red; }"]})
+      const s1 = new Spacer({width: 50, height: 50, stylesheets: [":host { background-color: green; }"]})
+      const s2 = new Spacer({width: 50, height: 50, stylesheets: [":host { background-color: blue; }"]})
+
+      const row = new Row({children: [s0, s1, s2]})
+      const {view} = await display(row)
+
+      const sv0 = view.owner.get_one(s0)
+      const sv1 = view.owner.get_one(s1)
+      const sv2 = view.owner.get_one(s2)
+
+      const css = (view: ViewOf<Spacer>) => `
+${view.host_selector} {
+  flex: 0 0 50px;
+  min-width: 0;
+  min-height: 0;
+}`
+      expect(sv0.parent_style.css).to.be.equal(css(sv0))
+      expect(sv1.parent_style.css).to.be.equal(css(sv1))
+      expect(sv2.parent_style.css).to.be.equal(css(sv2))
+
+      sv0.rerender()
+      sv1.rerender()
+      sv2.rerender()
+
+      expect(sv0.parent_style.css).to.be.equal(css(sv0))
+      expect(sv1.parent_style.css).to.be.equal(css(sv1))
+      expect(sv2.parent_style.css).to.be.equal(css(sv2))
+    })
+  })
+
+  describe("in issue #14352", () => {
+    it("doesn't calculate log ranges below 1", async () => {
+      const p = fig([200, 200], {x_axis_type: "log", x_range: [1e-8, 1e-6]})
+      await display(p)
+    })
+  })
+
+  describe("in issue #14334", () => {
+    it("doesn't allow update of Range.{start,end} in RangeTool when there are no linked plots with ranges", async () => {
+      let n_start = 0
+      let n_end = 0
+      const x_range = new Range1d({start: 10, end: 20})
+      x_range.on_change(x_range.properties.start, () => n_start += 1)
+      x_range.on_change(x_range.properties.end, () => n_end += 1)
+      const range_tool = new RangeTool({x_range, x_interaction: true})
+      const p = fig([300, 200], {x_range: [0, 100], y_range: [0, 1], tools: [range_tool]})
+      const {view} = await display(p)
+      await actions(view).pan(xy(15, 0.5), xy(55, 0.5))
+      await view.ready
+      expect(x_range.start).to.be.similar(50)
+      expect(x_range.end).to.be.similar(60)
+      expect(n_start).to.not.be.equal(0)
+      expect(n_end).to.not.be.equal(0)
+    })
+  })
+
+  describe("in issue #13931", () => {
+    it("updates data without errors when DataTable selections are stale", async () => {
+      const source = new ColumnDataSource({data: {my_col: ["a", "b", "c"]}})
+      const columns = [
+        new TableColumn({field: "my_col", title: "My Column"}),
+      ]
+
+      const table = new DataTable({source, columns})
+      const {view} = await display(table)
+
+      source.selected.indices = [1, 2]
+      await view.ready
+      expect(view.get_selected_rows()).to.be.equal([1, 2])
+
+      source.data = {my_col: ["a", "b"]}
+      await view.ready
+
+      expect(source.selected.indices).to.be.equal([1, 2])
+      expect(view.get_selected_rows()).to.be.equal([1])
+    })
+  })
+
+  describe("in issue #14568", () => {
+    it("doesn't allow zooming to respect bounds when using FactorRange", async () => {
+      const factors = ["A", "B", "C"]
+      const x_range = new FactorRange({factors, start: 0, end: 3, bounds: [0, 3]})
+      const y_range = new Range1d({start: 0, end: 3})
+
+      const wheel_zoom = new WheelZoomTool({maintain_focus: false})
+      const p = fig([200, 200], {x_range, y_range, tools: [wheel_zoom], active_scroll: wheel_zoom})
+      p.scatter({x: factors, y: [1, 2, 3], size: 20})
+
+      const {view} = await display(p)
+
+      expect(x_range.interval).to.be.equal([0, 3])
+
+      const actions = new PlotActions(view)
+      await actions.scroll_down(xy(2, 2), 1)
+      await view.ready
+
+      expect(x_range.interval).to.be.equal([0, 3])
+    })
+  })
+
+  describe("in issue #14815", () => {
+    it("doesn't apply explicit bounds on initial render when using FactorRange", async () => {
+      const factors = ["a", "b", "c"]
+      const x_range = new FactorRange({factors, bounds: [1, 3]})
+      const p = fig([200, 200], {tools: "reset,pan", x_range})
+      p.line(factors, [1, 2, 3])
+
+      await display(p)
+
+      expect(x_range.start).to.be.equal(1)
+      expect(x_range.end).to.be.equal(3)
+
+      const a = x_range.synthetic("a")
+      const b = x_range.synthetic("b")
+      const c = x_range.synthetic("c")
+
+      expect(a).to.be.below(x_range.start)
+      expect(b).to.be.within(x_range.start, x_range.end)
+      expect(c).to.be.within(x_range.start, x_range.end)
+    })
+  })
+
+  describe("in issue #14869", () => {
+    function get_cursor(plot_view: PlotView): string {
+      return getComputedStyle(plot_view.canvas_view.events_el).cursor
+    }
+
+    async function has_cursor_at(plot_view: PlotView, point: XY, cursor: string) {
+      const ac = actions(plot_view, {units: "data"})
+      await ac.hover(point)
+      expect(get_cursor(plot_view)).to.be.equal(cursor)
+    }
+
+    it("doesn't hide resize cursors if BoxAnnotation is non editable", async () => {
+      const p = fig([200, 200], {x_range: [0, 4], y_range: [0, 4]})
+      const box = new BoxAnnotation({left: 1, right: 3, bottom: 1, top: 3})
+      p.add_layout(box)
+      const {view} = await display(p)
+
+      await has_cursor_at(view, xy(1, 1), "default")
+      await has_cursor_at(view, xy(1, 2), "default")
+      await has_cursor_at(view, xy(1, 3), "default")
+      await has_cursor_at(view, xy(2, 3), "default")
+      await has_cursor_at(view, xy(3, 3), "default")
+      await has_cursor_at(view, xy(3, 2), "default")
+      await has_cursor_at(view, xy(3, 1), "default")
+      await has_cursor_at(view, xy(2, 1), "default")
+      await has_cursor_at(view, xy(2, 2), "default")
+    })
+  })
+
+  describe("in issue #7297", () => {
+    it("doesn't support reversed LogColorMapper when low is grater than high", async () => {
+      const x = linspace(0.5, 10.5, 21)
+      const y = linspace(0.5, 10.5, 21)
+      const source = new ColumnDataSource({data: {x, y}})
+
+      const p = fig([200, 200])
+      const cmap = new LogColorMapper({
+        palette: Spectral6, low: 10, high: 1, low_color: "gray", high_color: "black",
+      })
+      const cbar = new ColorBar({color_mapper: cmap})
+      p.scatter("x", "y", {color: {field: "x", transform: cmap}, size: 15, source})
+      p.add_layout(cbar, "right")
+
+      await display(p)
+    })
+  })
+
+  describe("in issue #15080", () => {
+    it("doesn't allow to change frame width, height and align of a Plot", async () => {
+      const p = new Plot({frame_width: 100, frame_height: 200})
+      const {view} = await display(p, [300, 300])
+
+      expect(view.frame.bbox.width).to.be.equal(100)
+      expect(view.frame.bbox.height).to.be.equal(200)
+
+      p.frame_width = 150
+      p.frame_height = 275
+      await view.ready
+
+      expect(view.frame.bbox.width).to.be.equal(150)
+      expect(view.frame.bbox.height).to.be.equal(275)
+
+      p.frame_width = 160
+      p.frame_height = 180
+      await view.ready
+
+      expect(view.frame.bbox.width).to.be.equal(160)
+      expect(view.frame.bbox.height).to.be.equal(180)
+    })
+  })
+
+  describe("in issue #14040", () => {
+    it("doesn't allow clearing the DataTable selection when selected rows are filtered out", async () => {
+      const source = new ColumnDataSource({
+        data: {
+          index: [0, 1, 2],
+          x: [1, 2, 3],
+          y: ["a", "b", "c"],
+        },
+      })
+
+      const columns = [
+        new TableColumn({field: "index", title: "#", width: 50}),
+        new TableColumn({field: "x", title: "x", width: 50}),
+        new TableColumn({field: "y", title: "y", width: 50}),
+      ]
+      const filter = new AllIndices()
+      const cds_view = new CDSView({filter})
+
+      const table = new DataTable({source, columns, selectable: "checkbox", view: cds_view, width: 300, height: 400})
+      const {view} = await display(table, [350, 450])
+
+      await view.ready
+
+      const checkbox1 = view.shadow_el.querySelectorAll(".slick-cell.l1.r1.bk-cell-select")[2]
+      const checkbox1_el = checkbox1.querySelector('input[type="checkbox"]')
+      expect_not_null(checkbox1_el)
+      await mouse_click(checkbox1_el)
+      expect(view.get_selected_rows()).to.be.equal([2])
+      expect(table.source.selected.indices).to.be.equal([2])
+
+      table.view.filter = new IndexFilter({indices: [0, 1]})
+
+      expect(view.get_selected_rows()).to.be.equal([])
+      expect(table.source.selected.indices).to.be.equal([2])
+
+      const checkbox2 = view.shadow_el.querySelectorAll(".slick-cell.l1.r1.bk-cell-select")[0]
+      const checkbox2_el = checkbox2.querySelector('input[type="checkbox"]')
+      expect_not_null(checkbox2_el)
+      await mouse_click(checkbox2_el)
+      expect(view.get_selected_rows()).to.be.equal([0])
+      expect(table.source.selected.indices).to.be.equal([0, 2])
+
+      table.source.selected.indices = []
+      await view.ready
+
+      table.view.filter = new IndexFilter({indices: [0, 1, 2]})
+
+      expect(view.get_selected_rows().slice().sort()).to.be.equal([])
+      expect(table.source.selected.indices.slice().sort()).to.be.equal([])
     })
   })
 })

@@ -2,7 +2,7 @@ import {HasProps} from "./has_props"
 import type {Property} from "./properties"
 import type {Slot, ISignalable} from "./signaling"
 import {Signal0, Signal} from "./signaling"
-import {isArray, isString, isNumber} from "./util/types"
+import {isArray, isString, isNumber, isFunction} from "./util/types"
 import type {BBox, XY} from "./util/bbox"
 import type {Coordinate} from "../models/coordinates/coordinate"
 import type {NodeTarget} from "../models/coordinates/node"
@@ -12,8 +12,13 @@ import {Indexed} from "../models/coordinates/indexed"
 import {ViewManager, ViewQuery} from "./view_manager"
 import type {Equatable, Comparator} from "./util/eq"
 import {equals} from "./util/eq"
+import {logger} from "./logging"
+
+import type {Signal as PreactSignal} from "@preact/signals"
 
 export type ViewOf<T extends HasProps> = T["__view_type__"]
+
+export type ChildView = View | null | undefined
 
 export type SerializableState = {
   type: string
@@ -24,15 +29,29 @@ export type SerializableState = {
 export namespace View {
   export type Options = {
     model: HasProps
-    parent: View | null
+    parent: View | null | ((obj: HasProps) => View | null)
     owner?: ViewManager
   }
 }
 
 export type IterViews<T extends View = View> = Generator<T, void, undefined>
 
-export class View implements ISignalable, Equatable {
+/**
+ * Shared abort reason. Aborting without one makes the browser construct a
+ * `DOMException` with a stack trace, which is an order of magnitude more
+ * expensive and is paid by every view being removed.
+ */
+const view_removed = new DOMException("view removed", "AbortError")
+
+type TransitiveOpts = {
+  recursive?: boolean
+  signal?: (obj: HasProps) => Signal<unknown, HasProps>
+}
+
+export abstract class View implements ISignalable, Equatable {
   readonly removed = new Signal0<this>(this, "removed")
+
+  private readonly _abort_controller = new AbortController()
 
   readonly model: HasProps
 
@@ -43,9 +62,19 @@ export class View implements ISignalable, Equatable {
 
   readonly views: ViewQuery = new ViewQuery(this)
 
-  protected _ready: Promise<void> = Promise.resolve(undefined)
+  readonly signals: {readonly [key: string]: PreactSignal<unknown>} = {}
+  readonly values: {readonly [key: string]: unknown} = {}
+
+  private _ready: Promise<void> = Promise.resolve(undefined)
   get ready(): Promise<void> {
     return this._ready
+  }
+
+  protected _await_ready(promise: Promise<void>): void {
+    this._ready = this._ready.then(() => promise)
+    if (this.root != this) {
+      this.root._ready = this.root._ready.then(() => this._ready)
+    }
   }
 
   /** @internal */
@@ -55,11 +84,7 @@ export class View implements ISignalable, Equatable {
     let new_slot = this._slots.get(slot)
     if (new_slot == null) {
       new_slot = (args: Args, sender: Sender): void => {
-        const promise = Promise.resolve(slot.call(this, args, sender))
-        this._ready = this._ready.then(() => promise)
-        if (this.root != this) {
-          this.root._ready = this.root._ready.then(() => this._ready)
-        }
+        this._await_ready(Promise.resolve(slot.call(this, args, sender)))
       }
       this._slots.set(slot, new_slot)
     }
@@ -68,21 +93,35 @@ export class View implements ISignalable, Equatable {
   }
 
   disconnect<Args, Sender extends object>(signal: Signal<Args, Sender>, slot: Slot<Args, Sender>): boolean {
-    return signal.disconnect(slot, this)
+    const new_slot = this._slots.get(slot)
+    return new_slot != null ? signal.disconnect(new_slot, this) : false
   }
 
   constructor(options: View.Options) {
     const {model, parent, owner} = options
 
     this.model = model
-    this.parent = parent
+    this.parent = isFunction(parent) ? parent(this.model) : parent
 
-    if (parent == null) {
+    if (this.parent == null) {
       this.root = this
       this.owner = owner ?? new ViewManager([this])
     } else {
-      this.root = parent.root
+      this.root = this.parent.root
       this.owner = this.root.owner
+    }
+
+    for (const prop of this.model) {
+      Object.defineProperty(this.signals, prop.attr, {
+        get() { return prop.signal },
+        configurable: false,
+        enumerable: true,
+      })
+      Object.defineProperty(this.values, prop.attr, {
+        get() { return prop.signal.value },
+        configurable: false,
+        enumerable: true,
+      })
     }
   }
 
@@ -90,9 +129,33 @@ export class View implements ISignalable, Equatable {
 
   async lazy_initialize(): Promise<void> {}
 
+  /**
+   * An `AbortSignal` that is aborted when this view is removed.
+   *
+   * Pass it as `{signal: this.abort_signal}` to `addEventListener()` when
+   * subscribing to an event target that outlives this view (e.g. `document`,
+   * `window` or `visualViewport`). Such a target retains the listener, and
+   * through its closure this view and its model, for the lifetime of the page.
+   *
+   * Don't use it for listeners on elements this view owns. Those are released
+   * with the element itself, and registering an abort algorithm for them only
+   * adds a reference from this view to DOM it would otherwise let go of.
+   */
+  protected get abort_signal(): AbortSignal {
+    return this._abort_controller.signal
+  }
+
   protected _destroyed: boolean = false
   remove(): void {
+    if (this._destroyed) {
+      logger.warn(`${this}.remove(): view was already destroyed`)
+      return
+    }
     this.disconnect_signals()
+    this._abort_controller.abort(view_removed)
+    for (const view of this.children_views()) {
+      view.remove()
+    }
     this.owner.remove(this)
     this.removed.emit()
     this._destroyed = true
@@ -110,7 +173,13 @@ export class View implements ISignalable, Equatable {
     return Object.is(this, that)
   }
 
-  public *children(): IterViews {}
+  children_views(): View[] {
+    return this._children_views().filter((view) => view != null)
+  }
+
+  protected _children_views(): ChildView[] {
+    return []
+  }
 
   protected _has_finished: boolean = false
 
@@ -145,11 +214,14 @@ export class View implements ISignalable, Equatable {
     }
   }
 
+  serializable_children(): View[] {
+    return this.children_views().filter((view) => view.model.is_syncable)
+  }
+
   serializable_state(): SerializableState {
-    const children = [...this.children()]
-      .filter((view) => view.model.is_syncable)
+    const children = this.serializable_children()
       .map((view) => view.serializable_state())
-      .filter((item) => item.bbox != null && item.bbox.is_valid && !item.bbox.is_empty)
+      .filter((item) => item.bbox != null && item.bbox.is_valid && !item.bbox.is_empty) // TODO move this to a common base class for UI views
 
     return {
       type: this.model.type,
@@ -181,21 +253,23 @@ export class View implements ISignalable, Equatable {
     }
   }
 
-  on_transitive_change<T>(property: Property<T>, fn: () => void): void {
+  on_transitive_change<T>(property: Property<T>, fn: () => void, {recursive=false, signal=(obj) => obj.change}: TransitiveOpts = {}): void {
+    const slot = () => fn()
+
     const collect = () => {
       const value = property.is_unset ? [] : property.get_value()
-      return HasProps.references(value, {recursive: false})
+      return HasProps.references(value, {recursive})
     }
 
     const connect = (models: Iterable<HasProps>) => {
       for (const model of models) {
-        this.connect(model.change, fn)
+        this.connect(signal(model), slot)
       }
     }
 
     const disconnect = (models: Iterable<HasProps>) => {
       for (const model of models) {
-        this.disconnect(model.change, fn)
+        this.disconnect(signal(model), slot)
       }
     }
 
@@ -257,7 +331,7 @@ export class View implements ISignalable, Equatable {
         } else if (child.model == target) {
           return child
         } else {
-          queue.push(...child.children())
+          queue.push(...child.children_views())
         }
       }
       return null

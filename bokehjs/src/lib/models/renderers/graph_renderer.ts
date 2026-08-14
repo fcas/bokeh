@@ -5,13 +5,18 @@ import type {GlyphView} from "../glyphs/glyph"
 import {LayoutProvider} from "../graphs/layout_provider"
 import {GraphHitTestPolicy, NodesOnly} from "../graphs/graph_hit_test_policy"
 import type * as p from "core/properties"
-import type {IterViews} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import {build_view} from "core/build_views"
 import {logger} from "core/logging"
+import type {Geometry} from "core/geometry"
+import type {HitTestResult} from "core/hittest"
+import type {Context2d} from "core/util/canvas"
 import type {SelectionManager} from "core/selection_manager"
 import {XYGlyph} from "../glyphs/xy_glyph"
 import {MultiLine} from "../glyphs/multi_line"
 import {Patches} from "../glyphs/patches"
+
+type XsYsGlyph = MultiLine | Patches
 
 export class GraphRendererView extends DataRendererView {
   declare model: GraphRenderer
@@ -23,10 +28,8 @@ export class GraphRendererView extends DataRendererView {
     return this.node_view.glyph
   }
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield this.edge_view
-    yield this.node_view
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this.edge_view, this.node_view]
   }
 
   override async lazy_initialize(): Promise<void> {
@@ -111,19 +114,17 @@ export class GraphRendererView extends DataRendererView {
     }
   }
 
-  override remove(): void {
-    this.edge_view.remove()
-    this.node_view.remove()
-    super.remove()
-  }
-
-  protected _paint(): void {
-    this.edge_view.paint()
-    this.node_view.paint()
+  protected _paint(ctx: Context2d): void {
+    this.edge_view.paint(ctx)
+    this.node_view.paint(ctx)
   }
 
   override get has_webgl(): boolean {
     return this.edge_view.has_webgl || this.node_view.has_webgl
+  }
+
+  hit_test(geometry: Geometry): HitTestResult {
+    return this.model.inspection_policy.hit_test(geometry, this)
   }
 }
 
@@ -132,8 +133,8 @@ export namespace GraphRenderer {
 
   export type Props = DataRenderer.Props & {
     layout_provider: p.Property<LayoutProvider>
-    node_renderer: p.Property<GlyphRenderer>
-    edge_renderer: p.Property<GlyphRenderer>
+    node_renderer: p.Property<GlyphRenderer<XYGlyph>>
+    edge_renderer: p.Property<GlyphRenderer<XsYsGlyph>>
     selection_policy: p.Property<GraphHitTestPolicy>
     inspection_policy: p.Property<GraphHitTestPolicy>
   }
@@ -154,8 +155,8 @@ export class GraphRenderer extends DataRenderer {
 
     this.define<GraphRenderer.Props>(({Ref}) => ({
       layout_provider:   [ Ref(LayoutProvider) ],
-      node_renderer:     [ Ref(GlyphRenderer) ],
-      edge_renderer:     [ Ref(GlyphRenderer) ],
+      node_renderer:     [ Ref(GlyphRenderer<XYGlyph>) ],
+      edge_renderer:     [ Ref(GlyphRenderer<XsYsGlyph>) ],
       selection_policy:  [ Ref(GraphHitTestPolicy), () => new NodesOnly() ],
       inspection_policy: [ Ref(GraphHitTestPolicy), () => new NodesOnly() ],
     }))

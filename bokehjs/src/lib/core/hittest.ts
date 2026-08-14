@@ -63,13 +63,15 @@ export function dist_to_segment(p: Point, v: Point, w: Point): number {
   return Math.sqrt(dist_to_segment_squared(p, v, w))
 }
 
+export type SegmentIntersection = {
+  hit: boolean
+  x: number | null
+  y: number | null
+}
+
 export function check_2_segments_intersect(
   l0_x0: number, l0_y0: number, l0_x1: number, l0_y1: number,
-  l1_x0: number, l1_y0: number, l1_x1: number, l1_y1: number): {
-    hit: boolean
-    x: number | null
-    y: number | null
-  } {
+  l1_x0: number, l1_y0: number, l1_x1: number, l1_y1: number): SegmentIntersection {
   /*
    *  Check if 2 segments (l0 and l1) intersect. Returns a structure with
    *  the following attributes:
@@ -93,4 +95,41 @@ export function check_2_segments_intersect(
 
     return {hit: (a > 0 && a < 1) && (b > 0 && b < 1), x, y}
   }
+}
+
+// Given two polygons, is any vertex of one inside the other
+export function vertex_overlap(x0: Arrayable<number>, y0: Arrayable<number>, x1: Arrayable<number>, y1: Arrayable<number>): boolean {
+  // need to check "both directions" to handle total inclusion cases
+  for (let i = 0; i < x0.length; i++) {
+    if (point_in_poly(x0[i], y0[i], x1, y1)) {
+      return true
+    }
+  }
+  for (let i = 0; i < x1.length; i++) {
+    if (point_in_poly(x1[i], y1[i], x0, y0)) {
+      return true
+    }
+  }
+  return false
+}
+
+// Given two polygons, do any pair of edges intersect
+export function edge_intersection(x0: Arrayable<number>, y0: Arrayable<number>, x1: Arrayable<number>, y1: Arrayable<number>): boolean {
+  for (let i = 0; i < x0.length-1; i++) {
+    for (let j = 0; j < x1.length-1; j++) {
+      if (check_2_segments_intersect(x0[i], y0[i], x0[i+1], y0[i+1], x1[j], y1[j], x1[j+1], y1[j+1]).hit) {
+        return true
+      }
+    }
+    // consider x1, y1 "closing" segment
+    if (check_2_segments_intersect(x0[i], y0[i], x0[i+1], y0[i+1], x1[x1.length-1], y1[x1.length-1], x1[0], y1[0]).hit) {
+      return true
+    }
+  }
+  // consider x0, y0, "closing" segment
+  if (check_2_segments_intersect(x0[x0.length-1], y0[x0.length-1], x0[0], y0[0], x1[x1.length-1], y1[x1.length-1], x1[0], y1[0]).hit) {
+    return true
+  }
+
+  return false
 }

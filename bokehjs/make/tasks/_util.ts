@@ -1,9 +1,11 @@
-import assert from "assert"
-import os from "os"
-import type {ChildProcess} from "child_process"
-import {Socket} from "net"
+import assert from "node:assert"
+import os from "node:os"
+import fs from "node:fs"
+import cp from "node:child_process"
+import type {ChildProcess} from "node:child_process"
+import {Socket} from "node:net"
 
-import {BuildError} from "../task"
+import {BuildError} from "../task.js"
 
 export const platform = (() => {
   switch (os.type()) {
@@ -14,6 +16,21 @@ export const platform = (() => {
       throw new Error(`unsupported platform: ${os.type()}`)
   }
 })()
+
+export const is_dir = (path: string) => fs.lstatSync(path).isDirectory()
+export const is_file = (path: string) => fs.lstatSync(path).isFile()
+export const exists = (path: string) => fs.existsSync(path)
+export const file_exists = (path: string) => exists(path) && is_file(path)
+export const dir_exists = (path: string) => exists(path) && is_dir(path)
+
+export function compile_typescript(tsconfig_path: string): void {
+  const is_windows = process.platform == "win32"
+  const npx = is_windows ? "npx.cmd" : "npx"
+  const {status} = cp.spawnSync(`${npx} --loglevel=warn tsgo --project "${tsconfig_path}"`, {stdio: "inherit", shell: true})
+  if (status != 0) {
+    throw new BuildError("typescript", "compilation failed with tsgo")
+  }
+}
 
 export async function is_available(port: number): Promise<boolean> {
   const host = "0.0.0.0"
@@ -84,4 +101,54 @@ export async function keep_alive(): Promise<void> {
   await new Promise((resolve) => {
     process.on("SIGINT", () => resolve(undefined))
   })
+}
+
+// Based on https://underscorejs.org/docs/modules/debounce.html
+type DebouncedFn<Args extends unknown[]> = {
+  (...args: Args): Promise<void>
+  stop(): void
+}
+
+export function clear(array: unknown[]): void {
+  array.splice(0, array.length)
+}
+
+export function debounce<Args extends unknown[]>(func: (args: Args[]) => Promise<void>, wait: number, immediate: boolean = false): DebouncedFn<Args> {
+  let timeout: NodeJS.Timeout | null = null
+  let previous: number
+  const collected: Args[] = []
+
+  const later = async () => {
+    const passed = Date.now() - previous
+    if (wait > passed) {
+      timeout = setTimeout(later, wait - passed)
+    } else {
+      timeout = null
+      if (!immediate) {
+        await func(collected)
+        clear(collected)
+      }
+    }
+  }
+
+  const debounced = async (...args: Args) => {
+    previous = Date.now()
+    collected.push(args)
+    if (timeout == null) {
+      timeout = setTimeout(later, wait)
+      if (immediate) {
+        await func(collected)
+        clear(collected)
+      }
+    }
+  }
+
+  debounced.stop = function() {
+    if (timeout != null) {
+      clearTimeout(timeout)
+      timeout = null
+    }
+  }
+
+  return debounced
 }

@@ -21,10 +21,11 @@ log = logging.getLogger(__name__)
 #-----------------------------------------------------------------------------
 
 # Standard library imports
-from typing import TYPE_CHECKING, Any, TypeAlias
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 # Bokeh imports
-from ...util.dataclasses import NotRequired, Unspecified, dataclass
+from ...util.dataclasses import NotRequired, Unspecified
 from ..serialization import (
     AnyRep,
     Deserializer,
@@ -58,8 +59,8 @@ __all__ = (
 #-----------------------------------------------------------------------------
 
 @dataclass
-class Value(Serializable):
-    value: Any
+class Value[T](Serializable):
+    value: T
     transform: NotRequired[Transform] = Unspecified
     units: NotRequired[str] = Unspecified
 
@@ -67,7 +68,7 @@ class Value(Serializable):
         return serializer.encode_struct(type="value", value=self.value, transform=self.transform, units=self.units)
 
     @classmethod
-    def from_serializable(cls, rep: dict[str, AnyRep], deserializer: Deserializer) -> Value:
+    def from_serializable(cls, rep: dict[str, AnyRep], deserializer: Deserializer) -> Value[Any]:
         if "value" not in rep:
             deserializer.error("expected 'value' field")
         value = deserializer.decode(rep["value"])
@@ -141,7 +142,7 @@ class Expr(Serializable):
         else:
             raise KeyError(f"key '{key}' not found")
 
-Vectorized: TypeAlias = Value | Field | Expr
+type Vectorized = Value[Any] | Field | Expr
 
 value = Value
 

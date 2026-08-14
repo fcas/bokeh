@@ -37,7 +37,14 @@ log = logging.getLogger(__name__)
 import gc
 import weakref
 from json import loads
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Iterable,
+    Literal,
+    overload,
+)
 
 # External imports
 from jinja2 import Template
@@ -53,13 +60,14 @@ from ..core.serialization import (
     UnknownReferenceError,
 )
 from ..core.templates import FILE
-from ..core.types import ID
 from ..core.validation import check_integrity, process_validation_issues
-from ..events import Event
-from ..model import Model
-from ..themes import Theme, built_in_themes, default as default_theme
+from ..themes import (
+    Theme,
+    ThemeLike,
+    built_in_themes,
+    default as default_theme,
+)
 from ..util.serialization import make_id
-from ..util.strings import nice_join
 from ..util.version import __version__
 from .callbacks import (
     Callback,
@@ -68,13 +76,13 @@ from .callbacks import (
     JSEventCallback,
     MessageCallback,
 )
+from .config import DocumentConfig
 from .events import (
     DocumentPatchedEvent,
     RootAddedEvent,
     RootRemovedEvent,
     TitleChangedEvent,
 )
-from .json import DocJson, PatchJson
 from .models import DocumentModelManager
 from .modules import DocumentModuleManager
 
@@ -82,6 +90,9 @@ if TYPE_CHECKING:
     from ..application.application import SessionContext, SessionDestroyedCallback
     from ..core.has_props import Setter
     from ..core.query import SelectorType
+    from ..core.types import ID
+    from ..events import Event
+    from ..model import Model
     from ..server.callbacks import (
         NextTickCallback,
         PeriodicCallback,
@@ -89,6 +100,8 @@ if TYPE_CHECKING:
         TimeoutCallback,
     )
     from .events import DocumentChangeCallback
+    from .json import DocJson, PatchJson
+    from .locking import LockedCallback, LockedCallbackPolicy
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -99,6 +112,9 @@ DEFAULT_TITLE = "Bokeh Application"
 __all__ = (
     'Document',
 )
+
+def _no_op_callback() -> None:
+    pass
 
 #-----------------------------------------------------------------------------
 # General API
@@ -124,6 +140,7 @@ class Document:
     models: DocumentModelManager
     modules: DocumentModuleManager
 
+    _config: DocumentConfig
     _roots: list[Model]
     _theme: Theme
     _title: str
@@ -132,10 +149,7 @@ class Document:
     _template_variables: dict[str, Any]
 
     def __init__(self, *, theme: Theme = default_theme, title: str = DEFAULT_TITLE) -> None:
-        self.callbacks = DocumentCallbackManager(self)
-        self.models = DocumentModelManager(self)
-        self.modules = DocumentModuleManager(self)
-
+        self._config = DocumentConfig()
         self._roots = []
         self._template = FILE
         self._template_variables = {}
@@ -144,14 +158,38 @@ class Document:
 
         self._session_context = None
 
+        self.callbacks = DocumentCallbackManager(self)
+        self.models = DocumentModelManager(self)
+        self.modules = DocumentModuleManager(self)
+
+        self.models.recompute()
+        self.models.flush_synced()
+
     # Properties --------------------------------------------------------------
 
     @property
+    def config(self) -> DocumentConfig:
+        ''' A configuration of this document.
+
+        '''
+        return self._config
+
+    @property
     def roots(self) -> list[Model]:
-        ''' A list of all the root models in this Document.
+        ''' A list of all the root models in this document.
 
         '''
         return list(self._roots)
+
+    @property
+    def _all_roots(self) -> list[Model]:
+        ''' A list of all models that anchor the document's model graph.
+
+        Unlike :attr:`roots`, this includes models owned by the document that
+        aren't user-visible roots.
+
+        '''
+        return [*self._roots, self._config]
 
     @property
     def session_callbacks(self) -> list[SessionCallback]:
@@ -187,7 +225,7 @@ class Document:
 
     @template.setter
     def template(self, template: Template) -> None:
-        if not isinstance(template, Template | str):
+        if not isinstance(template, (Template, str)):
             raise ValueError("document template must be Jinja2 template or a string")
         self._template = template
 
@@ -213,13 +251,15 @@ class Document:
         return self._theme
 
     @theme.setter
-    def theme(self, theme: Theme | str | None) -> None:
+    def theme(self, theme: ThemeLike | None) -> None:
         theme = default_theme if theme is None else theme
 
         if isinstance(theme, str):
             try:
                 theme = built_in_themes[theme]
             except KeyError:
+                from ..util.strings import nice_join
+
                 raise ValueError(f"{theme} is not a built-in theme; available themes are {nice_join(built_in_themes)}")
 
         if not isinstance(theme, Theme):
@@ -266,8 +306,70 @@ class Document:
 
         '''
         from ..server.callbacks import NextTickCallback
-        cb = NextTickCallback(callback=None, callback_id=make_id())
+        cb = NextTickCallback(callback=_no_op_callback, callback_id=make_id())
         return self.callbacks.add_session_callback(cb, callback, one_shot=True)
+
+    @overload
+    def locked_callback[**P](self, callback: Callable[P, Any], *, policy: LockedCallbackPolicy = "every") -> LockedCallback[P]: ...
+
+    @overload
+    def locked_callback[**P](self, callback: None = None, *, policy: LockedCallbackPolicy = "every") -> Callable[[Callable[P, Any]], LockedCallback[P]]: ...
+
+    def locked_callback[**P](
+        self, callback: Callable[P, Any] | None = None, *, policy: LockedCallbackPolicy = "every",
+    ) -> LockedCallback[P] | Callable[[Callable[P, Any]], LockedCallback[P]]:
+        ''' Decorate a callback to safely update this document from any thread.
+
+        The decorated function schedules its work on this document's server
+        session and executes with the document lock held. Calls return
+        immediately instead of returning the wrapped function's result.
+
+        Parentheses are optional when using the default policy. That is,
+        ``@doc.locked_callback`` and ``@doc.locked_callback()`` are equivalent.
+
+        Args:
+            callback (callable, optional):
+                The function to decorate when this method is used without
+                parentheses.
+
+            policy (``"every"`` or ``"latest"``, optional):
+                With ``"every"``, invoke the callback once for every call, in
+                order. With ``"latest"``, keep at most one waiting invocation,
+                replacing its arguments with those from the most recent call.
+
+        Returns:
+            A decorator that produces a
+            :class:`~bokeh.document.locking.LockedCallback`.
+
+        Example:
+
+            .. code-block:: python
+
+                @curdoc().locked_callback(policy="latest")
+                def update(value):
+                    source.data = value
+
+                @curdoc().locked_callback
+                def notify(value):
+                    status.text = value
+
+                # Safe to call from another thread:
+                update(new_data)
+
+        .. note::
+            Locked callbacks require a Bokeh server session and are closed
+            automatically when that session is destroyed.
+
+        '''
+        from .locking import LockedCallback
+
+        if callback is not None:
+            return LockedCallback(self, callback, policy=policy)
+
+        def decorator(callback: Callable[P, Any]) -> LockedCallback[P]:
+            return LockedCallback(self, callback, policy=policy)
+
+        return decorator
 
     def add_periodic_callback(self, callback: Callback, period_milliseconds: int) -> PeriodicCallback:
         ''' Add a callback to be invoked on a session periodically.
@@ -289,7 +391,7 @@ class Document:
 
         '''
         from ..server.callbacks import PeriodicCallback
-        cb = PeriodicCallback(callback=None, period=period_milliseconds, callback_id=make_id())
+        cb = PeriodicCallback(callback=_no_op_callback, period=period_milliseconds, callback_id=make_id())
         return self.callbacks.add_session_callback(cb, callback, one_shot=False)
 
     def add_root(self, model: Model, setter: Setter | None = None) -> None:
@@ -343,14 +445,14 @@ class Document:
 
         '''
         from ..server.callbacks import TimeoutCallback
-        cb = TimeoutCallback(callback=None, timeout=timeout_milliseconds, callback_id=make_id())
+        cb = TimeoutCallback(callback=_no_op_callback, timeout=timeout_milliseconds, callback_id=make_id())
         return self.callbacks.add_session_callback(cb, callback, one_shot=True)
 
     def apply_json_patch(self, patch_json: PatchJson | Serialized[PatchJson], *, setter: Setter | None = None) -> None:
         ''' Apply a JSON patch object and process any resulting events.
 
         Args:
-            patch (JSON-data) :
+            patch_json (JSON-data) :
                 The JSON-object containing the patch to apply.
 
             setter (ClientSession or ServerSession or None, optional) :
@@ -374,7 +476,7 @@ class Document:
             patch: PatchJson = deserializer.deserialize(patch_json)
         except UnknownReferenceError as error:
             if self.models.seen(error.id):
-                logging.warning(f"""\
+                logging.debug(f"""\
 Dropping a patch because it contains a previously known reference (id={error.id!r}). \
 Most of the time this is harmless and usually a result of updating a model on one \
 side of a communications channel while it was being removed on the other end.\
@@ -430,17 +532,22 @@ side of a communications channel while it was being removed on the other end.\
             Document :
 
         '''
-        # TODO: deserialize model definitions
-        if isinstance(doc_json, dict):
+        # TODO add support for deserialization of model definitions
+        if isinstance(doc_json, Serialized):
+            doc_json.content["defs"] = []
+        else:
             doc_json["defs"] = []
 
         deserializer = Deserializer()
         doc_struct = deserializer.deserialize(doc_json)
 
+        config = doc_struct["config"]
         roots = doc_struct["roots"]
         title = doc_struct["title"]
 
         doc = Document()
+        doc._set_config(config)
+
         for root in roots:
             doc.add_root(root)
 
@@ -496,7 +603,7 @@ side of a communications channel while it was being removed on the other end.\
         hold will be applied according to the hold policy.
 
         Args:
-            hold ('combine' or 'collect', optional)
+            policy ('combine' or 'collect', optional)
                 Whether events collected during a hold should attempt to be
                 combined (default: 'combine')
 
@@ -658,7 +765,7 @@ side of a communications channel while it was being removed on the other end.\
         '''
         self.callbacks.remove_session_callback(callback_obj)
 
-    def replace_with_json(self, json: DocJson) -> None:
+    def replace_with_json(self, json: DocJson | Serialized[DocJson]) -> None:
         ''' Overwrite everything in this document with the JSON-encoded
         document.
 
@@ -716,14 +823,16 @@ side of a communications channel while it was being removed on the other end.\
         Args:
             selector (JSON-like query dictionary) : you can query by type or by
                 name,i e.g. ``{"type": HoverTool}``, ``{"name": "mycircle"}``
-                updates (dict) :
+            updates (dict) :
 
         Returns:
             None
 
         '''
+        from ..model import Model
+
         if isinstance(selector, type) and issubclass(selector, Model):
-            selector = dict(type=selector)
+            selector = {"type": selector}
         for obj in self.select(selector):
             for key, val in updates.items():
                 setattr(obj, key, val)
@@ -738,33 +847,64 @@ side of a communications channel while it was being removed on the other end.\
             self._title = title
             self.callbacks.trigger_on_change(TitleChangedEvent(self, title, setter))
 
-    def to_json(self, *, deferred: bool = True) -> DocJson:
-        ''' Convert this document to a JSON-serializble object.
+    @overload
+    def to_json(self, *, deferred: Literal[True] = ...) -> Serialized[DocJson]: ...
+    @overload
+    def to_json(self, *, deferred: Literal[False]) -> DocJson: ...
 
-        Return:
-            DocJson
+    def to_json(self, *, deferred: bool = True) -> DocJson | Serialized[DocJson]:
+        ''' Convert this document to a serialized representation.
+
+        .. note::
+            Despite the name, the default return value is **not** directly
+            JSON-serializable. With ``deferred=True`` (the default), any binary
+            buffers are kept as references and the result is a ``Serialized``
+            wrapper, so e.g. ``json.dumps(doc.to_json())`` will raise
+            ``TypeError``. To obtain a JSON *string*, pass the result to
+            ``bokeh.core.json_encoder.serialize_json``. Alternatively, pass
+            ``deferred=False`` to inline any binary buffers as base64 and return
+            a plain ``dict`` that is directly JSON-serializable.
+
+        Args:
+            deferred (bool) :
+                If ``True`` (default), encode binary buffers lazily as
+                references and return a ``Serialized`` wrapper. If ``False``,
+                encode buffers immediately as inline base64 and return a plain
+                ``DocJson`` dict that is directly JSON-serializable.
+
+        Returns:
+            Serialized[DocJson] | DocJson
 
         '''
+        from ..model import Model
+        from .json import DocJson
+
         data_models = [ model for model in Model.model_class_reverse_map.values() if is_DataModel(model) ]
 
         serializer = Serializer(deferred=deferred)
         defs = serializer.encode(data_models)
+        config = serializer.encode(self._config)
         roots = serializer.encode(self._roots)
-        callbacks = serializer.encode(self.callbacks._js_event_callbacks)
+        callbacks = serializer.encode(self.callbacks.js_event_callbacks)
 
         doc_json = DocJson(
             version=__version__,
             title=self.title,
+            config=config,
             roots=roots,
         )
 
         if data_models:
             doc_json["defs"] = defs
-        if self.callbacks._js_event_callbacks:
+        if self.callbacks.js_event_callbacks:
             doc_json["callbacks"] = callbacks
 
         self.models.flush_synced()
-        return doc_json
+
+        if deferred:
+            return Serialized(doc_json, buffers=serializer.buffers)
+        else:
+            return doc_json
 
     def unhold(self) -> None:
         ''' Turn off any active document hold and apply any collected events.
@@ -790,6 +930,13 @@ side of a communications channel while it was being removed on the other end.\
 
     # Private methods ---------------------------------------------------------
 
+    def _set_config(self, config: DocumentConfig) -> None:
+        if self._config is config:
+            return
+
+        with self.models.freeze():
+            self._config = config
+
     def _destructively_move(self, dest_doc: Document) -> None:
         ''' Move all data in this doc to the dest_doc, leaving this doc empty.
 
@@ -809,6 +956,7 @@ side of a communications channel while it was being removed on the other end.\
         # we have to remove ALL roots before adding any
         # to the new doc or else models referenced from multiple
         # roots could be in both docs at once, which isn't allowed.
+        config = self.config
         roots: list[Model] = []
 
         with self.models.freeze():
@@ -816,13 +964,18 @@ side of a communications channel while it was being removed on the other end.\
                 root = next(iter(self.roots))
                 self.remove_root(root)
                 roots.append(root)
+            self._config = DocumentConfig()
 
         for root in roots:
             if root.document is not None:
                 raise RuntimeError(f"Somehow we didn't detach {root!r}")
 
-        if len(self.models) != 0:
-            raise RuntimeError(f"_all_models still had stuff in it: {self.models!r}")
+        if set(self.models) != self.config.references():
+            raise RuntimeError(
+                f"_all_models still had unexpected models in it: {self.models!r}",
+            )
+
+        dest_doc._set_config(config)
 
         for root in roots:
             dest_doc.add_root(root)

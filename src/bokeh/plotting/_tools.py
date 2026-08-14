@@ -27,7 +27,6 @@ from typing import (
     Iterator,
     Literal,
     Sequence,
-    TypeAlias,
     cast,
 )
 
@@ -45,7 +44,6 @@ from ..models.tools import (
     Scroll,
     Tap,
 )
-from ..util.warnings import warn
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -65,12 +63,12 @@ __all__ = (
 #-----------------------------------------------------------------------------
 
 # TODO: str should be literal union of e.g. pan | xpan | ypan
-Auto: TypeAlias = Literal["auto"]
-ActiveDrag: TypeAlias = Drag | Auto | str | None
-ActiveInspect: TypeAlias = list[InspectTool] | InspectTool | Auto | str | None
-ActiveScroll: TypeAlias = Scroll | Auto | str | None
-ActiveTap: TypeAlias = Tap | Auto | str | None
-ActiveMulti: TypeAlias = GestureTool | Auto | str | None
+type Auto = Literal["auto"]
+type ActiveDrag = Drag | Auto | str | None
+type ActiveInspect = list[InspectTool] | InspectTool | Auto | str | None
+type ActiveScroll = Scroll | Auto | str | None
+type ActiveTap = Tap | Auto | str | None
+type ActiveMulti = GestureTool | Auto | str | None
 
 def process_active_tools(toolbar: Toolbar, tool_map: dict[str, Tool],
         active_drag: ActiveDrag, active_inspect: ActiveInspect, active_scroll: ActiveScroll,
@@ -79,7 +77,7 @@ def process_active_tools(toolbar: Toolbar, tool_map: dict[str, Tool],
 
     Args:
         toolbar (Toolbar): instance of a Toolbar object
-        tools_map (dict[str]): tool_map from _process_tools_arg
+        tool_map (dict[str]): tool_map from _process_tools_arg
         active_drag (str, None, "auto" or Tool): the tool to set active for drag
         active_inspect (str, None, "auto", Tool or Tool[]): the tool to set active for inspect
         active_scroll (str, None, "auto" or Tool): the tool to set active for scroll
@@ -129,7 +127,7 @@ def process_active_tools(toolbar: Toolbar, tool_map: dict[str, Tool],
         raise ValueError(f"Got unknown {active_multi!r} for 'active_multi', which was not a string supplied in 'tools' argument")
 
 def process_tools_arg(plot: Plot, tools: str | Sequence[Tool | str],
-        tooltips: str | tuple[str, str] | None = None) -> tuple[list[Tool], dict[str, Tool]]:
+        tooltips: str | list[tuple[str, str]] | None = None) -> tuple[list[Tool], dict[str, Tool]]:
     """ Adds tools to the plot object
 
     Args:
@@ -148,12 +146,14 @@ def process_tools_arg(plot: Plot, tools: str | Sequence[Tool | str],
 
     repeated_tools = [ str(obj) for obj in _collect_repeated_tools(tool_objs) ]
     if repeated_tools:
+        from ..util.warnings import warn
+
         warn(f"{','.join(repeated_tools)} are being repeated")
 
     if tooltips is not None:
         for tool_obj in tool_objs:
             if isinstance(tool_obj, HoverTool):
-                tool_obj.tooltips = tooltips # type: ignore
+                tool_obj.tooltips = tooltips
                 break
         else:
             tool_objs.append(HoverTool(tooltips=tooltips))
@@ -190,12 +190,12 @@ def _resolve_tools(tools: str | Sequence[Tool | str]) -> tuple[list[Tool], dict[
 
     return tool_objs, tool_map
 
-def _collect_repeated_tools(tool_objs: list[Tool]) -> Iterator[Tool]:
-    @dataclass(frozen=True)
-    class Item:
-        obj: Tool
-        properties: dict[str, Any]
+@dataclass(frozen=True)
+class Item:
+    obj: Tool
+    properties: dict[str, Any]
 
+def _collect_repeated_tools(tool_objs: list[Tool]) -> Iterator[Tool]:
     key: Callable[[Tool], str] = lambda obj: obj.__class__.__name__
 
     for _, group in itertools.groupby(sorted(tool_objs, key=key), key=key):

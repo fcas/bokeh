@@ -1,13 +1,13 @@
 import * as sinon from "sinon"
 
-import {expect, expect_not_null} from "assertions"
-import {display} from "../../_util"
+import {expect, expect_not_null} from "#framework/assertions"
+import {display} from "#framework/layouts"
 
 import {Selection} from "@bokehjs/models/selections/selection"
 import {Plot} from "@bokehjs/models/plots/plot"
 import {Range1d} from "@bokehjs/models/ranges/range1d"
 
-import {Circle} from "@bokehjs/models/glyphs/circle"
+import {Scatter} from "@bokehjs/models/glyphs/scatter"
 import {MultiLine} from "@bokehjs/models/glyphs/multi_line"
 import {EdgesOnly, NodesOnly, NodesAndLinkedEdges, EdgesAndLinkedNodes, NodesAndAdjacentNodes} from "@bokehjs/models/graphs/graph_hit_test_policy"
 import {LayoutProvider} from "@bokehjs/models/graphs/layout_provider"
@@ -61,8 +61,8 @@ describe("GraphHitTestPolicy", () => {
         ys: [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
       },
     })
-    const node_renderer = new GlyphRenderer({data_source: node_source, glyph: new Circle()}) as GlyphRenderer & {glyph: Circle}
-    const edge_renderer = new GlyphRenderer({data_source: edge_source, glyph: new MultiLine()}) as GlyphRenderer & {glyph: MultiLine}
+    const node_renderer = new GlyphRenderer({data_source: node_source, glyph: new Scatter()})
+    const edge_renderer = new GlyphRenderer({data_source: edge_source, glyph: new MultiLine()})
 
     gr = new GraphRenderer({
       node_renderer,

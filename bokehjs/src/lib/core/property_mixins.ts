@@ -43,6 +43,7 @@ export type Hatch = {
 export type Text = {
   text_color: p.Property<Color | null>
   text_outline_color: p.Property<Color | null>
+  text_outline_width: p.Property<number>
   text_alpha: p.Property<number>
   text_font: p.Property<string>
   text_font_size: p.Property<string>
@@ -83,6 +84,7 @@ export const Hatch: p.DefineOf<Hatch> = {
 export const Text: p.DefineOf<Text> = {
   text_color:         [ k.Nullable(k.Color), "#444444" ],
   text_outline_color: [ k.Nullable(k.Color), null ],
+  text_outline_width: [ k.Float, 1.0 ],
   text_alpha:         [ k.Alpha, 1.0 ],
   text_font:          [ p.Font, "helvetica" ],
   text_font_size:     [ k.FontSize, "16px" ],
@@ -125,6 +127,7 @@ export type HatchScalar = {
 export type TextScalar = {
   text_color: p.ScalarSpec<Color | null>
   text_outline_color: p.ScalarSpec<Color | null>
+  text_outline_width: p.ScalarSpec<number>
   text_alpha: p.ScalarSpec<number>
   text_font: p.ScalarSpec<string>
   text_font_size: p.ScalarSpec<string>
@@ -165,6 +168,7 @@ export const HatchScalar: p.DefineOf<HatchScalar> = {
 export const TextScalar: p.DefineOf<TextScalar> = {
   text_color:         [ p.ColorScalar,        "#444444"   ],
   text_outline_color: [ p.ColorScalar,        null        ],
+  text_outline_width: [ p.NumberScalar,       1.0         ],
   text_alpha:         [ p.NumberScalar,       1.0         ],
   text_font:          [ p.FontScalar,         "helvetica" ],
   text_font_size:     [ p.FontSizeScalar,     "16px"      ],
@@ -207,6 +211,7 @@ export type HatchVector = {
 export type TextVector = {
   text_color: p.ColorSpec
   text_outline_color: p.ColorSpec
+  text_outline_width: p.VectorSpec<number>
   text_alpha: p.VectorSpec<number>
   text_font: p.VectorSpec<string>
   text_font_size: p.VectorSpec<string>
@@ -247,6 +252,7 @@ export const HatchVector: p.DefineOf<HatchVector> = {
 export const TextVector: p.DefineOf<TextVector> = {
   text_color:         [ p.ColorSpec, "#444444" ],
   text_outline_color: [ p.ColorSpec, null ],
+  text_outline_width: [ p.NumberSpec, 1.0 ],
   text_alpha:         [ p.NumberSpec, 1.0 ],
   text_font:          [ p.FontSpec, "helvetica" ],
   text_font_size:     [ p.FontSizeSpec, "16px"],
@@ -267,6 +273,10 @@ export type AboveHatch = Prefixed<"above", Hatch>
 export type BelowFill = Prefixed<"below", Fill>
 export type BelowHatch = Prefixed<"below", Hatch>
 
+export type GlyphLineVector = Prefixed<"glyph", LineVector>
+export type GlyphFillVector = Prefixed<"glyph", FillVector>
+export type GlyphHatchVector = Prefixed<"glyph", HatchVector>
+
 export type AxisLabelText = Prefixed<"axis_label", Text>
 export type AxisLine = Prefixed<"axis", Line>
 export type BackgroundFill = Prefixed<"background", Fill>
@@ -274,15 +284,18 @@ export type BackgroundHatch = Prefixed<"background", Hatch>
 export type BackgroundFillVector = Prefixed<"background", FillVector>
 export type BackgroundHatchVector = Prefixed<"background", HatchVector>
 export type ItemBackgroundFill = Prefixed<"item_background", Fill>
+export type ItemBackgroundHatch = Prefixed<"item_background", Hatch>
 export type BandFill = Prefixed<"band", Fill>
 export type BandHatch = Prefixed<"band", Hatch>
 export type BarLine = Prefixed<"bar", Line>
 export type BorderFill = Prefixed<"border", Fill>
+export type BorderHatch = Prefixed<"border", Hatch>
 export type BorderLine = Prefixed<"border", Line>
 export type BorderLineVector = Prefixed<"border", LineVector>
 export type GridLine = Prefixed<"grid", Line>
 export type GroupText = Prefixed<"group", Text>
 export type InactiveFill = Prefixed<"inactive", Fill>
+export type InactiveHatch = Prefixed<"inactive", Hatch>
 export type LabelText = Prefixed<"label", Text>
 export type MajorLabelText = Prefixed<"major_label", Text>
 export type MajorTickLine = Prefixed<"major_tick", Line>
@@ -293,7 +306,7 @@ export type SeparatorLine = Prefixed<"separator", Line>
 export type SubGroupText = Prefixed<"subgroup", Text>
 export type TitleText = Prefixed<"title", Text>
 
-type Mixins = Text | Line | Fill | Hatch | Image
+type Mixins = Text | Line | Fill | Hatch | Image | TextVector | LineVector | FillVector | HatchVector
 
 export function attrs_of<P extends string, T extends Mixins>(
     model: HasProps, prefix: P, mixin: p.DefineOf<T>, new_prefix: string | boolean = false): {[key: string]: unknown} {

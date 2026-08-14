@@ -94,6 +94,21 @@ global defaults
 If no value is obtained after searching all of these locations, then a
 RuntimeError will be raised.
 
+Usage with ``Server``
+~~~~~~~~~~~~~~~~~~~~~
+
+The ``bokeh serve`` command applies relevant settings from this module
+automatically. When creating a :class:`~bokeh.server.server.Server`
+programmatically, use the :meth:`~bokeh.server.server.Server.from_settings`
+factory method to similarly relay relevant settings to the Server instance, as
+the primary ``Server`` constructor does not read from this module by default.
+
+Any values explicitly passed as keyword arguments to ``from_settings()`` will
+take precedence over settings values from environment variables or direct
+interaction with this module.
+
+See :ref:`ug_server_library` for details.
+
 API
 ~~~
 
@@ -118,17 +133,15 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 import os
+from enum import Enum, auto
 from os.path import join
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Generic,
     Literal,
     Sequence,
-    TypeAlias,
-    TypeVar,
     cast,
 )
 
@@ -136,7 +149,6 @@ from typing import (
 import yaml
 
 # Bokeh imports
-from .util.deprecation import deprecated
 from .util.paths import bokehjs_path, server_path
 
 if TYPE_CHECKING:
@@ -168,6 +180,16 @@ def convert_int(value: int | str) -> int:
     ''' Convert a string to an integer.
     '''
     return int(value)
+
+def convert_compression(value: int | str) -> int:
+    ''' Convert a string to a gzip compression level value.
+    '''
+    level = int(value)
+
+    if 0 <= level <= 9:
+        return level
+
+    raise ValueError(f"Compression level must be an integer in [0, 9], got {value!r}")
 
 def convert_bool(value: bool | str) -> bool:
     ''' Convert a string to True or False.
@@ -213,7 +235,7 @@ def convert_str_seq(value: list[str] | str) -> list[str]:
         list[str]
 
     '''
-    if isinstance(value, list | tuple):
+    if isinstance(value, (list, tuple)):
         return value
 
     try:
@@ -222,9 +244,9 @@ def convert_str_seq(value: list[str] | str) -> list[str]:
         raise ValueError(f"Cannot convert {value} to list value")
 
 
-LogLevel: TypeAlias = Literal["trace", "debug", "info", "warn", "error", "fatal"]
+type LogLevel = Literal["trace", "debug", "info", "warn", "error", "fatal"]
 
-PyLogLevel: TypeAlias = int | None
+type PyLogLevel = int | None
 
 _log_levels = {
     "CRITICAL" : logging.CRITICAL,
@@ -271,7 +293,7 @@ def convert_logging(value: str | int) -> PyLogLevel:
 
     raise ValueError(f"Cannot convert {value} to log level, valid values are: {', '.join(_log_levels)}")
 
-ValidationLevel = Literal["none", "errors", "all"]
+type ValidationLevel = Literal["none", "errors", "all"]
 
 def convert_validation(value: str | ValidationLevel) -> ValidationLevel:
     '''Convert a string to a validation level
@@ -330,14 +352,24 @@ def convert_ico_path(value: str) -> str:
 
 class _Unset: pass
 
-T = TypeVar("T")
-
-Unset: TypeAlias = T | type[_Unset]
+type Unset[T] = T | type[_Unset]
 
 def is_dev() -> bool:
     return convert_bool(os.environ.get("BOKEH_DEV", False))
 
-class PrioritizedSetting(Generic[T]):
+class SettingProvenance(Enum):
+    IMMEDIATE = auto()
+    USER_SET = auto()
+    CONFIG_OVERRIDE = auto()
+    ENV_VAR = auto()
+    CONFIG_USER = auto()
+    CONFIG_SYSTEM = auto()
+    DEV_DEFAULT = auto()
+    DEFAULT = auto()
+    GLOBAL_DEFAULT = auto()
+    NONE = auto()
+
+class PrioritizedSetting[T]:
     ''' Return a value for a global setting according to configuration precedence.
 
     The following methods are searched in order for the setting:
@@ -361,7 +393,7 @@ class PrioritizedSetting(Generic[T]):
     The optional ``default`` argument specified an implicit default value for
     the setting that is returned if no other methods provide a value.
 
-    A ``convert`` agument may be provided to convert values before they are
+    A ``convert`` argument may be provided to convert values before they are
     returned. For instance to concert log levels in environment variables
     to ``logging`` module values.
     '''
@@ -369,9 +401,9 @@ class PrioritizedSetting(Generic[T]):
     _parent: Settings | None
     _user_value: Unset[str | T]
 
-    def __init__(self, name: str, env_var: str | None = None, default: Unset[T] = _Unset,
-            dev_default: Unset[T] = _Unset, convert: Callable[[T | str], T] | None = None, help: str = "") -> None:
-        self._convert = convert if convert else convert_str
+    def __init__(self, name: str, env_var: str | None = None, default: Unset[T | str] = _Unset,
+            dev_default: Unset[T | str] = _Unset, convert: Callable[[Any], T] | None = None, help: str = "") -> None:
+        self._convert = convert if convert else cast(Callable[[Any], T], convert_str)
         self._default = default
         self._dev_default = dev_default
         self._env_var = env_var
@@ -380,7 +412,52 @@ class PrioritizedSetting(Generic[T]):
         self._parent = None
         self._user_value = _Unset
 
-    def __call__(self, value: T | str | None = None, default: Unset[T] = _Unset) -> T:
+    def get_value_with_provenance(
+        self,
+        value: T | str | None = None,
+        default: Unset[T | str] = _Unset,
+    ) -> tuple[T, SettingProvenance]:
+        """Return the setting value and where it came from."""
+
+        # 7. immediate values
+        if value is not None:
+            return self._convert(value), SettingProvenance.IMMEDIATE
+
+        # 6. previously user-set value
+        if self._user_value is not _Unset:
+            return self._convert(self._user_value), SettingProvenance.USER_SET
+
+        # 5. user-named config file
+        if self._parent and self._name in self._parent.config_override:
+            return self._convert(self._parent.config_override[self._name]), SettingProvenance.CONFIG_OVERRIDE
+
+        # 4. environment variable
+        if self._env_var and self._env_var in os.environ:
+            return self._convert(os.environ[self._env_var]), SettingProvenance.ENV_VAR
+
+        # 3. local config file
+        if self._parent and self._name in self._parent.config_user:
+            return self._convert(self._parent.config_user[self._name]), SettingProvenance.CONFIG_USER
+
+        # 2. global config file
+        if self._parent and self._name in self._parent.config_system:
+            return self._convert(self._parent.config_system[self._name]), SettingProvenance.CONFIG_SYSTEM
+
+        # 1.5 (undocumented) dev defaults take precedence over other defaults
+        if is_dev() and self._dev_default is not _Unset:
+            return self._convert(self._dev_default), SettingProvenance.DEV_DEFAULT
+
+        # 1. local defaults
+        if default is not _Unset:
+            return self._convert(default), SettingProvenance.DEFAULT
+
+        # 0. global defaults
+        if self._default is not _Unset:
+            return self._convert(self._default), SettingProvenance.GLOBAL_DEFAULT
+
+        raise RuntimeError(f"No configured value found for setting {self._name!r}")
+
+    def __call__(self, value: T | str | None = None, default: Unset[T | str] = _Unset) -> T:
         '''Return the setting value according to the standard precedence.
 
         Args:
@@ -389,7 +466,7 @@ class PrioritizedSetting(Generic[T]):
                 be converted, then returned.
 
             default (any, optional):
-                An optional default value that only takes precendence over
+                An optional default value that only takes precedence over
                 implicit default values specified on the property itself.
 
         Returns:
@@ -399,43 +476,8 @@ class PrioritizedSetting(Generic[T]):
             RuntimeError
         '''
 
-        # 7. immediate values
-        if value is not None:
-            return self._convert(value)
-
-        # 6. previously user-set value
-        if self._user_value is not _Unset:
-            return self._convert(self._user_value)
-
-        # 5. user-named config file
-        if self._parent and self._name in self._parent.config_override:
-            return self._convert(self._parent.config_override[self._name])
-
-        # 4. environment variable
-        if self._env_var and self._env_var in os.environ:
-            return self._convert(os.environ[self._env_var])
-
-        # 3. local config file
-        if self._parent and self._name in self._parent.config_user:
-            return self._convert(self._parent.config_user[self._name])
-
-        # 2. global config file
-        if self._parent and self._name in self._parent.config_system:
-            return self._convert(self._parent.config_system[self._name])
-
-        # 1.5 (undocumented) dev defaults take precedence over other defaults
-        if is_dev() and self._dev_default is not _Unset:
-            return self._convert(self._dev_default)
-
-        # 1. local defaults
-        if default is not _Unset:
-            return self._convert(default)
-
-        # 0. global defaults
-        if self._default is not _Unset:
-            return self._convert(self._default)
-
-        raise RuntimeError(f"No configured value found for setting {self._name!r}")
+        val, _ = self.get_value_with_provenance(value=value, default=default)
+        return val
 
     def __get__(self, instance: Any, owner: type[Any]) -> PrioritizedSetting[T]:
         return self
@@ -463,7 +505,7 @@ class PrioritizedSetting(Generic[T]):
         # are shared among all instances, it is usually not avised to store any
         # data directly on them. But in our case we only ever have one single
         # instance of a Settings object.
-        self._user_value = value  # lgtm [py/mutable-descriptor]
+        self._user_value = value
 
     def unset_value(self) -> None:
         ''' Unset the previous user value such that the priority is reset.
@@ -476,11 +518,11 @@ class PrioritizedSetting(Generic[T]):
         return self._env_var
 
     @property
-    def default(self) -> Unset[T]:
+    def default(self) -> Unset[T | str]:
         return self._default
 
     @property
-    def dev_default(self) -> Unset[T]:
+    def dev_default(self) -> Unset[T | str]:
         return self._dev_default
 
     @property
@@ -499,6 +541,8 @@ class PrioritizedSetting(Generic[T]):
             return "Bool"
         if self._convert is convert_int:
             return "Int"
+        if self._convert is convert_compression:
+            return "Compression Level (0-9)"
         if self._convert is convert_logging:
             return "Log Level"
         if self._convert is convert_str_seq:
@@ -508,6 +552,32 @@ class PrioritizedSetting(Generic[T]):
         if self._convert is convert_ico_path:
             return "Ico Path"
         raise RuntimeError("unreachable")
+
+    @property
+    def is_set(self) -> bool:
+        return self._user_value is not _Unset and self._user_value != self._default
+
+    @property
+    def current_provenance(self) -> SettingProvenance:
+        """Return where the current value came from."""
+        _, provenance = self.get_value_with_provenance()
+        return provenance
+
+    @property
+    def provenance_display(self) -> str:
+        """Return a readable description of provenance."""
+        provenance_map = {
+            SettingProvenance.IMMEDIATE: "Immediate",
+            SettingProvenance.USER_SET: "User-set",
+            SettingProvenance.CONFIG_OVERRIDE: "Config override file",
+            SettingProvenance.ENV_VAR: "Environment variable",
+            SettingProvenance.CONFIG_USER: "User config file",
+            SettingProvenance.CONFIG_SYSTEM: "System config file",
+            SettingProvenance.DEV_DEFAULT: "Dev default",
+            SettingProvenance.DEFAULT: "Explicit default",
+            SettingProvenance.GLOBAL_DEFAULT: "Global default",
+        }
+        return provenance_map[self.current_provenance]
 
 _config_user_locations: Sequence[Path] = (
     Path.home() / ".bokeh" / "bokeh.yaml",
@@ -547,11 +617,11 @@ class Settings:
     def dev(self) -> bool:
         return is_dev()
 
-    allowed_ws_origin: PrioritizedSetting[list[str]] = PrioritizedSetting("allowed_ws_origin", "BOKEH_ALLOW_WS_ORIGIN", default=[], convert=convert_str_seq, help="""
+    allowed_ws_origin = PrioritizedSetting[list[str]]("allowed_ws_origin", "BOKEH_ALLOW_WS_ORIGIN", default=[], convert=convert_str_seq, help="""
     A comma-separated list of allowed websocket origins for Bokeh server applications.
     """)
 
-    auth_module: PrioritizedSetting[str | None] = PrioritizedSetting("auth_module", "BOKEH_AUTH_MODULE", default=None, help="""
+    auth_module = PrioritizedSetting[str | None]("auth_module", "BOKEH_AUTH_MODULE", default=None, help="""
     A path to a Python modules that implements user authentication functions for
     the Bokeh server.
 
@@ -560,7 +630,7 @@ class Settings:
 
     """)
 
-    browser: PrioritizedSetting[str | None] = PrioritizedSetting("browser", "BOKEH_BROWSER", default=None, dev_default="none", help="""
+    browser = PrioritizedSetting[str | None]("browser", "BOKEH_BROWSER", default=None, dev_default="none", help="""
     The default browser that Bokeh should use to show documents with.
 
     Valid values are any of the predefined browser names understood by the
@@ -568,13 +638,13 @@ class Settings:
     module.
     """)
 
-    cdn_version: PrioritizedSetting[str | None] = PrioritizedSetting("version", "BOKEH_CDN_VERSION", default=None, help="""
+    cdn_version = PrioritizedSetting[str | None]("version", "BOKEH_CDN_VERSION", default=None, help="""
     What version of BokehJS to use with CDN resources.
 
     See the :class:`~bokeh.resources.Resources` class reference for full details.
     """)
 
-    chromedriver_path: PrioritizedSetting[str | None] = PrioritizedSetting("chromedriver_path", "BOKEH_CHROMEDRIVER_PATH", default=None, help="""
+    chromedriver_path = PrioritizedSetting[str | None]("chromedriver_path", "BOKEH_CHROMEDRIVER_PATH", default=None, help="""
     The name of or full path to chromedriver's executable.
 
     This is used to allow ``bokeh.io.export`` to work on systems that use a
@@ -583,13 +653,26 @@ class Settings:
     by Snap package manager; see https://snapcraft.io/).
     """)
 
-    cookie_secret: PrioritizedSetting[str | None] = PrioritizedSetting("cookie_secret", "BOKEH_COOKIE_SECRET", default=None, help="""
+    compression_level = PrioritizedSetting[int]("compression_level", "BOKEH_COMPRESSION_LEVEL", default=2, convert=convert_compression, help="""
+    In contexts where array buffers are base64-encoded (e.g. to embed inside
+    an HTML file), the buffer will first be compressed to save space.
+
+    Valid values are the standard gzip compression levels 0-9:
+
+    * Level 9 will result in the highest compression.
+    * Level 1 will result in the least compression, but be faster.
+    * Level 0 will result in no compression.
+
+    The default is level 2.
+    """)
+
+    cookie_secret = PrioritizedSetting[str | None]("cookie_secret", "BOKEH_COOKIE_SECRET", default=None, help="""
     Configure the ``cookie_secret`` setting in Tornado. This value is required
     if you use ``get_secure_cookie`` or ``set_secure_cookie``.  It should be a
     long, random sequence of bytes
     """)
 
-    docs_cdn: PrioritizedSetting[str | None] = PrioritizedSetting("docs_cdn", "BOKEH_DOCS_CDN", default=None, help="""
+    docs_cdn = PrioritizedSetting[str | None]("docs_cdn", "BOKEH_DOCS_CDN", default=None, help="""
     The version of BokehJS that should be use for loading CDN resources when
     building the docs.
 
@@ -612,11 +695,27 @@ class Settings:
     will build docs that use BokehJS version ``1.4.0rc1`` from CDN.
     """)
 
-    docs_version: PrioritizedSetting[str | None] = PrioritizedSetting("docs_version", "BOKEH_DOCS_VERSION", default=None, help="""
+    docs_version = PrioritizedSetting[str | None]("docs_version", "BOKEH_DOCS_VERSION", default=None, help="""
     The Bokeh version to stipulate when building the docs.
 
     This setting is necessary to re-deploy existing versions of docs with new
     fixes or changes.
+    """)
+
+    export_backend: PrioritizedSetting[str] = PrioritizedSetting("export_backend", "BOKEH_EXPORT_BACKEND", default="auto", help="""
+    Which browser backend to use for PNG and SVG export.
+
+    Valid values are:
+
+    - ``auto``: try Selenium first, fall back to Playwright (default).
+      This preserves existing behaviour for users who already have
+      Selenium installed.
+    - ``playwright``: use Playwright (requires ``pip install playwright``
+      and ``playwright install chromium``).
+    - ``selenium``: use Selenium with a browser driver on PATH.
+
+    This can also be overridden per-call via the ``backend`` parameter
+    on ``export_png``, ``export_svg``, etc.
     """)
 
     ico_path: PrioritizedSetting[str] = PrioritizedSetting("ico_path", "BOKEH_ICO_PATH",
@@ -632,11 +731,11 @@ class Settings:
 
     """)
 
-    ignore_filename: PrioritizedSetting[bool] = PrioritizedSetting("ignore_filename", "BOKEH_IGNORE_FILENAME", default=False, convert=convert_bool, help="""
+    ignore_filename = PrioritizedSetting[bool]("ignore_filename", "BOKEH_IGNORE_FILENAME", default=False, convert=convert_bool, help="""
     Whether to ignore the current script filename when saving Bokeh content.
     """)
 
-    log_level: PrioritizedSetting[LogLevel] = PrioritizedSetting("log_level", "BOKEH_LOG_LEVEL", default="info", dev_default="debug", help="""
+    log_level = PrioritizedSetting[LogLevel]("log_level", "BOKEH_LOG_LEVEL", default="info", dev_default="debug", help="""
     Set the log level for JavaScript BokehJS code.
 
     Valid values are, in order of increasing severity:
@@ -650,11 +749,11 @@ class Settings:
 
     """)
 
-    minified: PrioritizedSetting[bool] = PrioritizedSetting("minified", "BOKEH_MINIFIED", convert=convert_bool, default=True, dev_default=False, help="""
+    minified = PrioritizedSetting[bool]("minified", "BOKEH_MINIFIED", convert=convert_bool, default=True, dev_default=False, help="""
     Whether Bokeh should use minified BokehJS resources.
     """)
 
-    nodejs_path: PrioritizedSetting[str | None] = PrioritizedSetting("nodejs_path", "BOKEH_NODEJS_PATH", default=None, help="""
+    nodejs_path = PrioritizedSetting[str | None]("nodejs_path", "BOKEH_NODEJS_PATH", default=None, help="""
     Path to the Node executable.
 
     NodeJS is an optional dependency that is required for PNG and SVG export,
@@ -663,17 +762,27 @@ class Settings:
     location Bokeh finds, or to point to a non-standard location.
     """)
 
-    perform_document_validation: PrioritizedSetting[bool] = PrioritizedSetting("validate_doc", "BOKEH_VALIDATE_DOC", convert=convert_bool, default=True, help="""
+    perform_document_validation = PrioritizedSetting[bool]("validate_doc", "BOKEH_VALIDATE_DOC", convert=convert_bool, default=True, help="""
     whether Bokeh should perform validation checks on documents.
 
     Setting this value to False may afford a small performance improvement.
     """)
 
-    pretty: PrioritizedSetting[bool] = PrioritizedSetting("pretty", "BOKEH_PRETTY", default=False, dev_default=True, help="""
+    perform_error_diagnostics = PrioritizedSetting[bool]("perform_error_diagnostics", "BOKEH_PERFORM_ERROR_DIAGNOSTICS",
+        convert=convert_bool, default=True, help="""
+    Whether Bokeh should perform expensive error diagnostics.
+
+    When enabled (the default):
+
+    - Callback signatures are validated in ``on_change`` and ``on_event``
+    - Close-match suggestions are provided when accessing undefined attributes
+    """)
+
+    pretty = PrioritizedSetting[bool]("pretty", "BOKEH_PRETTY", default=False, dev_default=True, help="""
     Whether JSON strings should be pretty-printed.
     """)
 
-    py_log_level: PrioritizedSetting[PyLogLevel] = PrioritizedSetting("py_log_level", "BOKEH_PY_LOG_LEVEL",
+    py_log_level = PrioritizedSetting[PyLogLevel]("py_log_level", "BOKEH_PY_LOG_LEVEL",
         default="none", dev_default="debug", convert=convert_logging, help="""
     The log level for Python Bokeh code.
 
@@ -701,51 +810,50 @@ class Settings:
     See the :class:`~bokeh.resources.Resources` class reference for full details.
     """)
 
-    default_server_host: PrioritizedSetting[str] = PrioritizedSetting("default_server_host", "BOKEH_DEFAULT_SERVER_HOST", default="localhost", help="""
+    default_server_host = PrioritizedSetting[str]("default_server_host", "BOKEH_DEFAULT_SERVER_HOST", default="localhost", help="""
     Allows to define the default host used by Bokeh's server and resources.
     """)
 
-    default_server_port: PrioritizedSetting[int] = PrioritizedSetting("default_server_port", "BOKEH_DEFAULT_SERVER_PORT", default=5006, convert=convert_int, help="""
+    default_server_port = PrioritizedSetting[int]("default_server_port", "BOKEH_DEFAULT_SERVER_PORT", default=5006, convert=convert_int, help="""
     Allows to define the default port used by Bokeh's server and resources.
     """)
 
-    secret_key: PrioritizedSetting[str | None] = PrioritizedSetting("secret_key", "BOKEH_SECRET_KEY", default=None, help="""
+    secret_key = PrioritizedSetting[str | None]("secret_key", "BOKEH_SECRET_KEY", default=None, help="""
     A long, cryptographically-random secret unique to a Bokeh deployment.
     """)
 
-    serialize_include_defaults: PrioritizedSetting[bool] = \
-        PrioritizedSetting("serialize_include_defaults", "BOKEH_SERIALIZE_INCLUDE_DEFAULTS", default=False, help="""
-    Wether to include default values when serializing ``HasProps`` instances.
+    serialize_include_defaults = PrioritizedSetting[bool]("serialize_include_defaults", "BOKEH_SERIALIZE_INCLUDE_DEFAULTS", default=False, help="""
+    Whether to include default values when serializing ``HasProps`` instances.
 
     This is primarily useful for testing, debugging serialization/protocol and other internal purpose.
     """)
 
-    sign_sessions: PrioritizedSetting[bool] = PrioritizedSetting("sign_sessions", "BOKEH_SIGN_SESSIONS", default=False, help="""
+    sign_sessions = PrioritizedSetting[bool]("sign_sessions", "BOKEH_SIGN_SESSIONS", default=False, help="""
     Whether the Bokeh server should only allow sessions signed with a secret key.
 
     If True, ``BOKEH_SECRET_KEY`` must also be set.
     """)
 
-    simple_ids: PrioritizedSetting[bool] = PrioritizedSetting("simple_ids", "BOKEH_SIMPLE_IDS", default=True, convert=convert_bool, help="""
+    simple_ids = PrioritizedSetting[bool]("simple_ids", "BOKEH_SIMPLE_IDS", default=True, convert=convert_bool, help="""
     Whether Bokeh should use simple integers for model IDs (starting at 1000).
 
     If False, Bokeh will use UUIDs for object identifiers. This might be needed,
     e.g., if multiple processes are contributing to a single Bokeh Document.
     """)
 
-    ssl_certfile: PrioritizedSetting[str | None] = PrioritizedSetting("ssl_certfile", "BOKEH_SSL_CERTFILE", default=None, help="""
+    ssl_certfile = PrioritizedSetting[str | None]("ssl_certfile", "BOKEH_SSL_CERTFILE", default=None, help="""
     The path to a certificate file for SSL termination.
     """)
 
-    ssl_keyfile: PrioritizedSetting[str | None] = PrioritizedSetting("ssl_keyfile", "BOKEH_SSL_KEYFILE", default=None, help="""
+    ssl_keyfile = PrioritizedSetting[str | None]("ssl_keyfile", "BOKEH_SSL_KEYFILE", default=None, help="""
     The path to a private key file for SSL termination.
     """)
 
-    ssl_password: PrioritizedSetting[str | None] = PrioritizedSetting("ssl_password", "BOKEH_SSL_PASSWORD", default=None, help="""
+    ssl_password = PrioritizedSetting[str | None]("ssl_password", "BOKEH_SSL_PASSWORD", default=None, help="""
     A password to decrypt the SSL keyfile, if necessary.
     """)
 
-    validation_level: PrioritizedSetting[ValidationLevel] = PrioritizedSetting("validation_level", "BOKEH_VALIDATION_LEVEL",
+    validation_level = PrioritizedSetting[ValidationLevel]("validation_level", "BOKEH_VALIDATION_LEVEL",
         default="none", convert=convert_validation, help="""
     Whether validation checks should log or raise exceptions on errors and warnings.
 
@@ -757,7 +865,7 @@ class Settings:
 
     """)
 
-    xsrf_cookies: PrioritizedSetting[bool] = PrioritizedSetting("xsrf_cookies", "BOKEH_XSRF_COOKIES", default=False, convert=convert_bool, help="""
+    xsrf_cookies = PrioritizedSetting[bool]("xsrf_cookies", "BOKEH_XSRF_COOKIES", default=False, convert=convert_bool, help="""
     Whether to enable Tornado XSRF cookie protection on the Bokeh server. This
     is only applicable when also using an auth module or custom handlers. See
 
@@ -782,6 +890,8 @@ class Settings:
         .. deprecated:: 3.4.0
             Use ``bokehjs_path()`` method instead.
         '''
+        from .util.deprecation import deprecated
+
         deprecated((3, 4, 0), "bokehjsdir()", "bokehjs_path() method")
         return str(self.bokehjs_path())
 
@@ -853,9 +963,11 @@ settings = Settings()
 _secret_key = settings.secret_key()
 if _secret_key is not None and len(_secret_key) < 32:
     from .util.warnings import warn
+
     warn("BOKEH_SECRET_KEY is recommended to have at least 32 bytes of entropy chosen with a cryptographically-random algorithm")
 del _secret_key
 
 if settings.sign_sessions() and settings.secret_key() is None:
     from .util.warnings import warn
+
     warn("BOKEH_SECRET_KEY must be set if BOKEH_SIGN_SESSIONS is set to True")

@@ -36,7 +36,7 @@ export class TablerIconView extends IconView {
 
   protected readonly _tabler = new ImportedStyleSheet(`${TablerIconView._url}/tabler-icons.min.css`)
 
-  protected readonly _style = new InlineStyleSheet()
+  protected readonly _style = new InlineStyleSheet("", "icon")
 
   override stylesheets(): StyleSheetLike[] {
     return [...super.stylesheets(), TablerIconView._fonts, this._tabler, this._style]
@@ -51,7 +51,7 @@ export class TablerIconView extends IconView {
     })()
 
     this._style.replace(`
-      :host {
+      ${this.host_selector} {
         display: inline-block;
         vertical-align: middle;
         font-size: ${size};

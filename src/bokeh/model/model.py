@@ -13,6 +13,8 @@ a Bokeh |Document|.
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportArgumentType=false, reportAssignmentType=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportIncompatibleVariableOverride=false, reportIndexIssue=false, reportOperatorIssue=false, reportOptionalMemberAccess=false, reportReturnType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -22,15 +24,23 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 from inspect import Parameter, Signature, isclass
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Iterable,
+    Self,
+)
 
 # Bokeh imports
-from ..core import properties as p
 from ..core.has_props import HasProps, _default_resolver, abstract
 from ..core.property._sphinx import type_link
+from ..core.property.any import AnyRef
+from ..core.property.container import Dict, List, Set
+from ..core.property.instance import Instance
+from ..core.property.nullable import Nullable
+from ..core.property.primitive import Bool, String
 from ..core.property.validation import without_property_validation
 from ..core.serialization import ObjectRefRep, Ref, Serializer
-from ..core.types import ID
 from ..events import Event
 from ..themes import default as default_theme
 from ..util.callback_manager import EventCallbackManager, PropertyCallbackManager
@@ -43,10 +53,9 @@ from .util import (
 )
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
-
     from ..core.has_props import Setter
     from ..core.query import SelectorType
+    from ..core.types import ID
     from ..document import Document
     from ..document.events import DocumentPatchedEvent
     from ..models.callbacks import (
@@ -90,11 +99,18 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
 
         if cls.__module__.startswith("bokeh.models"):
             assert "__init__" in cls.__dict__, str(cls)
-            parameters = [x[0] for x in  cls.parameters()]
+            parameters = [x[0] for x in cls.parameters()]
             cls.__init__.__signature__ = Signature(parameters=parameters)
             process_example(cls)
 
     _id: ID
+
+    # Don't override __new__, because then you will have to overload it every time
+    # you overload __init__ with a custom signature (in e.g. ranges or figure) in
+    # declaration files (*.pyi).
+    @classmethod
+    def _new(cls, id: ID) -> Self:
+        return cls.__new__(cls, id=id)
 
     def __new__(cls, *args: Any, id: ID | None = None, **kwargs: Any) -> Self:
         obj = super().__new__(cls)
@@ -137,7 +153,7 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
     def id(self) -> ID:
         return self._id
 
-    name: str | None = p.Nullable(p.String, help="""
+    name = Nullable(String, help="""
     An arbitrary, user-supplied name for this model.
 
     This name can be useful when querying the document to retrieve specific
@@ -145,7 +161,7 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
 
     .. code:: python
 
-        >>> plot.circle([1,2,3], [4,5,6], name="temp")
+        >>> plot.scatter([1,2,3], [4,5,6], name="temp")
         >>> plot.select(name="temp")
         [GlyphRenderer(id='399d53f5-73e9-44d9-9527-544b761c7705', ...)]
 
@@ -156,7 +172,7 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
 
     """)
 
-    tags: list[Any] = p.List(p.AnyRef, help="""
+    tags = List(AnyRef, help="""
     An optional list of arbitrary, user-supplied values to attach to this
     model.
 
@@ -165,7 +181,7 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
 
     .. code:: python
 
-        >>> r = plot.circle([1,2,3], [4,5,6])
+        >>> r = plot.scatter([1,2,3], [4,5,6])
         >>> r.tags = ["foo", 10]
         >>> plot.select(tags=['foo', 10])
         [GlyphRenderer(id='1de4c3df-a83d-480a-899b-fb263d3d5dd9', ...)]
@@ -180,7 +196,7 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
 
     """)
 
-    js_event_callbacks = p.Dict(p.String, p.List(p.Instance("bokeh.models.callbacks.Callback")), help="""
+    js_event_callbacks = Dict(String, List(Instance("bokeh.models.callbacks.Callback")), help="""
     A mapping of event names to lists of ``CustomJS`` callbacks.
 
     Typically, rather then modifying this property directly, callbacks should be
@@ -192,7 +208,7 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
         plot.js_on_event('tap', callback)
     """)
 
-    js_property_callbacks = p.Dict(p.String, p.List(p.Instance("bokeh.models.callbacks.Callback")), help="""
+    js_property_callbacks = Dict(String, List(Instance("bokeh.models.callbacks.Callback")), help="""
     A mapping of attribute names to lists of ``CustomJS`` callbacks, to be set up on
     BokehJS side when the document is created.
 
@@ -206,13 +222,13 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
 
     """)
 
-    subscribed_events = p.Set(p.String, help="""
+    subscribed_events = Set(String, help="""
     Collection of events that are subscribed to by Python callbacks. This is
     the set of events that will be communicated from BokehJS back to Python
     for this model.
     """)
 
-    syncable: bool = p.Bool(default=True, help="""
+    syncable: bool = Bool(default=True, help="""
     Indicates whether this model should be synchronized back to a Bokeh server when
     updated in a web browser. Setting to ``False`` may be useful to reduce network
     traffic when dealing with frequently updated objects whose updated values we
@@ -232,6 +248,18 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
         return Ref(id=self._id)
 
     # Public methods ----------------------------------------------------------
+
+    @classmethod
+    def clear_extensions(cls) -> None:
+        """ Clear any currently defined custom extensions.
+
+        Serialization calls will result in any currently defined custom
+        extensions being included with the generated Document, whether or not
+        there are utilized. This method can be used to clear out all existing
+        custom extension definitions.
+
+        """
+        _default_resolver.clear_extensions()
 
     @classmethod
     @without_property_validation
@@ -495,10 +523,11 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
 
     def select_one(self, selector: SelectorType) -> Model | None:
         ''' Query this object and all of its references for objects that
-        match the given selector.  Raises an error if more than one object
-        is found.  Returns single matching object, or None if nothing is found
+        match the given selector. Raises an error if more than one object
+        is found. Returns single matching object, or None if nothing is found.
+
         Args:
-            selector (JSON-like) :
+            selector (JSON-like):
 
         Returns:
             Model
@@ -586,10 +615,6 @@ class Model(HasProps, HasDocumentRef, PropertyCallbackManager, EventCallbackMana
         doc.theme.apply_to_model(self)
         self.document = doc
         self._update_event_callbacks()
-
-    @classmethod
-    def _clear_extensions(cls) -> None:
-        _default_resolver.clear_extensions()
 
     def _detach_document(self) -> None:
         ''' Detach a model from a Bokeh |Document|.

@@ -3,8 +3,8 @@ import type * as visuals from "core/visuals"
 import * as p from "core/properties"
 import {Signal0} from "core/signaling"
 import type {Place} from "core/enums"
-import {Location, OutputBackend, ResetPolicy} from "core/enums"
-import {concat, remove_by} from "core/util/array"
+import {Location, OutputBackend, ResetPolicy, WindowAxis} from "core/enums"
+import {concat, remove} from "core/util/array"
 import {difference} from "core/util/set"
 import {isString} from "core/util/types"
 import type {LRTB} from "core/util/bbox"
@@ -31,6 +31,7 @@ import {GlyphRenderer} from "../renderers/glyph_renderer"
 import type {ToolAliases} from "../tools/tool"
 import {Tool} from "../tools/tool"
 import {DataRange1d} from "../ranges/data_range1d"
+import {StyledElement} from "../ui/styled_element"
 
 import {PlotView} from "./plot_canvas"
 export {PlotView}
@@ -51,11 +52,11 @@ export namespace Plot {
     title: p.Property<Title | string | null>
     title_location: p.Property<Location | null>
 
-    above: p.Property<(Annotation | Axis)[]>
-    below: p.Property<(Annotation | Axis)[]>
-    left: p.Property<(Annotation | Axis)[]>
-    right: p.Property<(Annotation | Axis)[]>
-    center: p.Property<(Annotation | Grid)[]>
+    above: p.Property<(Annotation | Axis | StyledElement)[]>
+    below: p.Property<(Annotation | Axis | StyledElement)[]>
+    left: p.Property<(Annotation | Axis | StyledElement)[]>
+    right: p.Property<(Annotation | Axis | StyledElement)[]>
+    center: p.Property<(Annotation | Grid | StyledElement)[]>
 
     renderers: p.Property<Renderer[]>
 
@@ -70,6 +71,8 @@ export namespace Plot {
 
     extra_x_scales: p.Property<Dict<Scale>>
     extra_y_scales: p.Property<Dict<Scale>>
+
+    window_axis: p.Property<WindowAxis>
 
     lod_factor: p.Property<number>
     lod_interval: p.Property<number>
@@ -103,12 +106,18 @@ export namespace Plot {
   export type Mixins =
     mixins.OutlineLine    &
     mixins.BackgroundFill &
-    mixins.BorderFill
+    mixins.BackgroundHatch &
+    mixins.BorderLine &
+    mixins.BorderFill &
+    mixins.BorderHatch
 
   export type Visuals = visuals.Visuals & {
     outline_line: visuals.Line
     background_fill: visuals.Fill
+    background_hatch: visuals.Hatch
+    border_line: visuals.Line
     border_fill: visuals.Fill
+    border_hatch: visuals.Hatch
   }
 }
 
@@ -132,7 +141,10 @@ export class Plot extends LayoutDOM {
     this.mixins<Plot.Mixins>([
       ["outline_",    mixins.Line],
       ["background_", mixins.Fill],
+      ["background_", mixins.Hatch],
+      ["border_",     mixins.Line],
       ["border_",     mixins.Fill],
+      ["border_",     mixins.Hatch],
     ])
 
     this.define<Plot.Props>(({Bool, Float, Str, List, Dict, Or, Ref, Null, Nullable, Struct, Opt}) => ({
@@ -151,11 +163,11 @@ export class Plot extends LayoutDOM {
       }],
       title_location:    [ Nullable(Location), "above" ],
 
-      above:             [ List(Or(Ref(Annotation), Ref(Axis))), [] ],
-      below:             [ List(Or(Ref(Annotation), Ref(Axis))), [] ],
-      left:              [ List(Or(Ref(Annotation), Ref(Axis))), [] ],
-      right:             [ List(Or(Ref(Annotation), Ref(Axis))), [] ],
-      center:            [ List(Or(Ref(Annotation), Ref(Grid))), [] ],
+      above:             [ List(Or(Ref(Annotation), Ref(Axis), Ref(StyledElement))), [] ],
+      below:             [ List(Or(Ref(Annotation), Ref(Axis), Ref(StyledElement))), [] ],
+      left:              [ List(Or(Ref(Annotation), Ref(Axis), Ref(StyledElement))), [] ],
+      right:             [ List(Or(Ref(Annotation), Ref(Axis), Ref(StyledElement))), [] ],
+      center:            [ List(Or(Ref(Annotation), Ref(Grid), Ref(StyledElement))), [] ],
 
       renderers:         [ List(Ref(Renderer)), [] ],
 
@@ -170,6 +182,8 @@ export class Plot extends LayoutDOM {
 
       extra_x_scales:    [ Dict(Ref(Scale)), {} ],
       extra_y_scales:    [ Dict(Ref(Scale)), {} ],
+
+      window_axis:       [ WindowAxis, "none" ],
 
       lod_factor:        [ Float, 10 ],
       lod_interval:      [ Float, 300 ],
@@ -204,39 +218,38 @@ export class Plot extends LayoutDOM {
       width: 600,
       height: 600,
       outline_line_color: "#e5e5e5",
+      border_line_color: null,
       border_fill_color: "#ffffff",
       background_fill_color: "#ffffff",
+      context_menu: "auto",
     })
   }
 
-  add_layout(renderer: Annotation | GuideRenderer, side: Place = "center"): void {
+  add_layout(renderer: Annotation | GuideRenderer | StyledElement, side: Place = "center"): void {
+    this.remove_layout(renderer)
+
     const renderers = this.properties[side].get_value()
     this.setv({[side]: [...renderers, renderer]})
   }
 
-  remove_layout(renderer: Annotation | GuideRenderer): void {
-
-    const del = (items: (Annotation | GuideRenderer)[]): void => {
-      remove_by(items, (item) => item == renderer)
-    }
-
-    del(this.left)
-    del(this.right)
-    del(this.above)
-    del(this.below)
-    del(this.center)
+  remove_layout(renderer: Annotation | GuideRenderer | StyledElement): void {
+    remove(this.left, renderer)
+    remove(this.right, renderer)
+    remove(this.above, renderer)
+    remove(this.below, renderer)
+    remove(this.center, renderer)
   }
 
   get data_renderers(): DataRenderer[] {
-    return this.renderers.filter((r): r is DataRenderer => r instanceof DataRenderer)
+    return this.renderers.filter((r) => r instanceof DataRenderer)
   }
 
   add_renderers(...renderers: Renderer[]): void {
     this.renderers = [...this.renderers, ...renderers]
   }
 
-  add_glyph(glyph: Glyph, source: ColumnarDataSource = new ColumnDataSource(),
-      attrs: Partial<GlyphRenderer.Attrs> = {}): GlyphRenderer {
+  add_glyph<BaseGlyph extends Glyph>(glyph: BaseGlyph, source: ColumnarDataSource = new ColumnDataSource(),
+      attrs: Partial<GlyphRenderer.Attrs<BaseGlyph>> = {}): GlyphRenderer<BaseGlyph> {
     const renderer = new GlyphRenderer({...attrs, data_source: source, glyph})
     this.add_renderers(renderer)
     return renderer
@@ -251,11 +264,11 @@ export class Plot extends LayoutDOM {
     this.toolbar.tools = [...difference(new Set(this.toolbar.tools), new Set(tools))]
   }
 
-  get panels(): (Annotation | Axis | Grid)[] {
+  get panels(): (Annotation | Axis | Grid | StyledElement)[] {
     return [...this.side_panels, ...this.center]
   }
 
-  get side_panels(): (Annotation | Axis)[] {
+  get side_panels(): (Annotation | Axis | StyledElement)[] {
     const {above, below, left, right} = this
     return concat([above, below, left, right])
   }

@@ -91,26 +91,43 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 from copy import copy
-from types import FunctionType
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Generic,
+    Protocol,
     TypeGuard,
-    TypeVar,
+    cast,
+    overload,
 )
 
 # Bokeh imports
-from ...util.deprecation import deprecated
 from .singletons import Undefined
 from .wrappers import PropertyValueColumnData, PropertyValueContainer
 
 if TYPE_CHECKING:
+    from ...document import Document
     from ...document.events import DocumentPatchedEvent
+    from ...model import Model
     from ..has_props import HasProps, Setter
     from .alias import Alias, DeprecatedAlias
     from .bases import Property
+    from .descriptor_factory import PropertyDescriptorLike
+
+class _HasDocument(Protocol):
+    document: Document | None
+
+class _HasOverriddenDefaults(Protocol):
+    def _overridden_defaults(self) -> dict[str, Any]: ...
+
+class _HasTrigger(Protocol):
+    def trigger(self, attr: str, old: Any, new: Any,
+            hint: DocumentPatchedEvent | None = None, setter: Setter | None = None) -> None: ...
+
+class _DataSpecProperty(Protocol):
+    value_type: Property[Any]
+
+    def to_serializable(self, obj: HasProps, name: str, val: Any) -> Any: ...
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -134,12 +151,10 @@ __all__ = (
 # Dev API
 #-----------------------------------------------------------------------------
 
-T = TypeVar("T")
-
 class UnsetValueError(ValueError):
     """ Represents state in which descriptor without value was accessed. """
 
-class AliasPropertyDescriptor(Generic[T]):
+class AliasPropertyDescriptor[T]:
     """
 
     """
@@ -156,7 +171,11 @@ class AliasPropertyDescriptor(Generic[T]):
         self.property = alias
         self.__doc__ = f"This is a compatibility alias for the {self.aliased_name!r} property."
 
-    def __get__(self, obj: HasProps | None, owner: type[HasProps] | None) -> T:
+    @overload
+    def __get__(self, obj: HasProps, owner: type[HasProps] | None) -> T: ...
+    @overload
+    def __get__(self, obj: None, owner: type[HasProps] | None) -> AliasPropertyDescriptor[T]: ...
+    def __get__(self, obj: HasProps | None, owner: type[HasProps] | None) -> T | AliasPropertyDescriptor[T]:
         if obj is not None:
             return getattr(obj, self.aliased_name)
         elif owner is not None:
@@ -175,10 +194,10 @@ class AliasPropertyDescriptor(Generic[T]):
     def has_unstable_default(self, obj: HasProps) -> bool:
         return obj.lookup(self.aliased_name).has_unstable_default(obj)
 
-    def class_default(self, cls: type[HasProps], *, no_eval: bool = False):
+    def class_default(self, cls: type[HasProps], *, no_eval: bool = False) -> Any:
         return cls.lookup(self.aliased_name).class_default(cls, no_eval=no_eval)
 
-class DeprecatedAliasPropertyDescriptor(AliasPropertyDescriptor[T]):
+class DeprecatedAliasPropertyDescriptor[T](AliasPropertyDescriptor[T]):
     """
 
     """
@@ -199,11 +218,17 @@ This is a backwards compatibility alias for the {self.aliased_name!r} property.
 """
 
     def _warn(self) -> None:
+        from ...util.deprecation import deprecated
+
         deprecated(self.alias.since, self.name, self.aliased_name, self.alias.extra)
 
-    def __get__(self, obj: HasProps | None, owner: type[HasProps] | None) -> T:
+    @overload
+    def __get__(self, obj: HasProps, owner: type[HasProps] | None) -> T: ...
+    @overload
+    def __get__(self, obj: None, owner: type[HasProps] | None) -> AliasPropertyDescriptor[T]: ...
+    def __get__(self, obj: HasProps | None, owner: type[HasProps] | None) -> T | AliasPropertyDescriptor[T]:
         if obj is not None:
-            # Warn only when accesing descriptor's value, otherwise there would
+            # Warn only when accessing descriptor's value, otherwise there would
             # be a lot of spurious warnings from parameter resolution, etc.
             self._warn()
         return super().__get__(obj, owner)
@@ -212,7 +237,7 @@ This is a backwards compatibility alias for the {self.aliased_name!r} property.
         self._warn()
         super().__set__(obj, value)
 
-class PropertyDescriptor(Generic[T]):
+class PropertyDescriptor[T]:
     """ A base class for Bokeh properties with simple get/set and serialization
     behavior.
 
@@ -242,7 +267,11 @@ class PropertyDescriptor(Generic[T]):
         """
         return f"{self.property}"
 
-    def __get__(self, obj: HasProps | None, owner: type[HasProps] | None) -> T:
+    @overload
+    def __get__(self, obj: HasProps, owner: type[HasProps] | None) -> T: ...
+    @overload
+    def __get__(self, obj: None, owner: type[HasProps] | None) -> PropertyDescriptor[T]: ...
+    def __get__(self, obj: HasProps | None, owner: type[HasProps] | None) -> T | PropertyDescriptor[T]:
         """ Implement the getter for the Python `descriptor protocol`_.
 
         For instance attribute access, we delegate to the |Property|. For
@@ -347,7 +376,7 @@ class PropertyDescriptor(Generic[T]):
         if self.name in obj._unstable_default_values:
             del obj._unstable_default_values[self.name]
 
-    def class_default(self, cls: type[HasProps], *, no_eval: bool = False):
+    def class_default(self, cls: type[HasProps], *, no_eval: bool = False) -> Any:
         """ Get the default value for a specific subtype of ``HasProps``,
         which may not be used for an individual instance.
 
@@ -392,19 +421,13 @@ class PropertyDescriptor(Generic[T]):
         """
         return self.__get__(obj, obj.__class__)
 
-    def set_from_json(self, obj: HasProps, value: Any, *, setter: Setter | None = None):
+    def set_from_json(self, obj: HasProps, value: Any, *, setter: Setter | None = None) -> None:
         """Sets the value of this property from a JSON value.
 
         Args:
             obj: (HasProps) : instance to set the property value on
 
-            json: (JSON-value) : value to set to the attribute to
-
-            models (dict or None, optional) :
-                Mapping of model ids to models (default: None)
-
-                This is needed in cases where the attributes to update also
-                have values that have references.
+            value: (JSON-value) : value to set to the attribute to
 
             setter (ClientSession or ServerSession or None, optional) :
                 This is used to prevent "boomerang" updates to Bokeh apps.
@@ -479,12 +502,14 @@ class PropertyDescriptor(Generic[T]):
     def has_unstable_default(self, obj: HasProps) -> bool:
         # _may_have_unstable_default() doesn't have access to overrides, so check manually
         return self.property._may_have_unstable_default() or \
-            self.is_unstable(obj.__overridden_defaults__.get(self.name, None))
+            self.is_unstable(cast(_HasOverriddenDefaults, obj)._overridden_defaults().get(self.name, None))
 
     @classmethod
     def is_unstable(cls, value: Any) -> TypeGuard[Callable[[], Any]]:
+        from types import FunctionType
+
         from .instance import InstanceDefault
-        return isinstance(value, FunctionType | InstanceDefault)
+        return isinstance(value, (FunctionType, InstanceDefault))
 
     def _get(self, obj: HasProps) -> T:
         """ Internal implementation of instance attribute access for the
@@ -518,7 +543,7 @@ class PropertyDescriptor(Generic[T]):
         """ Internal implementation of instance attribute access for default
         values.
 
-        Handles bookeeping around ``PropertyContainer`` value, etc.
+        Handles bookkeeping around ``PropertyContainer`` value, etc.
 
         """
         if self.name in obj._property_values:
@@ -695,7 +720,7 @@ class PropertyDescriptor(Generic[T]):
 
         """
         if hasattr(obj, 'trigger'):
-            obj.trigger(self.name, old, value, hint, setter)
+            cast(_HasTrigger, obj).trigger(self.name, old, value, hint, setter)
 
 
 _CDS_SET_FROM_CDS_ERROR = """
@@ -706,12 +731,12 @@ If you need to copy set from one CDS to another, make a shallow copy by
 calling dict: s1.data = dict(s2.data)
 """
 
-class ColumnDataPropertyDescriptor(PropertyDescriptor):
+class ColumnDataPropertyDescriptor(PropertyDescriptor[Any]):
     """ A ``PropertyDescriptor`` specialized to handling ``ColumnData`` properties.
 
     """
 
-    def __set__(self, obj, value, *, setter=None):
+    def __set__(self, obj: HasProps, value: Any, *, setter: Setter | None = None) -> None:
         """ Implement the setter for the Python `descriptor protocol`_.
 
         This method first separately extracts and removes any ``units`` field
@@ -760,13 +785,14 @@ class ColumnDataPropertyDescriptor(PropertyDescriptor):
             raise ValueError(_CDS_SET_FROM_CDS_ERROR)
 
         from ...document.events import ColumnDataChangedEvent
-        hint = ColumnDataChangedEvent(obj.document, obj, "data", setter=setter) if obj.document else None
+        model = cast(_HasDocument, obj)
+        hint = ColumnDataChangedEvent(model.document, cast("Model", obj), "data", setter=setter) if model.document else None
 
         value = self.property.prepare_value(obj, self.name, value)
         old = self._get(obj)
         self._set(obj, old, value, hint=hint, setter=setter)
 
-class DataSpecPropertyDescriptor(PropertyDescriptor):
+class DataSpecPropertyDescriptor(PropertyDescriptor[Any]):
     """ A ``PropertyDescriptor`` for Bokeh |DataSpec| properties that serialize to
     field/value dictionaries.
 
@@ -776,9 +802,9 @@ class DataSpecPropertyDescriptor(PropertyDescriptor):
         """
 
         """
-        return self.property.to_serializable(obj, self.name, getattr(obj, self.name))
+        return cast(_DataSpecProperty, self.property).to_serializable(obj, self.name, getattr(obj, self.name))
 
-    def set_from_json(self, obj: HasProps, value: Any, *, setter: Setter | None = None):
+    def set_from_json(self, obj: HasProps, value: Any, *, setter: Setter | None = None) -> None:
         """ Sets the value of this property from a JSON value.
 
         This method first
@@ -786,9 +812,7 @@ class DataSpecPropertyDescriptor(PropertyDescriptor):
         Args:
             obj (HasProps) :
 
-            json (JSON-dict) :
-
-            models(seq[Model], optional) :
+            value (JSON-dict) :
 
             setter (ClientSession or ServerSession or None, optional) :
                 This is used to prevent "boomerang" updates to Bokeh apps.
@@ -811,7 +835,7 @@ class DataSpecPropertyDescriptor(PropertyDescriptor):
             old = getattr(obj, self.name)
             if old is not None:
                 try:
-                    self.property.value_type.validate(old, False)
+                    cast(_DataSpecProperty, self.property).value_type.validate(old, False)
                     if 'value' in value:
                         value = value['value']
                 except ValueError:
@@ -827,7 +851,7 @@ class UnitsSpecPropertyDescriptor(DataSpecPropertyDescriptor):
 
     """
 
-    def __init__(self, name, property, units_property) -> None:
+    def __init__(self, name: str, property: Any, units_property: PropertyDescriptorLike[Any]) -> None:
         """
 
         Args:
@@ -844,7 +868,7 @@ class UnitsSpecPropertyDescriptor(DataSpecPropertyDescriptor):
         super().__init__(name, property)
         self.units_prop = units_property
 
-    def __set__(self, obj, value, *, setter=None):
+    def __set__(self, obj: HasProps, value: Any, *, setter: Setter | None = None) -> None:
         """ Implement the setter for the Python `descriptor protocol`_.
 
         This method first separately extracts and removes any ``units`` field
@@ -882,7 +906,7 @@ class UnitsSpecPropertyDescriptor(DataSpecPropertyDescriptor):
         value = self._extract_units(obj, value)
         super().__set__(obj, value, setter=setter)
 
-    def set_from_json(self, obj, json, *, models=None, setter=None):
+    def set_from_json(self, obj: HasProps, value: Any, *, models: Any = None, setter: Setter | None = None) -> None:
         """ Sets the value of this property from a JSON value.
 
         This method first separately extracts and removes any ``units`` field
@@ -916,10 +940,10 @@ class UnitsSpecPropertyDescriptor(DataSpecPropertyDescriptor):
             None
 
         """
-        json = self._extract_units(obj, json)
-        super().set_from_json(obj, json, setter=setter)
+        value = self._extract_units(obj, value)
+        super().set_from_json(obj, value, setter=setter)
 
-    def _extract_units(self, obj, value):
+    def _extract_units(self, obj: HasProps, value: Any) -> Any:
         """ Internal helper for dealing with units associated units properties
         when setting values on ``UnitsSpec`` properties.
 

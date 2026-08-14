@@ -13,6 +13,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false, reportAttributeAccessIssue=false, reportAssignmentType=false, reportGeneralTypeIssues=false, reportOperatorIssue=false, reportReturnType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -22,28 +24,28 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 import numbers
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
+from typing import Any
 
 # Bokeh imports
 from ...core.has_props import abstract
-from ...core.properties import (
-    Bool,
-    Color,
-    Datetime,
-    Either,
-    Enum,
-    Float,
-    Instance,
-    Int,
-    Nullable,
-    Override,
-    Readonly,
-    Required,
-    Seq,
-    String,
-    Tuple,
-)
+from ...core.property.color import Color
+from ...core.property.container import Seq, Tuple
+from ...core.property.datetime import Datetime
 from ...core.property.descriptors import UnsetValueError
+from ...core.property.either import Either
+from ...core.property.enum import Enum
+from ...core.property.instance import Instance
+from ...core.property.nullable import Nullable
+from ...core.property.override import Override
+from ...core.property.primitive import (
+    Bool,
+    Float,
+    Int,
+    String,
+)
+from ...core.property.readonly import Readonly
+from ...core.property.required import Required
 from ...core.property.singletons import Undefined
 from ...core.validation import error
 from ...core.validation.errors import EQUAL_SLIDER_START_END
@@ -130,7 +132,7 @@ class NumericalSlider(AbstractSlider):
     """ Base class for numerical sliders. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     format = Either(String, Instance(TickFormatter), help="""
@@ -144,7 +146,7 @@ class CategoricalSlider(AbstractSlider):
     """ Discrete slider allowing selection from a collection of values. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     categories = Required(Seq(String), help="""
@@ -163,7 +165,7 @@ class Slider(NumericalSlider):
     """ Slider-based number selection widget. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     start = Required(Float, help="""
@@ -192,7 +194,7 @@ class RangeSlider(NumericalSlider):
     """ Range-slider based number range selection widget. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     value = Required(Tuple(Float, Float), help="""
@@ -221,7 +223,7 @@ class DateSlider(NumericalSlider):
     """ Slider-based date selection widget. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     @property
@@ -234,7 +236,7 @@ class DateSlider(NumericalSlider):
             return None
 
         if isinstance(self.value, numbers.Number):
-            return datetime.fromtimestamp(self.value / 1000, tz=timezone.utc)
+            return datetime.fromtimestamp(self.value / 1000, tz=UTC)
 
         return self.value
 
@@ -248,7 +250,7 @@ class DateSlider(NumericalSlider):
             return None
 
         if isinstance(self.value, numbers.Number):
-            dt = datetime.fromtimestamp(self.value / 1000, tz=timezone.utc)
+            dt = datetime.fromtimestamp(self.value / 1000, tz=UTC)
             return date(*dt.timetuple()[:3])
 
         return self.value
@@ -279,7 +281,7 @@ class DateRangeSlider(NumericalSlider):
     """ Slider-based date range selection widget. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     @property
@@ -293,11 +295,11 @@ class DateRangeSlider(NumericalSlider):
             return None
         v1, v2 = self.value
         if isinstance(v1, numbers.Number):
-            d1 = datetime.fromtimestamp(v1 / 1000, tz=timezone.utc)
+            d1 = datetime.fromtimestamp(v1 / 1000, tz=UTC)
         else:
             d1 = v1
         if isinstance(v2, numbers.Number):
-            d2 = datetime.fromtimestamp(v2 / 1000, tz=timezone.utc)
+            d2 = datetime.fromtimestamp(v2 / 1000, tz=UTC)
         else:
             d2 = v2
         return d1, d2
@@ -313,12 +315,12 @@ class DateRangeSlider(NumericalSlider):
             return None
         v1, v2 = self.value
         if isinstance(v1, numbers.Number):
-            dt = datetime.fromtimestamp(v1 / 1000, tz=timezone.utc)
+            dt = datetime.fromtimestamp(v1 / 1000, tz=UTC)
             d1 = date(*dt.timetuple()[:3])
         else:
             d1 = v1
         if isinstance(v2, numbers.Number):
-            dt = datetime.fromtimestamp(v2 / 1000, tz=timezone.utc)
+            dt = datetime.fromtimestamp(v2 / 1000, tz=UTC)
             d2 = date(*dt.timetuple()[:3])
         else:
             d2 = v2
@@ -350,7 +352,7 @@ class DatetimeRangeSlider(NumericalSlider):
     """ Slider-based datetime range selection widget. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     @property
@@ -362,11 +364,11 @@ class DatetimeRangeSlider(NumericalSlider):
             return None
         v1, v2 = self.value
         if isinstance(v1, numbers.Number):
-            d1 = datetime.fromtimestamp(v1 / 1000, tz=timezone.utc)
+            d1 = datetime.fromtimestamp(v1 / 1000, tz=UTC)
         else:
             d1 = v1
         if isinstance(v2, numbers.Number):
-            d2 = datetime.fromtimestamp(v2 / 1000, tz=timezone.utc)
+            d2 = datetime.fromtimestamp(v2 / 1000, tz=UTC)
         else:
             d2 = v2
         return d1, d2

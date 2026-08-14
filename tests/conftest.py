@@ -13,17 +13,19 @@ pytest_plugins = (
 )
 
 # Standard library imports
-from inspect import iscoroutinefunction
+import importlib
+import importlib.util
 
 # External imports
 import _pytest
 import pytest
+from narwhals.stable.v1.typing import IntoDataFrame
 
-
-def pytest_collection_modifyitems(items: list[_pytest.nodes.Item]) -> None:
-    for item in items:
-        if iscoroutinefunction(item.obj):
-            item.add_marker(pytest.mark.asyncio)
+if importlib.util.find_spec("pandas") is not None:
+    import pandas as pd
+    pandas_1x = pd.__version__.startswith("1")
+else:
+    pd = pandas_1x = None
 
 # Unfortunately these seem to all need to be centrally defined at the top level
 def pytest_addoption(parser: _pytest.config.argparsing.Parser) -> None:
@@ -48,3 +50,57 @@ def pytest_addoption(parser: _pytest.config.argparsing.Parser) -> None:
     parser.addoption(
         "--no-js", action="store_true", default=False,
         help="only run python code and skip js")
+
+def pandas_constructor(obj) -> IntoDataFrame:
+    return pd.DataFrame(obj)  # type: ignore[no-any-return]
+
+
+def pandas_nullable_constructor(obj) -> IntoDataFrame:
+    return pd.DataFrame(obj).convert_dtypes(dtype_backend="numpy_nullable")  # type: ignore[no-any-return]
+
+
+def pandas_pyarrow_constructor(obj) -> IntoDataFrame:
+    return pd.DataFrame(obj).convert_dtypes(dtype_backend="pyarrow")  # type: ignore[no-any-return]
+
+
+def polars_eager_constructor(obj) -> IntoDataFrame:
+    import polars as pl
+    return pl.DataFrame(obj)
+
+
+def pyarrow_table_constructor(obj) -> IntoDataFrame:
+    import pyarrow as pa
+    return pa.table(obj)  # type: ignore[no-any-return]
+
+
+constructors = []
+if pandas_1x is False:
+    constructors.append(pandas_constructor)
+    constructors.append(pandas_nullable_constructor)
+elif pandas_1x is True:
+    constructors.append(pandas_constructor)
+
+if pd and importlib.util.find_spec('pyarrow') is not None:
+    constructors.extend([pandas_pyarrow_constructor, pyarrow_table_constructor])
+if importlib.util.find_spec('polars') is not None:
+    constructors.append(polars_eager_constructor)
+
+
+@pytest.fixture(params=constructors)
+def constructor(request: pytest.FixtureRequest):
+    return request.param  # type: ignore[no-any-return]
+
+
+@pytest.fixture(scope="session")
+def base_url() -> None:
+    '''Session-scoped no-op override to prevent a fixture scope conflict.
+
+    ``pytest-base-url`` (pulled in by ``pytest-playwright``) ships a
+    session-scoped autouse ``_verify_url`` fixture that depends on
+    ``base_url``.  ``pytest-tornado`` also defines ``base_url`` but at
+    function scope.  When both plugins are installed, pytest raises
+    ``ScopeMismatch``.  This override short-circuits the resolution:
+    returning ``None`` causes ``_verify_url`` to skip its check, and no
+    Bokeh test actually consumes the ``base_url`` fixture.
+    '''
+    return None

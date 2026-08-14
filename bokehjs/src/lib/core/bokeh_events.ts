@@ -1,12 +1,34 @@
+import {Model} from "../model"
 import type {HasProps} from "./has_props"
 import type {Attrs} from "./types"
+import {isPlainObject} from "./util/types"
+import {assert} from "./util/assert"
 import type {GeometryData} from "./geometry"
 import type {Class} from "./class"
 import type {KeyModifiers} from "./ui_gestures"
 import type {Serializable, Serializer} from "./serialization"
 import {serialize} from "./serialization"
+import {Deserializer} from "./serialization/deserializer"
 import type {Equatable, Comparator} from "./util/eq"
 import {equals} from "./util/eq"
+import type {Legend} from "../models/annotations/legend"
+import type {Axis} from "../models/axes/axis"
+import type {LegendItem} from "../models/annotations/legend_item"
+import type {Factor} from "../models/ranges/factor_range"
+import type {ClearInput} from "../models/widgets/input_widget"
+import type {ClientConnection} from "../client/connection"
+import type {FileInputChange} from "../models/widgets/file_input"
+
+Deserializer.register("event", (rep: BokehEventRep, deserializer: Deserializer): BokehEvent => {
+  const cls = deserializable_events.get(rep.name)
+  if (cls !== undefined && cls.from_values != null) {
+    const values = deserializer.decode(rep.values)
+    assert(isPlainObject(values))
+    return cls.from_values(values)
+  } else {
+    deserializer.error(`deserialization of '${rep.name}' event is not supported`)
+  }
+})
 
 export type BokehEventType =
   DocumentEventType |
@@ -17,10 +39,14 @@ export type DocumentEventType =
   ConnectionEventType
 
 export type ConnectionEventType =
-  "connection_lost"
+  "connection_lost" |
+  "client_reconnected"
 
 export type ModelEventType =
+  "axis_click" |
   "button_click" |
+  "file_input_change" |
+  "legend_item_click" |
   "menu_item_click" |
   "value_submit" |
   UIEventType
@@ -52,34 +78,43 @@ export type PointEventType =
   "rotatestart" |
   "rotateend"
 
+/**
+ * Events known to bokeh by name, for type-safety of Model.on_event(event_name, (EventType) => void).
+ * Other events, including user defined events, can be referred to by event's class object.
+ */
 export type BokehEventMap = {
-  document_ready: DocumentReady
-  connection_lost: ConnectionLost
+  axis_click: AxisClick
   button_click: ButtonClick
-  menu_item_click: MenuItemClick
-  value_submit: ValueSubmit
-  lodstart: LODStart
+  clear_input: ClearInput
+  connection_lost: ConnectionLost
+  client_reconnected: ClientReconnected
+  document_ready: DocumentReady
+  doubletap: DoubleTap
+  file_input_change: FileInputChange
+  legend_item_click: LegendItemClick
   lodend: LODEnd
-  rangesupdate: RangesUpdate
-  selectiongeometry: SelectionGeometry
-  reset: Reset
-  pan: Pan
-  pinch: Pinch
-  rotate: Rotate
-  wheel: MouseWheel
-  mousemove: MouseMove
+  lodstart: LODStart
+  menu_item_click: MenuItemClick
   mouseenter: MouseEnter
   mouseleave: MouseLeave
-  tap: Tap
-  doubletap: DoubleTap
+  mousemove: MouseMove
+  pan: Pan
+  panend: PanEnd
+  panstart: PanStart
+  pinch: Pinch
+  pinchend: PinchEnd
+  pinchstart: PinchStart
   press: Press
   pressup: PressUp
-  panstart: PanStart
-  panend: PanEnd
-  pinchstart: PinchStart
-  pinchend: PinchEnd
-  rotatestart: RotateStart
+  rangesupdate: RangesUpdate
+  reset: Reset
+  rotate: Rotate
   rotateend: RotateEnd
+  rotatestart: RotateStart
+  selectiongeometry: SelectionGeometry
+  tap: Tap
+  value_submit: ValueSubmit
+  wheel: MouseWheel
 }
 
 export type BokehEventRep = {
@@ -88,9 +123,25 @@ export type BokehEventRep = {
   values: unknown
 }
 
-function event(event_name: string) {
+export function event(event_name: string) {
   return (cls: Class<BokehEvent>) => {
     cls.prototype.event_name = event_name
+  }
+}
+
+const deserializable_events: Map<string, typeof BokehEvent> = new Map()
+
+/**
+ * Marks and registers a class as a one way (server -> client) event.
+ */
+export function server_event(event_name: string) {
+  return (cls: Class<BokehEvent>) => {
+    if (deserializable_events.has(event_name)) {
+      throw new Error(`'${event_name}' event is already registered`)
+    }
+    deserializable_events.set(event_name, cls)
+    cls.prototype.event_name = event_name
+    cls.prototype.publish = false
   }
 }
 
@@ -110,6 +161,8 @@ export abstract class BokehEvent implements Serializable, Equatable {
 
   protected abstract get event_values(): Attrs
 
+  static from_values?(values: Attrs): BokehEvent
+
   static {
     this.prototype.publish = true
   }
@@ -120,6 +173,42 @@ export abstract class ModelEvent extends BokehEvent {
 
   protected get event_values(): Attrs {
     return {model: this.origin}
+  }
+}
+
+export abstract class UserEvent extends ModelEvent {
+  constructor(readonly values: Attrs) {
+    super()
+  }
+
+  protected override get event_values(): Attrs {
+    return {...super.event_values, ...this.values}
+  }
+
+  static override from_values(values: Attrs): UserEvent {
+    const origin = (() => {
+      if ("model" in values) {
+        const {model} = values
+        assert(model === null || model instanceof Model)
+        delete values.model
+        return model
+      } else {
+        return null
+      }
+    })()
+    const event = new (this as any)(values)
+    event.origin = origin
+    return event
+  }
+}
+
+export abstract class PropertyBundleEvent<M extends HasProps, K extends keyof M> extends ModelEvent {
+  constructor(readonly values: Pick<M, K>) {
+    super()
+  }
+
+  protected override get event_values(): Attrs {
+    return {...super.event_values, ...this.values}
   }
 }
 
@@ -134,22 +223,78 @@ export class DocumentReady extends DocumentEvent {
 
 export abstract class ConnectionEvent extends DocumentEvent {}
 
+/**
+ * Announce when a WebSocket connection was disconnected.
+ *
+ * @member timestamp when the last connection attempt was made
+ * @member attempts  the number of times reconnection was attempted
+ * @member timeout   milliseconds till next reconnection attempt or `null`
+ *                   indicating that no further attempts will be made
+ */
 export class ConnectionLost extends ConnectionEvent {
-  readonly timestamp = new Date()
+  readonly timestamp = Date.now()
+
+  constructor(private readonly connection: WeakRef<ClientConnection>, readonly attempts: number, readonly timeout: number | null) {
+    super()
+  }
 
   protected get event_values(): Attrs {
-    const {timestamp} = this
-    return {timestamp}
+    const {timestamp, attempts, timeout} = this
+    return {timestamp, attempts, timeout}
   }
 
   static {
     this.prototype.event_name = "connection_lost"
     this.prototype.publish = false
   }
+
+  reconnect(): void {
+    void this.connection.deref()?.reconnect()
+  }
+}
+
+/**
+ * Announce when a connection to the client has been reconnected.
+ */
+export class ClientReconnected extends ConnectionEvent {
+
+  protected get event_values(): Attrs {
+    return {}
+  }
+
+  static {
+    this.prototype.event_name = "client_reconnected"
+  }
+}
+
+@event("axis_click")
+export class AxisClick extends ModelEvent {
+
+  constructor(readonly model: Axis, readonly value: number | Factor) {
+    super()
+  }
+
+  protected override get event_values(): Attrs {
+    const {value} = this
+    return {...super.event_values, value}
+  }
 }
 
 @event("button_click")
 export class ButtonClick extends ModelEvent {}
+
+@event("legend_item_click")
+export class LegendItemClick extends ModelEvent {
+
+  constructor(readonly model: Legend, readonly item: LegendItem) {
+    super()
+  }
+
+  protected override get event_values(): Attrs {
+    const {item} = this
+    return {...super.event_values, item}
+  }
+}
 
 @event("menu_item_click")
 export class MenuItemClick extends ModelEvent {

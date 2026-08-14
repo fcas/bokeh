@@ -29,7 +29,6 @@ const load_google_api = function(api_key: string, api_version: string): void {
 
   const enc = encodeURIComponent
   const script = document.createElement("script")
-  script.type = "text/javascript"
   script.src = `https://maps.googleapis.com/maps/api/js?v=${enc(api_version)}&key=${enc(api_key)}&callback=_bokeh_gmaps_callback&loading=async`
   document.body.appendChild(script)
 }
@@ -101,7 +100,7 @@ export class GMapPlotView extends PlotView {
     super.remove()
   }
 
-  override update_range(range_info: GMapRangeInfo | null, options?: RangeOptions): void {
+  override update_range(range_info: GMapRangeInfo | null, options?: Partial<RangeOptions>): void {
     // RESET -------------------------
     if (range_info == null) {
       this.map.setCenter({lat: this.initial_lat, lng: this.initial_lng})

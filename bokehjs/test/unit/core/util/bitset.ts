@@ -1,8 +1,11 @@
-import {expect} from "assertions"
+import {expect} from "#framework/assertions"
+import {trap} from "#framework/util"
+
 import {BitSet} from "@bokehjs/core/util/bitset"
 import {range} from "@bokehjs/core/util/array"
 import {is_equal} from "@bokehjs/core/util/eq"
 import {may_have_refs} from "@bokehjs/core/util/refs"
+import {version as js_version} from "@bokehjs/version"
 
 describe("core/util/bitset module", () => {
 
@@ -25,7 +28,7 @@ describe("core/util/bitset module", () => {
     const bs0 = BitSet.from_indices(39, [0, 1, 15, 16, 31, 32, 33, 38])
     const bs1 = BitSet.from_indices(39, [1, 6, 15, 31, 32, 34, 35, 38])
 
-    it("should suppport get() method", () => {
+    it("should support get() method", () => {
       expect(bs0.get(0)).to.be.equal(true)
       expect(bs0.get(1)).to.be.equal(true)
       expect(bs0.get(2)).to.be.equal(false)
@@ -45,107 +48,138 @@ describe("core/util/bitset module", () => {
       expect(bs0.get(37)).to.be.equal(false)
       expect(bs0.get(38)).to.be.equal(true)
 
-      expect(() => bs0.get(39)).to.throw()
+      expect(bs0.get(-1)).to.be.equal(true)
+      expect(bs0.get(39)).to.be.equal(false)
+
+      expect(bs0.get(-39)).to.be.equal(true)
+      expect(bs0.get(-40)).to.be.equal(false)
     })
 
-    it("should suppport iterator protocol", () => {
+    it("should support set() method", () => {
+      const bs = BitSet.from_indices(5, [0, 1, 4])
+
+      expect(bs.get(0)).to.be.true
+      bs.set(0, false)
+      expect(bs.get(0)).to.be.false
+      bs.set(0, true)
+      expect(bs.get(0)).to.be.true
+
+      expect(bs.get(-1)).to.be.true
+      expect(bs.get(4)).to.be.true
+      bs.set(-1, false)
+      expect(bs.get(-1)).to.be.false
+      expect(bs.get(4)).to.be.false
+      bs.set(-1, true)
+      expect(bs.get(-1)).to.be.true
+      expect(bs.get(4)).to.be.true
+
+      const out0 = trap(() => bs.set(5, true))
+      expect(out0.warn).to.be.equal(`[bokeh ${js_version}] out of bounds access: index=5 >= size=5\n`)
+      expect(bs.get(5)).to.be.false
+
+      const out1 = trap(() => bs.set(-6, true))
+      expect(out1.warn).to.be.equal(`[bokeh ${js_version}] out of bounds access: index=-1 >= size=5\n`)
+      expect(bs.get(-6)).to.be.false
+    })
+
+    it("should support iterator protocol", () => {
       expect([...bs0]).to.be.equal([0, 1, 15, 16, 31, 32, 33, 38])
-      expect([...bs0.ones()]).to.be.equal([0, 1, 15, 16, 31, 32, 33, 38])
-      expect([...bs0.zeros()]).to.be.equal([
+      expect(bs0.ones()).to.be.equal([0, 1, 15, 16, 31, 32, 33, 38])
+      expect(bs0.zeros()).to.be.equal([
         2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19,
         20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 34, 35, 36, 37,
       ])
     })
 
-    it("should suppport count getter", () => {
+    it("should support count getter", () => {
       expect(bs0.count).to.be.equal(8)
       expect(bs1.count).to.be.equal(8)
     })
 
-    it("should suppport ~a", () => {
+    it("should support ~a", () => {
       const bs = bs0.inversion()
       expect(bs).to.be.instanceof(BitSet)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([
+      expect(bs.ones()).to.be.equal([
         2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19,
         20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 34, 35, 36, 37,
       ])
       expect(bs.count).to.be.equal(31)
     })
 
-    it("should suppport a | b operation", () => {
+    it("should support a | b operation", () => {
       const bs = bs0.union(bs1)
       expect(bs).to.be.instanceof(BitSet)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([0, 1, 6, 15, 16, 31, 32, 33, 34, 35, 38])
+      expect(bs.ones()).to.be.equal([0, 1, 6, 15, 16, 31, 32, 33, 34, 35, 38])
       expect(bs.count).to.be.equal(11)
     })
 
-    it("should suppport a & b operation", () => {
+    it("should support a & b operation", () => {
       const bs = bs0.intersection(bs1)
       expect(bs).to.be.instanceof(BitSet)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([1, 15, 31, 32, 38])
+      expect(bs.ones()).to.be.equal([1, 15, 31, 32, 38])
       expect(bs.count).to.be.equal(5)
     })
 
-    it("should suppport a - b operation", () => {
+    it("should support a - b operation", () => {
       const bs = bs0.difference(bs1)
       expect(bs).to.be.instanceof(BitSet)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([0, 16, 33])
+      expect(bs.ones()).to.be.equal([0, 16, 33])
       expect(bs.count).to.be.equal(3)
     })
 
-    it("should suppport a ^ b operation", () => {
+    it("should support a ^ b operation", () => {
       const bs = bs0.symmetric_difference(bs1)
       expect(bs).to.be.instanceof(BitSet)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([0, 6, 16, 33, 34, 35])
+      expect(bs.ones()).to.be.equal([0, 6, 16, 33, 34, 35])
       expect(bs.count).to.be.equal(6)
     })
 
-    it("should suppport inplace ~a", () => {
+    it("should support inplace ~a", () => {
       const bs = bs0.clone()
       bs.invert()
       expect(bs).to.be.instanceof(BitSet)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([
+      expect(bs.ones()).to.be.equal([
         2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19,
         20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 34, 35, 36, 37,
       ])
       expect(bs.count).to.be.equal(31)
     })
 
-    it("should suppport inplace a | b operation", () => {
+    it("should support inplace a | b operation", () => {
       const bs = bs0.clone()
       bs.add(bs1)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([0, 1, 6, 15, 16, 31, 32, 33, 34, 35, 38])
+      expect(bs.ones()).to.be.equal([0, 1, 6, 15, 16, 31, 32, 33, 34, 35, 38])
       expect(bs.count).to.be.equal(11)
     })
 
-    it("should suppport inplace a & b operation", () => {
+    it("should support inplace a & b operation", () => {
       const bs = bs0.clone()
       bs.intersect(bs1)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([1, 15, 31, 32, 38])
+      expect(bs.ones()).to.be.equal([1, 15, 31, 32, 38])
       expect(bs.count).to.be.equal(5)
     })
 
-    it("should suppport inplace a - b operation", () => {
+    it("should support inplace a - b operation", () => {
       const bs = bs0.clone()
       bs.subtract(bs1)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([0, 16, 33])
+      expect(bs.ones()).to.be.equal([0, 16, 33])
       expect(bs.count).to.be.equal(3)
     })
 
-    it("should suppport inplace a ^ b operation", () => {
+    it("should support inplace a ^ b operation", () => {
       const bs = bs0.clone()
       bs.symmetric_subtract(bs1)
       expect(bs.size).to.be.equal(39)
-      expect([...bs.ones()]).to.be.equal([0, 6, 16, 33, 34, 35])
+      expect(bs.ones()).to.be.equal([0, 6, 16, 33, 34, 35])
       expect(bs.count).to.be.equal(6)
     })
 

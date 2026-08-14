@@ -1,24 +1,26 @@
 import {Widget, WidgetView} from "./widget"
+import type {StyleSheetLike} from "core/dom"
 import type * as p from "core/properties"
+import * as toggle_input_css from "styles/widgets/toggle_input.css"
 
 export abstract class ToggleInputView extends WidgetView {
   declare model: ToggleInput
 
-  override connect_signals(): void {
-    super.connect_signals()
+  protected _last_active: boolean
 
-    const {active, disabled} = this.model.properties
-    this.on_change(active, () => this._update_active())
-    this.on_change(disabled, () => this._update_disabled())
+  override stylesheets(): StyleSheetLike[] {
+    return [...super.stylesheets(), toggle_input_css.default]
   }
 
-  protected abstract _update_active(): void
-
-  protected abstract _update_disabled(): void
-
   protected _toggle_active(): void {
-    if (!this.model.disabled) {
-      this.model.active = !this.model.active
+    const {active, disabled, tri_state} = this.model
+    const is_indeterminate = active === null
+    const new_active = active != null ? !active : true
+    if (!is_indeterminate) {
+      this._last_active = active
+    }
+    if (!disabled) {
+      this.model.active = !is_indeterminate && tri_state ? null : is_indeterminate && tri_state ? !this._last_active : new_active
     }
   }
 }
@@ -27,7 +29,10 @@ export namespace ToggleInput {
   export type Attrs = p.AttrsOf<Props>
 
   export type Props = Widget.Props & {
-    active: p.Property<boolean>
+    active: p.Property<boolean | null>
+    label: p.Property<string>
+    // TODO: Implement tri-state handling without having to add this here
+    tri_state: p.Property<boolean>
   }
 }
 
@@ -42,8 +47,11 @@ export abstract class ToggleInput extends Widget {
   }
 
   static {
-    this.define<ToggleInput.Props>(({Bool}) => ({
-      active: [ Bool, false ],
+    this.define<ToggleInput.Props>(({Bool, Nullable, Str}) => ({
+      active: [ Nullable(Bool), false ],
+      label: [ Str, "" ],
+      // TODO: Implement tri-state handling without having to add this here
+      tri_state: [ Bool, false],
     }))
   }
 }

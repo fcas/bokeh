@@ -1,4 +1,4 @@
-import {expect} from "assertions"
+import {expect} from "#framework/assertions"
 
 import {MercatorTickFormatter} from "@bokehjs/models/formatters/mercator_tick_formatter"
 import {unicode_replace} from "@bokehjs/models/formatters/basic_tick_formatter"
@@ -22,6 +22,14 @@ describe("mercator_tick_formatter module", () => {
         expect(labels[0]).to.be.equal(unicode_replace(`${lat}`))
       }
     }
+  })
+
+  it("should decay tick values close to zero", () => {
+    const lat = new MercatorTickFormatter({dimension: "lat"})
+    const lon = new MercatorTickFormatter({dimension: "lon"})
+
+    expect(lat.doFormat([-1e-7, 1e-7], {loc: 0})).to.be.equal(["0", "0"])
+    expect(lon.doFormat([-1e-7, 1e-7], {loc: 0})).to.be.equal(["0", "0"])
   })
 
   it("should compute longitude tick labels when dimension=lon", () => {

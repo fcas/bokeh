@@ -1,8 +1,10 @@
 import {Model} from "../../model"
 import type * as p from "core/properties"
+import {SubsetIndexMapper} from "core/util/indices"
 import type {Selection} from "../selections/selection"
 import {View} from "core/view"
 import {Indices} from "core/types"
+import type {Arrayable} from "core/types"
 import {Filter} from "../filters/filter"
 import {AllIndices} from "../filters/all_indices"
 import {IntersectionFilter} from "../filters/intersection_filter"
@@ -73,15 +75,7 @@ export class CDSViewView extends View {
     // XXX: if the data source is empty, there still may be one
     // index originating from glyph's scalar values.
     const source = this.parent.data_source.get_value()
-
-    const size = source.get_length() ?? 1
-    const indices = Indices.all_set(size)
-
-    const filtered = this.model.filter.compute_indices(source)
-    indices.intersect(filtered)
-
-    this.model.indices = indices
-    this.model._indices_map_to_subset()
+    this.model.compute_indices(source)
   }
 }
 
@@ -92,7 +86,7 @@ export namespace CDSView {
     filter: p.Property<Filter>
     // internal
     indices: p.Property<Indices>
-    indices_map: p.Property<Map<number, number>>
+    indices_map: p.Property<SubsetIndexMapper>
     masked: p.Property<Indices | null>
   }
 }
@@ -114,37 +108,52 @@ export class CDSView extends Model {
       filter: [ Ref(Filter), () => new AllIndices() ],
     }))
 
-    this.internal<CDSView.Props>(({Int, Mapping, Ref, Nullable}) => ({
+    this.internal<CDSView.Props>(({Ref, Nullable}) => ({
       indices:     [ Ref(Indices) ],
-      indices_map: [ Mapping(Int, Int), new Map() ],
+      indices_map: [ Ref(SubsetIndexMapper), () => new SubsetIndexMapper(0) ],
       masked:      [ Nullable(Ref(Indices)), null ],
     }))
   }
 
-  private _indices: number[]
+  get_subset_index(index: number): number {
+    return this.indices_map.get_subset_index(index)
+  }
 
-  _indices_map_to_subset(): void {
-    this._indices = [...this.indices]
-    this.indices_map = new Map()
-
-    const {_indices, indices_map} = this
-    const n = _indices.length
-
-    for (let i = 0; i < n; i++) {
-      indices_map.set(_indices[i], i)
-    }
+  has_subset_index(index: number): boolean {
+    return this.indices_map.has_subset_index(index)
   }
 
   convert_selection_from_subset(selection_subset: Selection): Selection {
-    return selection_subset.map((i) => this._indices[i])
+    return selection_subset.map((i) => this.indices_map.get_superset_index(i))
   }
 
   convert_selection_to_subset(selection_full: Selection): Selection {
-    return selection_full.map((i) => this.indices_map.get(i)!) // XXX ?? NaN
+    return selection_full.map((i) => this.indices_map.get_subset_index(i)) // XXX ?? NaN
   }
 
   convert_indices_from_subset(indices: number[]): number[] {
-    return indices.map((i) => this._indices[i])
+    return this.indices_map.convert_indices_from_subset(indices)
+  }
+
+  get_reference_point(array: Arrayable, value: unknown): number | null {
+    return this.indices_map.subset_index_of(array, value)
+  }
+
+  compute_indices(source: ColumnarDataSource): void {
+    const size = source.get_length() ?? 1
+    const indices = Indices.all_set(size)
+
+    const filtered = this.filter.compute_indices(source)
+    indices.intersect(filtered)
+
+    this.indices = indices
+
+    // reuse mapper if possible
+    if (size !== this.indices_map.size) {
+      this.indices_map = new SubsetIndexMapper(size)
+    }
+
+    this.indices_map.set_subset(indices.ones())
   }
 
   /** @deprecated */

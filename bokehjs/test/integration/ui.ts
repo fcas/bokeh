@@ -1,7 +1,7 @@
-import {display} from "./_util"
-import {actions, xy} from "../interactive"
+import {display} from "#framework/layouts"
+import {actions, xy} from "#framework/interactive"
 
-import {Dialog, Pane, Menu, ActionItem, CheckableItem, DividerItem, CustomJS, BoxSelectTool} from "@bokehjs/models"
+import {Dialog, Drawer, Pane, Menu, MenuItem, CustomJS, BoxSelectTool} from "@bokehjs/models"
 import type {Figure} from "@bokehjs/api/plotting"
 import {figure} from "@bokehjs/api/plotting"
 import {Random} from "@bokehjs/core/util/random"
@@ -66,20 +66,20 @@ describe("UI elements", () => {
       const palette = Spectral11.map((color) => color2hex(color))
       const menu = new Menu({
         items: [
-          new ActionItem({
+          new MenuItem({
             label: "Count",
             shortcut: "Alt+C",
             disabled: true,
             action: new CustomJS({code: "console.log('count not implemented')"}),
           }),
-          new ActionItem({
+          new MenuItem({
             label: "Delete",
             shortcut: "Alt+Shift+D",
             icon: "delete",
             action: new CustomJS({code: "console.log('delete not implemented')"}),
           }),
-          new DividerItem(),
-          new ActionItem({
+          null,
+          new MenuItem({
             label: "Choose color",
             menu: new Menu({
               stylesheets: [
@@ -87,7 +87,7 @@ describe("UI elements", () => {
                 ".bk-label { font-family: monospace; }",
               ],
               items: palette.map((color) => {
-                return new ActionItem({
+                return new MenuItem({
                   label: color,
                   icon: `.color-${color.substring(1)}`,
                   action: new CustomJS({code: "console.log('color not implemented')"}),
@@ -95,19 +95,19 @@ describe("UI elements", () => {
               }),
             }),
           }),
-          new DividerItem(),
-          new CheckableItem({
+          null,
+          new MenuItem({
             label: "Continuous selection",
             checked: box_select.continuous,
             action: new CustomJS({code: "console.log('continuous not implemented')"}),
           }),
-          new DividerItem(),
-          new ActionItem({
+          null,
+          new MenuItem({
             icon: "invert_selection",
             label: "Invert selection",
             action: new CustomJS({code: "console.log('invert not implemented')"}),
           }),
-          new ActionItem({
+          new MenuItem({
             icon: "clear_selection",
             label: "Clear selection",
             shortcut: "Esc",
@@ -128,6 +128,57 @@ describe("UI elements", () => {
       view.show_context_menu(new MouseEvent("contextmenu", {clientX: x + 120, clientY: y + 120, shiftKey: false}))
       // TODO hover "Choose color" item to show its sub-menu
       await paint()
+    })
+  })
+
+  describe("should implement Drawer component", () => {
+    function size(width: number, height: number) {
+      return `
+        :host {
+          width: ${width}px;
+          height: ${height}px;
+        }
+      `
+    }
+
+    const checkerboard_background = `
+      :host {
+        background-image: linear-gradient(45deg, #808080 25%, transparent 25%),
+                          linear-gradient(-45deg, #808080 25%, transparent 25%),
+                          linear-gradient(45deg, transparent 75%, #808080 75%),
+                          linear-gradient(-45deg, transparent 75%, #808080 75%);
+        background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        background-size: 20px 20px;
+      }
+    `
+
+    async function drawer(attrs: Partial<Drawer.Attrs>) {
+      const drawer = new Drawer({
+        open: true,
+        size: "80px",
+        ...attrs,
+      })
+      const pane = new Pane({
+        elements: [drawer],
+        stylesheets: [size(200, 200), checkerboard_background],
+      })
+      return await display(pane, [250, 250])
+    }
+
+    it("supporting location = 'left'", async () => {
+      await drawer({location: "left"})
+    })
+
+    it("supporting location = 'right'", async () => {
+      await drawer({location: "right"})
+    })
+
+    it("supporting location = 'above'", async () => {
+      await drawer({location: "above"})
+    })
+
+    it("supporting location = 'below'", async () => {
+      await drawer({location: "below"})
     })
   })
 })

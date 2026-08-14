@@ -19,11 +19,9 @@ import pytest ; pytest
 # Standard library imports
 from unittest.mock import MagicMock, patch
 
-# External imports
-import pandas as pd
-
 # Bokeh imports
 from bokeh.core.properties import Any, ColumnData, Instance
+from bokeh.core.property.bases import Property
 from bokeh.core.serialization import MapRep, ObjectRefRep, Serializer
 from bokeh.document import Document
 from bokeh.model import Model
@@ -137,6 +135,11 @@ class TestDocumentPatchedEvent:
         e = bde.DocumentPatchedEvent(doc, "setter", "invoker")
         e2 = bde.DocumentPatchedEvent(doc, "setter", "invoker")
         assert e.combine(e2) is False
+
+    def test_handle_event_unknown_kind(self) -> None:
+        doc = Document()
+        with pytest.raises(RuntimeError, match="unknown patch event type 'Unknown'"):
+            bde.DocumentPatchedEvent.handle_event(doc, dict(kind="Unknown"), None)
 
 # ModelChangedEvent -----------------------------------------------------------
 
@@ -314,12 +317,13 @@ class TestColumnsStreamedEvent:
         assert e.rollover == 200
 
     def test_pandas_data(self) -> None:
+        pd = pytest.importorskip("pandas")
         doc = Document()
         m = SomeModel()
         df = pd.DataFrame({'x': [1, 2, 3], 'y': [4, 5, 6]})
         e = bde.ColumnsStreamedEvent(doc, m, "data", df, 200, "setter", "invoker")
         assert isinstance(e.data, dict)
-        assert e.data == {c: df[c] for c in df.columns}
+        assert Property().matches(e.data, {c: df[c] for c in df.columns}) # can't use == with pandas' types
 
 # ColumnsPatchedEvent ---------------------------------------------------------
 

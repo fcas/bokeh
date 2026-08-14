@@ -13,6 +13,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -22,36 +24,36 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 from math import inf
-from typing import Any as any
+from typing import Any
 
 # Bokeh imports
 from ...core.has_props import abstract
-from ...core.properties import (
-    Any,
-    Auto,
-    Bool,
-    Color,
-    ColorHex,
+from ...core.property.any import AnyRef
+from ...core.property.auto import Auto
+from ...core.property.color import Color, ColorHex
+from ...core.property.container import (
     Dict,
-    Either,
-    Enum,
-    Float,
-    Instance,
-    Int,
-    Interval,
     List,
-    NonNegative,
-    Null,
-    Nullable,
-    Override,
-    Positive,
-    Readonly,
-    Required,
     Seq,
-    String,
     Tuple,
 )
-from ...util.deprecation import deprecated
+from ...core.property.either import Either
+from ...core.property.enum import Enum
+from ...core.property.instance import Instance
+from ...core.property.nullable import Nullable
+from ...core.property.numeric import Interval, NonNegative, Positive
+from ...core.property.override import Override
+from ...core.property.primitive import (
+    Bool,
+    Float,
+    Int,
+    Null,
+    String,
+)
+from ...core.property.readonly import Readonly
+from ...core.property.required import Required
+from ...core.property_aliases import IconLike
+from ...events import ModelEvent
 from ..dom import HTML
 from ..formatters import TickFormatter
 from ..ui import Tooltip
@@ -71,6 +73,7 @@ __all__ = (
     'MultiChoice',
     'MultiSelect',
     'NumericInput',
+    'LightDark',
     'PasswordInput',
     'Select',
     'Spinner',
@@ -84,7 +87,6 @@ __all__ = (
 # Dev API
 #-----------------------------------------------------------------------------
 
-
 @abstract
 class InputWidget(Widget):
     ''' Abstract base class for input widgets.
@@ -92,7 +94,7 @@ class InputWidget(Widget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     title = Either(String, Instance(HTML), default="", help="""
@@ -107,17 +109,33 @@ class InputWidget(Widget):
 # General API
 #-----------------------------------------------------------------------------
 
+# TODO mark this as a one way event from server to client
+class ClearInput(ModelEvent):
+    """
+    Notifies the input widget that its input/value needs to be cleared.
+
+    This is specially useful for widgets whose value can't be simply cleared by
+    assigning to ``value`` (or equivalent) property.
+
+    """
+    event_name = "clear_input"
+
+    def __init__(self, model: InputWidget) -> None:
+        if not isinstance(model, InputWidget):
+            raise ValueError(f"{self.__class__.__name__} event only applies to input models, i.e. instances of bokeh.models.widgets.InputWidget")
+        super().__init__(model=model)
+
 class FileInput(InputWidget):
     ''' Present a file-chooser dialog to users and return the contents of the
     selected files.
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     value = Readonly(Either(String, List(String)), help='''
-    The base64-enconded contents of the file or files that were loaded.
+    The base64-encoded contents of the file or files that were loaded.
 
     If `multiple` is set to False (default), this value is a single string with the contents
     of the single file that was chosen.
@@ -191,6 +209,30 @@ class FileInput(InputWidget):
     selection of more than one file at a time should be possible.
     """)
 
+    directory = Bool(default=False, help="""
+    Whether to allow selection of directories instead of files.
+
+    The filename will be relative paths to the uploaded directory.
+
+    .. note::
+        When a directory is uploaded it will give add a confirmation pop up.
+        The confirmation pop up cannot be disabled, as this is a security feature
+        in the browser.
+
+    .. note::
+        The `accept` parameter only works with file extension.
+        When using `accept` with `directory`, the number of files
+        reported will be the total amount of files, not the filtered.
+    """)
+
+
+    def clear(self) -> None:
+        """ Clear the contents of this file input widget.
+
+        """
+        doc = self.document
+        if doc is not None:
+            doc.callbacks.send_event(ClearInput(self))
 
 class NumericInput(InputWidget):
     ''' Numeric input widget.
@@ -198,7 +240,7 @@ class NumericInput(InputWidget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     value = Either(Null, Float, Int, help="""
@@ -237,7 +279,7 @@ class Spinner(NumericInput):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     value_throttled = Readonly(Either(Null, Float, Int), help="""
@@ -265,32 +307,63 @@ class ToggleInput(Widget):
     """ Base class for toggleable (boolean) input widgets. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
-    active = Bool(default=False, help="""
+    active = Nullable(Bool, default=False, help="""
     The state of the widget.
+    """)
+
+    label = String(default="", help="""
+    The label next to the input.
+    """)
+
+    tri_state = Bool(default=False, help="""
+    Allow handle of third intermediate state of the widget (``active = None``).
     """)
 
 class Checkbox(ToggleInput):
     """ A checkbox widget. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-
-    label = String(default="", help="""
-    The label next to the checkbox.
-    """)
 
 class Switch(ToggleInput):
     """ A checkbox-like widget. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
-    width = Override(default=32)
+    on_icon = Nullable(IconLike, default=None, help="""
+    Icon to represent widget on state (``active = True``).
+    """)
+
+    off_icon = Nullable(IconLike, default=None, help="""
+    Icon to represent widget off state (``active = False``).
+    """)
+
+    indeterminate_icon = Nullable(IconLike, default=None, help="""
+    Icon to represent widget indeterminate state (``active = None``).
+    """)
+
+class LightDark(Switch):
+    """ A switch widget to change between themes (light and dark). """
+
+    # explicit __init__ to support Init signatures
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+    active = Override(default=None)
+
+    on_icon = Override(default="light_theme")
+
+    off_icon = Override(default="dark_theme")
+
+    indeterminate_icon = Override(default="system_theme")
+
+    tri_state = Override(default=True)
 
 class TextLikeInput(InputWidget):
     ''' Base class for text-like input widgets.
@@ -298,7 +371,7 @@ class TextLikeInput(InputWidget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     value = String(default="", help="""
@@ -328,7 +401,7 @@ class TextInput(TextLikeInput):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     prefix = Nullable(String, help="""
@@ -347,7 +420,7 @@ class TextAreaInput(TextLikeInput):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     cols = Int(default=20, help="""
@@ -373,7 +446,7 @@ class PasswordInput(TextInput):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -383,7 +456,7 @@ class AutocompleteInput(TextInput):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     completions = List(String, help="""
@@ -414,7 +487,7 @@ class AutocompleteInput(TextInput):
     match any substring of a completion string.
     """)
 
-Options = List(Either(String, Tuple(Any, String)))
+Options = List(Either(String, Tuple(AnyRef, String)))
 OptionsGroups = Dict(String, Options)
 
 NotSelected = "" # TODO symbol
@@ -425,7 +498,7 @@ class Select(InputWidget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     options = Either(Options, OptionsGroups, help="""
@@ -441,7 +514,7 @@ class Select(InputWidget):
     values are in the aforementioned list format.
     """).accepts(List(Either(Null, String)), lambda v: [ NotSelected if item is None else item for item in v ])
 
-    value = Any(default=NotSelected, help="""
+    value = AnyRef(default=NotSelected, help="""
     Initial or selected value.
     """).accepts(Null, lambda _: NotSelected)
 
@@ -451,7 +524,7 @@ class MultiSelect(InputWidget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     options = List(Either(String, Tuple(String, String)), help="""
@@ -478,7 +551,7 @@ class MultiChoice(InputWidget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     options = List(Either(String, Tuple(String, String)), help="""
@@ -522,7 +595,7 @@ class ColorPicker(InputWidget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     color = ColorHex(default='#000000', help="""
@@ -535,7 +608,7 @@ class PaletteSelect(InputWidget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     value = Required(String, help="""
@@ -559,12 +632,18 @@ class PaletteSelect(InputWidget):
     The number of columns to split the display of the palettes into.
     """)
 
-def ColorMap(*args: any, **kwargs: any) -> PaletteSelect:
+#-----------------------------------------------------------------------------
+# Legacy API
+#-----------------------------------------------------------------------------
+
+def ColorMap(*args: Any, **kwargs: Any) -> PaletteSelect:
     ''' Color palette select widget.
 
     .. deprecated:: 3.4.0
         Use ``PaletteSelect`` widget instead.
     '''
+    from ...util.deprecation import deprecated
+
     deprecated((3, 4, 0), "ColorMap widget", "PaletteSelect widget")
     return PaletteSelect(*args, **kwargs)
 

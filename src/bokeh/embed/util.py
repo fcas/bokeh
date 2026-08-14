@@ -23,27 +23,28 @@ log = logging.getLogger(__name__)
 # Standard library imports
 import re
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
+    Generator,
     Iterator,
     Sequence,
 )
 from weakref import WeakKeyDictionary
 
 # Bokeh imports
-from ..core.types import ID
 from ..document.document import Document
 from ..model import Model, collect_models
 from ..settings import settings
-from ..themes.theme import Theme
-from ..util.dataclasses import dataclass, field
+from ..themes import Theme, ThemeLike
 from ..util.serialization import (
     make_globally_unique_css_safe_id,
     make_globally_unique_id,
 )
 
 if TYPE_CHECKING:
+    from ..core.types import ID
     from ..document.document import DocJson
 
 #-----------------------------------------------------------------------------
@@ -78,9 +79,11 @@ class FromCurdoc:
     '''
     pass
 
+type ThemeSource = ThemeLike | type[FromCurdoc]
+
 @contextmanager
-def OutputDocumentFor(objs: Sequence[Model], apply_theme: Theme | type[FromCurdoc] | None = None,
-        always_new: bool = False) -> Iterator[Document]:
+def OutputDocumentFor(objs: Sequence[Model], apply_theme: ThemeSource = None,
+        always_new: bool = False) -> Generator[Document]:
     ''' Find or create a (possibly temporary) Document to use for serializing
     Bokeh content.
 
@@ -107,21 +110,22 @@ def OutputDocumentFor(objs: Sequence[Model], apply_theme: Theme | type[FromCurdo
       temporarily "re-homes" the models in a new bare Document that is only available
       inside the context manager.
 
-    OutputDocumentFor will also perfom document validation before yielding, if
+    OutputDocumentFor will also perform document validation before yielding, if
     ``settings.perform_document_validation()`` is True.
 
 
         objs (seq[Model]) :
             a sequence of Models that will be serialized, and need a common document
 
-        apply_theme (Theme or FromCurdoc or None, optional):
+        apply_theme (Theme or ThemeName or FromCurdoc or None, optional):
             Sets the theme for the doc while inside this context manager. (default: None)
 
             If None, use whatever theme is on the document that is found or created
 
             If FromCurdoc, use curdoc().theme, restoring any previous theme afterwards
 
-            If a Theme instance, use that theme, restoring any previous theme afterwards
+            If a Theme instance or built-in theme name, use that theme, restoring any
+            previous theme afterwards
 
         always_new (bool, optional) :
             Always return a new document, even in cases where it is otherwise possible
@@ -163,11 +167,11 @@ def OutputDocumentFor(objs: Sequence[Model], apply_theme: Theme | type[FromCurdo
                 doc = _create_temp_doc(objs)
 
             # we are using all the roots of a single doc, just use doc as-is
-            pass  # lgtm [py/unnecessary-pass]
+            pass
 
         # models have mixed docs, just make a quick clone
         else:
-            def finish():
+            def finish() -> None:
                 _dispose_temp_doc(objs)
             doc = _create_temp_doc(objs)
 
@@ -175,10 +179,11 @@ def OutputDocumentFor(objs: Sequence[Model], apply_theme: Theme | type[FromCurdo
         doc.validate()
 
     _set_temp_theme(doc, apply_theme)
-    yield doc
-    _unset_temp_theme(doc)
-
-    finish()
+    try:
+        yield doc
+    finally:
+        _unset_temp_theme(doc)
+        finish()
 
 
 class RenderItem:
@@ -247,7 +252,7 @@ class RenderRoot:
     #: A list of any user-supplied tag values for this root
     tags: list[Any] = field(default_factory=list, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Model.name is nullable, and field() won't enforce the default when name=None
         self.name = self.name or ""
 
@@ -260,7 +265,7 @@ class RenderRoots:
         for i in range(0, len(self)):
             yield self[i]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._roots.items())
 
     def __getitem__(self, key: int | str) -> RenderRoot:
@@ -296,10 +301,10 @@ def standalone_docs_json_and_render_items(models: Model | Document | Sequence[Mo
     '''
 
     '''
-    if isinstance(models, Model | Document):
+    if isinstance(models, (Model, Document)):
         models = [models]
 
-    if not (isinstance(models, Sequence) and all(isinstance(x, Model | Document) for x in models)):
+    if not (isinstance(models, Sequence) and all(isinstance(x, (Model, Document)) for x in models)):
         raise ValueError("Expected a Model, Document, or Sequence of Models or Documents")
 
     if submodel_has_python_callbacks(models) and not suppress_callback_warning:
@@ -307,6 +312,7 @@ def standalone_docs_json_and_render_items(models: Model | Document | Sequence[Mo
 
     docs: dict[Document, tuple[ID, dict[Model, ID]]] = {}
     for model_or_doc in models:
+        doc: Document | None
         if isinstance(model_or_doc, Document):
             model = None
             doc = model_or_doc
@@ -428,12 +434,12 @@ def _dispose_temp_doc(models: Sequence[Model]) -> None:
 
 _themes: WeakKeyDictionary[Document, Theme] = WeakKeyDictionary()
 
-def _set_temp_theme(doc: Document, apply_theme: Theme | type[FromCurdoc] | None) -> None:
+def _set_temp_theme(doc: Document, apply_theme: ThemeSource | None) -> None:
     _themes[doc] = doc.theme
     if apply_theme is FromCurdoc:
         from ..io import curdoc
         doc.theme = curdoc().theme
-    elif isinstance(apply_theme, Theme):
+    elif isinstance(apply_theme, (Theme, str)):
         doc.theme = apply_theme
 
 def _unset_temp_theme(doc: Document) -> None:

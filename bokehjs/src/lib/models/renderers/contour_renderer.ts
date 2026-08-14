@@ -3,9 +3,12 @@ import type {GlyphRendererView} from "./glyph_renderer"
 import {GlyphRenderer} from "./glyph_renderer"
 import type {GlyphView} from "../glyphs/glyph"
 import type * as p from "core/properties"
-import type {IterViews} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import {build_view} from "core/build_views"
 import type {SelectionManager} from "core/selection_manager"
+import type {Geometry} from "core/geometry"
+import type {HitTestResult} from "core/hittest"
+import type {Context2d} from "core/util/canvas"
 
 export class ContourRendererView extends DataRendererView {
   declare model: ContourRenderer
@@ -13,10 +16,8 @@ export class ContourRendererView extends DataRendererView {
   fill_view: GlyphRendererView
   line_view: GlyphRendererView
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield this.fill_view
-    yield this.line_view
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this.fill_view, this.line_view]
   }
 
   get glyph_view(): GlyphView {
@@ -35,15 +36,13 @@ export class ContourRendererView extends DataRendererView {
     this.line_view = await build_view(line_renderer, {parent})
   }
 
-  override remove(): void {
-    this.fill_view.remove()
-    this.line_view.remove()
-    super.remove()
+  protected _paint(ctx: Context2d): void {
+    this.fill_view.paint(ctx)
+    this.line_view.paint(ctx)
   }
 
-  protected _paint(): void {
-    this.fill_view.paint()
-    this.line_view.paint()
+  hit_test(geometry: Geometry): HitTestResult {
+    return this.fill_view.hit_test(geometry)
   }
 }
 

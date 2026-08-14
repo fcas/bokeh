@@ -1,16 +1,17 @@
 import {SelectTool, SelectToolView} from "./select_tool"
 import {Modifiers, satisfies_modifiers} from "./common"
+import {MenuItem} from "../../ui/menus"
+import type {MenuItemLike} from "../../ui/menus"
 import type {CallbackLike1} from "core/util/callbacks"
 import {execute} from "core/util/callbacks"
 import type * as p from "core/properties"
 import type {TapEvent, KeyModifiers} from "core/ui_events"
 import type {PointGeometry} from "core/geometry"
-import type {SelectionMode} from "core/enums"
+import {SelectionMode} from "core/enums"
 import {TapBehavior, TapGesture} from "core/enums"
-import {non_null} from "core/util/types"
 import type {ColumnarDataSource} from "../../sources/columnar_data_source"
 import type {DataRendererView} from "../../renderers/data_renderer"
-import {tool_icon_tap_select} from "styles/icons.css"
+import {tool_icon_tap_select, tool_icon_toggle_mode} from "styles/icons.css"
 
 export type TapToolCallback = CallbackLike1<TapTool, {
   geometries: PointGeometry & {x: number, y: number}
@@ -65,7 +66,7 @@ export class TapToolView extends SelectToolView {
 
     for (const [, renderers] of renderers_by_source) {
       const sm = renderers[0].get_selection_manager()
-      const r_views = renderers.map((r) => this.plot_view.views.find_one(r)).filter(non_null)
+      const r_views = renderers.map((r) => this.plot_view.views.find_one(r)).filter((r) => r != null)
       const did_hit = sm.select(r_views, geometry, final, mode)
       if (did_hit) {
         const [rv] = r_views
@@ -111,6 +112,7 @@ export namespace TapTool {
   export type Attrs = p.AttrsOf<Props>
 
   export type Props = SelectTool.Props & {
+    mode: p.Property<SelectionMode>
     behavior: p.Property<TapBehavior>
     gesture: p.Property<TapGesture>
     modifiers: p.Property<Modifiers>
@@ -132,15 +134,12 @@ export class TapTool extends SelectTool {
     this.prototype.default_view = TapToolView
 
     this.define<TapTool.Props>(({Any, Nullable}) => ({
+      mode:      [ SelectionMode, "toggle" ],
       behavior:  [ TapBehavior, "select" ],
       gesture:   [ TapGesture, "tap"],
       modifiers: [ Modifiers, {} ],
       callback:  [ Nullable(Any /*TODO*/), null ],
     }))
-
-    this.override<TapTool.Props>({
-      mode: "xor",
-    })
 
     this.register_alias("click", () => new TapTool({behavior: "inspect"}))
     this.register_alias("tap", () => new TapTool())
@@ -151,4 +150,20 @@ export class TapTool extends SelectTool {
   override tool_icon = tool_icon_tap_select
   override event_type = "tap" as "tap"
   override default_order = 10
+
+  override get menu(): MenuItemLike[] {
+    return [
+      new MenuItem({
+        icon: `.${tool_icon_toggle_mode}`,
+        label: "Toggle mode",
+        tooltip: "Toggle the current selection",
+        checked: () => this.mode == "toggle",
+        action: () => {
+          this.mode = "toggle"
+          this.active = true
+        },
+      }),
+      ...super.menu,
+    ]
+  }
 }

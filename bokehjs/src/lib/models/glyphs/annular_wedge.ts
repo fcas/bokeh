@@ -9,6 +9,7 @@ import type * as visuals from "core/visuals"
 import {Direction} from "core/enums"
 import * as p from "core/properties"
 import {angle_between} from "core/util/math"
+import type {SpatialIndex} from "core/util/spatial"
 import type {Context2d} from "core/util/canvas"
 import {Selection} from "../selections/selection"
 import {max} from "../../core/util/arrayable"
@@ -26,6 +27,16 @@ export class AnnularWedgeView extends XYGlyphView {
   override async load_glglyph() {
     const {AnnularWedgeGL} = await import("./webgl/annular_wedge")
     return AnnularWedgeGL
+  }
+
+  protected override _index_data(index: SpatialIndex): void {
+    const {x, y, outer_radius, data_size} = this
+    for (let i = 0; i < data_size; i++) {
+      const x_i = x[i]
+      const y_i = y[i]
+      const r_i = outer_radius.get(i)
+      index.add_rect(x_i - r_i, y_i - r_i, x_i + r_i, y_i + r_i)
+    }
   }
 
   protected override _map_data(): void {
@@ -74,6 +85,7 @@ export class AnnularWedgeView extends XYGlyphView {
 
       const angle_i = end_angle_i - start_angle_i
 
+      ctx.save()
       ctx.translate(sx_i, sy_i)
       ctx.rotate(start_angle_i)
 
@@ -85,12 +97,11 @@ export class AnnularWedgeView extends XYGlyphView {
       ctx.arc(0, 0, sinner_radius_i, 0, -angle_i, !anticlock)
       ctx.closePath()
 
-      ctx.rotate(-angle_i - start_angle_i)
-      ctx.translate(-sx_i, -sy_i)
-
       this.visuals.fill.apply(ctx, i)
       this.visuals.hatch.apply(ctx, i)
       this.visuals.line.apply(ctx, i)
+
+      ctx.restore()
     }
   }
 

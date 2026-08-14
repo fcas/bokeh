@@ -1,14 +1,13 @@
-import type {FullDisplay} from "../layouts/layout_dom"
 import {LayoutDOM, LayoutDOMView} from "../layouts/layout_dom"
+import {UIElement} from "../ui/ui_element"
 import type {GridBoxView} from "../layouts/grid_box"
 import {GridBox} from "../layouts/grid_box"
 import {TracksSizing, GridChild, GridSpacing} from "../common/kinds"
 import type {ToolbarView} from "../tools/toolbar"
 import {Toolbar} from "../tools/toolbar"
-import type {UIElement} from "../ui/ui_element"
 import {ActionTool} from "../tools/actions/action_tool"
-import type {ViewStorage, IterViews} from "core/build_views"
-import {build_views, remove_views} from "core/build_views"
+import type {ViewStorage, ChildView} from "core/build_views"
+import {build_views} from "core/build_views"
 import {Location} from "core/enums"
 import type * as p from "core/properties"
 
@@ -30,7 +29,7 @@ export class GridPlotView extends LayoutDOMView {
     if (location == null) {
       this.model.toolbar.visible = false
     } else {
-      this.model.toolbar.setv({visible: true, location})
+      this.model.toolbar.setv<Toolbar.Attrs>({visible: true, location})
     }
   }
 
@@ -55,8 +54,14 @@ export class GridPlotView extends LayoutDOMView {
       this._update_location()
       this.invalidate_layout()
     })
-    this.on_change([toolbar, children, rows, cols, spacing], async () => {
+    this.on_change(toolbar, async () => {
       await this.update_children()
+    })
+
+    this.on_change([children, rows, cols, spacing], async () => {
+      const {children, rows, cols, spacing} = this.model
+      this._grid_box.setv<GridBox.Attrs>({children, rows, cols, spacing})
+      await this.grid_box_view.ready
     })
 
     this.on_change(this.model.toolbar.properties.tools, async () => {
@@ -71,29 +76,19 @@ export class GridPlotView extends LayoutDOMView {
     })
   }
 
-  override remove(): void {
-    remove_views(this._tool_views)
-    super.remove()
-  }
-
   private readonly _tool_views: ViewStorage<ActionTool> = new Map()
 
   async build_tool_views(): Promise<void> {
-    const tools = this.model.toolbar.tools.filter((tool): tool is ActionTool => tool instanceof ActionTool)
+    const tools = this.model.toolbar.tools.filter((tool) => tool instanceof ActionTool)
     await build_views(this._tool_views, tools, {parent: this})
   }
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield* this._tool_views.values()
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), ...this._tool_views.values()]
   }
 
   get child_models(): UIElement[] {
     return [this.model.toolbar, this._grid_box]
-  }
-
-  protected override _intrinsic_display(): FullDisplay {
-    return {inner: this.model.flow_mode, outer: "flex"}
   }
 
   override _update_layout(): void {
@@ -108,7 +103,10 @@ export class GridPlotView extends LayoutDOMView {
         case "right": return "row-reverse"
       }
     })()
-    this.style.append(":host", {flex_direction})
+    this.self_style.append(this.host_selector, {
+      display: "flex",
+      flex_direction,
+    })
   }
 }
 
@@ -118,7 +116,7 @@ export namespace GridPlot {
   export type Props = LayoutDOM.Props & {
     toolbar: p.Property<Toolbar>
     toolbar_location: p.Property<Location | null>
-    children: p.Property<[LayoutDOM, number, number, number?, number?][]>
+    children: p.Property<[UIElement, number, number, number?, number?][]>
     rows: p.Property<TracksSizing | null>
     cols: p.Property<TracksSizing | null>
     spacing: p.Property<number | [number, number]>
@@ -141,7 +139,7 @@ export class GridPlot extends LayoutDOM {
     this.define<GridPlot.Props>(({List, Ref, Nullable}) => ({
       toolbar: [ Ref(Toolbar), () => new Toolbar() ],
       toolbar_location: [ Nullable(Location), "above" ],
-      children: [ List(GridChild(LayoutDOM)), [] ],
+      children: [ List(GridChild(UIElement)), [] ],
       rows: [ Nullable(TracksSizing), null ],
       cols: [ Nullable(TracksSizing), null ],
       spacing: [ GridSpacing, 0 ],

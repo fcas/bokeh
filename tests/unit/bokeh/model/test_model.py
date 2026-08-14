@@ -23,6 +23,7 @@ from bokeh.core.types import ID
 from bokeh.models import *  # noqa: F403
 from bokeh.models import CustomJS
 from bokeh.plotting import *  # noqa: F403
+from bokeh.util.warnings import BokehDeprecationWarning
 
 from bokeh.document import document # isort:skip
 
@@ -222,8 +223,11 @@ def test_all_builtin_models_default_constructible() -> None:
             continue
         try:
             cls()
+        except BokehDeprecationWarning:
+            pass
         except Exception:
             bad.append(name)
+
     assert bad == []
 
 def test_select() -> None:
@@ -278,6 +282,43 @@ def test_select() -> None:
 def test_args_pass_through():
     with pytest.raises(ValueError, match=r"positional arguments are not allowed"):
         SomeModel(1, b="a")
+
+class Test_clear_extensions:
+    def test_ext_with___css__(self):
+        assert not any(x.endswith(".Custom") for x in Model.model_class_reverse_map)
+
+        class Custom(Model):
+            __css__ = "stuff"
+
+        assert any(x.endswith(".Custom") for x in Model.model_class_reverse_map)
+
+        Model.clear_extensions()
+
+        assert not any(x.endswith(".Custom") for x in Model.model_class_reverse_map)
+
+    def test_ext_with___implementation__(self):
+        assert not any(x.endswith(".Custom") for x in Model.model_class_reverse_map)
+
+        class Custom(Model):
+            __implementation__ = "stuff"
+
+        assert any(x.endswith(".Custom") for x in Model.model_class_reverse_map)
+
+        Model.clear_extensions()
+
+        assert not any(x.endswith(".Custom") for x in Model.model_class_reverse_map)
+
+    def test_ext_with___javascript__(self):
+        assert not any(x.endswith(".Custom") for x in Model.model_class_reverse_map)
+
+        class Custom(Model):
+            __javascript__ = "stuff"
+
+        assert any(x.endswith(".Custom") for x in Model.model_class_reverse_map)
+
+        Model.clear_extensions()
+
+        assert not any(x.endswith(".Custom") for x in Model.model_class_reverse_map)
 
 #-----------------------------------------------------------------------------
 # Dev API

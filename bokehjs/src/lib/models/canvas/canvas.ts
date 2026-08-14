@@ -7,6 +7,7 @@ import {UIEventBus} from "core/ui_events"
 import {load_module} from "core/util/modules"
 import type {Context2d} from "core/util/canvas"
 import {CanvasLayer} from "core/util/canvas"
+import type {BBox} from "core/util/bbox"
 import {UIElement, UIElementView} from "../ui/ui_element"
 import type {PlotView} from "../plots/plot"
 import type {ReglWrapper} from "../glyphs/webgl/regl_wrap"
@@ -14,8 +15,6 @@ import type {StyleSheetLike} from "core/dom"
 import {InlineStyleSheet} from "core/dom"
 import * as canvas_css from "styles/canvas.css"
 import icons_css from "styles/icons.css"
-
-export type FrameBox = [number, number, number, number]
 
 // Notes on WebGL support:
 // Glyps can be rendered into the original 2D canvas, or in a (hidden)
@@ -86,7 +85,9 @@ export class CanvasView extends UIElementView {
 
   ui_event_bus: UIEventBus
 
-  protected _size = new InlineStyleSheet()
+  protected readonly _size = new InlineStyleSheet("", "size")
+
+  readonly touch_action = new InlineStyleSheet("", "touch-action")
 
   override initialize(): void {
     super.initialize()
@@ -95,7 +96,7 @@ export class CanvasView extends UIElementView {
     this.primary = this.create_layer()
     this.overlays = this.create_layer()
     this.overlays_el = div({class: canvas_css.layer})
-    this.events_el = div({class: [canvas_css.layer, canvas_css.events]})
+    this.events_el = div({class: [canvas_css.layer, canvas_css.events], tabIndex: 0})
 
     this.ui_event_bus = new UIEventBus(this)
   }
@@ -127,7 +128,7 @@ export class CanvasView extends UIElementView {
   }
 
   override stylesheets(): StyleSheetLike[] {
-    return [...super.stylesheets(), canvas_css.default, icons_css, this._size]
+    return [...super.stylesheets(), canvas_css.default, icons_css, this._size, this.touch_action]
   }
 
   override render(): void {
@@ -145,11 +146,15 @@ export class CanvasView extends UIElementView {
   }
 
   get pixel_ratio(): number {
-    return this.primary.pixel_ratio // XXX: primary
+    return this.primary.pixel_ratio
+  }
+
+  get pixel_ratio_changed(): boolean {
+    return this.primary.pixel_ratio_changed
   }
 
   override _update_bbox(): boolean {
-    const changed = super._update_bbox()
+    const changed = super._update_bbox() || this.pixel_ratio_changed
 
     if (changed) {
       const {width, height} = this.bbox
@@ -184,12 +189,13 @@ export class CanvasView extends UIElementView {
     this.overlays.resize(width, height)
   }
 
-  resize(): void {
-    this._update_bbox()
+  resize(): boolean {
+    const changed = this._update_bbox()
     this._after_resize()
+    return changed
   }
 
-  prepare_webgl(frame_box: FrameBox): void {
+  prepare_webgl(frame_box: BBox): void {
     // Prepare WebGL for a drawing pass
     const {webgl} = this
     if (webgl != null) {
@@ -197,7 +203,7 @@ export class CanvasView extends UIElementView {
       const {width, height} = this.bbox
       webgl.canvas.width = this.pixel_ratio*width
       webgl.canvas.height = this.pixel_ratio*height
-      const [sx, sy, w, h] = frame_box
+      const {x: sx, y: sy, width: w, height: h} = frame_box
       const {xview, yview} = this.bbox
       const vx = xview.compute(sx)
       const vy = yview.compute(sy + h)
@@ -249,6 +255,11 @@ export class CanvasView extends UIElementView {
   create_layer(): CanvasLayer {
     const {output_backend, hidpi} = this.model
     return new CanvasLayer(output_backend, hidpi)
+  }
+
+  create_layer_svg(): CanvasLayer {
+    const {hidpi} = this.model
+    return new CanvasLayer("svg", hidpi)
   }
 
   to_blob(): Promise<Blob> {

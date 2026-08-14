@@ -13,8 +13,9 @@ abstract class AbstractViewQuery {
 
   *query(fn: (view: View) => boolean): IterViews {
     const visited = new Set<View>()
+    const query_result: View[] = []
 
-    function* descend(view: View): IterViews {
+    function descend(view: View): void {
       if (visited.has(view)) {
         return
       }
@@ -22,17 +23,18 @@ abstract class AbstractViewQuery {
       visited.add(view)
 
       if (fn(view)) {
-        yield view
+        query_result.push(view)
       }
 
-      for (const child of view.children()) {
-        yield* descend(child)
+      for (const child of view.children_views()) {
+        descend(child)
       }
     }
 
     for (const view of this) {
-      yield* descend(view)
+      descend(view)
     }
+    yield* query_result
   }
 
   query_one(fn: (view: View) => boolean): View | null {
@@ -88,6 +90,10 @@ abstract class AbstractViewQuery {
 
   find_all_by_id(id: string): View[] {
     return [...this.find_by_id(id)]
+  }
+
+  select<T extends HasProps>(models: T[]): ViewOf<T>[] {
+    return models.map((model) => this.find_one(model)).filter((view) => view != null)
   }
 }
 

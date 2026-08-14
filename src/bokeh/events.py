@@ -73,31 +73,39 @@ from typing import (
     ClassVar,
     Literal,
     TypedDict,
+    cast,
 )
 
 # Bokeh imports
-from .core.serialization import Deserializer
+from .core.serialization import Deserializer, Serializable, Serializer
 
 if TYPE_CHECKING:
-    from .core.types import GeometryData
+    from .core.types import FactorType, GeometryData
     from .model import Model
+    from .models import Axis
+    from .models.annotations import Legend, LegendItem
     from .models.plots import Plot
     from .models.widgets.buttons import AbstractButton
-    from .models.widgets.inputs import TextInput
+    from .models.widgets.groups import ToggleButtonGroup
+    from .models.widgets.inputs import FileInput, TextInput
 
 #-----------------------------------------------------------------------------
 # Globals and constants
 #-----------------------------------------------------------------------------
 
 __all__ = (
+    'AxisClick',
     'ButtonClick',
+    'ClientReconnected',
     'ConnectionLost',
     'DocumentEvent',
     'DocumentReady',
     'DoubleTap',
     'Event',
+    'FileInputChange',
     'LODEnd',
     'LODStart',
+    'LegendItemClick',
     'MenuItemClick',
     'ModelEvent',
     'MouseEnter',
@@ -144,7 +152,7 @@ class EventRep(TypedDict):
     name: str
     values: dict[str, Any]
 
-class Event:
+class Event(Serializable):
     ''' Base class for all Bokeh events.
 
     This base class is not typically useful to instantiate on its own.
@@ -161,11 +169,21 @@ class Event:
             raise ValueError(f"unknown event name '{event_name}'")
 
     @classmethod
-    def __init_subclass__(cls):
+    def __init_subclass__(cls) -> None:
         super().__init_subclass__()
 
         if hasattr(cls, "event_name"):
             _CONCRETE_EVENT_CLASSES[cls.event_name] = cls
+
+    def event_values(self) -> dict[str, Any]:
+        return {}
+
+    def to_serializable(self, serializer: Serializer) -> BokehEventRep:
+        return BokehEventRep(
+            type="event",
+            name=self.event_name,
+            values=serializer.encode(self.event_values()),
+        )
 
     @classmethod
     def from_serializable(cls, rep: EventRep, decoder: Deserializer) -> Event:
@@ -179,12 +197,12 @@ class Event:
         if values is None:
             decoder.error("'values' field is missing")
 
-        cls = _CONCRETE_EVENT_CLASSES.get(name)
-        if cls is None:
+        event_cls = _CONCRETE_EVENT_CLASSES.get(name)
+        if event_cls is None:
             decoder.error(f"can't resolve event '{name}'")
 
         decoded_values = decoder.decode(values)
-        event = cls(**decoded_values)
+        event = event_cls(**decoded_values)
 
         return event
 
@@ -241,6 +259,13 @@ class ConnectionLost(ConnectionEvent):
         super().__init__()
         self.timestamp = datetime.now()
 
+class ClientReconnected(ConnectionEvent):
+    '''
+    Announce when a connection to the client has been reconnected.
+
+    '''
+    event_name = 'client_reconnected'
+
 class ModelEvent(Event):
     ''' Base class for all Bokeh Model events.
 
@@ -260,6 +285,32 @@ class ModelEvent(Event):
         '''
         self.model = model
 
+    def event_values(self) -> dict[str, Any]:
+        return dict(**super().event_values(), model=self.model)
+
+class AxisClick(ModelEvent):
+    ''' Announce a location where an axis was clicked.
+
+    For continuous numerical axes, the value will be a number. For log axes,
+    this number is the log decade.
+
+    For categorical axes, the value will be a categorical factor, i.e. a string
+    or a list of strings, representing the closest categorical factor that was
+    clicked.
+
+    '''
+    event_name = 'axis_click'
+
+    value: float | FactorType | None
+
+    def __init__(self, model: Axis | None, value: float | FactorType | None = None) -> None:
+        from .models import Model
+        from .models.axes import Axis
+        if model is not None and not isinstance(cast(Model, model), Axis):
+            clsname = self.__class__.__name__
+            raise ValueError(f"{clsname} event only applies to axis models")
+        super().__init__(model=model)
+        self.value = value
 
 class ButtonClick(ModelEvent):
     ''' Announce a button click event on a Bokeh button widget.
@@ -267,11 +318,45 @@ class ButtonClick(ModelEvent):
     '''
     event_name = 'button_click'
 
-    def __init__(self, model: AbstractButton | None) -> None:
+    def __init__(self, model: AbstractButton | ToggleButtonGroup | None) -> None:
+        from .models import Model
         from .models.widgets import AbstractButton, ToggleButtonGroup
-        if model is not None and not isinstance(model, AbstractButton | ToggleButtonGroup):
+        if model is not None and not isinstance(cast(Model, model), (AbstractButton, ToggleButtonGroup)):
             clsname = self.__class__.__name__
             raise ValueError(f"{clsname} event only applies to button and button group models")
+        super().__init__(model=model)
+
+class FileInputChange(ModelEvent):
+    ''' Announce an atomic file selection change on a FileInput widget.
+
+    '''
+    event_name = 'file_input_change'
+
+    def __init__(
+        self,
+        model: FileInput | None,
+        value:     str | list[str],
+        filename:  str | list[str],
+        mime_type: str | list[str],
+    ) -> None:
+        from .models import Model
+        from .models.widgets import FileInput
+        if model is not None and not isinstance(cast(Model, model), FileInput):
+            clsname = self.__class__.__name__
+            raise ValueError(f"{clsname} event only applies to FileInput model")
+        self.value     = value
+        self.filename  = filename
+        self.mime_type = mime_type
+        super().__init__(model=model)
+
+class LegendItemClick(ModelEvent):
+    ''' Announce a click event on a Bokeh legend item.
+
+    '''
+    event_name = 'legend_item_click'
+
+    def __init__(self, model: Legend, item: LegendItem) -> None:
+        self.item = item
         super().__init__(model=model)
 
 class MenuItemClick(ModelEvent):
@@ -293,8 +378,9 @@ class ValueSubmit(ModelEvent):
     value: str
 
     def __init__(self, model: TextInput | None, value: str) -> None:
+        from .models import Model
         from .models.widgets import TextInput
-        if model is not None and not isinstance(model, TextInput):
+        if model is not None and not isinstance(cast(Model, model), TextInput):
             clsname = self.__class__.__name__
             raise ValueError(f"{clsname} event only applies to text input models")
         super().__init__(model=model)
@@ -720,6 +806,11 @@ class RotateStart(PointEvent):
 #-----------------------------------------------------------------------------
 # Dev API
 #-----------------------------------------------------------------------------
+
+class BokehEventRep(TypedDict):
+  type: Literal["event"]
+  name: str
+  values: Any
 
 #-----------------------------------------------------------------------------
 # Code

@@ -19,6 +19,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -26,9 +28,12 @@ log = logging.getLogger(__name__)
 # Imports
 #-----------------------------------------------------------------------------
 
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
 from ...core.has_props import abstract
-from ...core.properties import Bool, String
+from ...core.property.primitive import Bool, String
 from .widget import Widget
 
 #-----------------------------------------------------------------------------
@@ -59,7 +64,7 @@ class Markup(Widget):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     text = String(default="", help="""
@@ -91,7 +96,7 @@ class Paragraph(Markup):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     __example__ = "examples/interaction/widgets/paragraph.py"
@@ -103,7 +108,7 @@ class Div(Markup):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     __example__ = "examples/interaction/widgets/div.py"
@@ -121,7 +126,7 @@ class PreText(Paragraph):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     __example__ = "examples/interaction/widgets/pretext.py"

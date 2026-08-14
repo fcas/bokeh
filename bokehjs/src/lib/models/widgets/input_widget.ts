@@ -4,17 +4,31 @@ import {Tooltip} from "../ui/tooltip"
 import {HTML, HTMLView} from "../dom/html"
 
 import {isString} from "core/util/types"
-import type {IterViews} from "core/build_views"
 import {build_view} from "core/build_views"
 import type {StyleSheetLike} from "core/dom"
 import {div, label} from "core/dom"
 import {View} from "core/view"
+import type {ChildView} from "core/view"
 import type * as p from "core/properties"
+import {server_event, ModelEvent} from "core/bokeh_events"
 
 import inputs_css, * as inputs from "styles/widgets/inputs.css"
 import icons_css from "styles/icons.css"
 
 export type HTMLInputElementLike = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+
+@server_event("clear_input")
+export class ClearInput extends ModelEvent {
+  constructor(readonly model: InputWidget) {
+    super()
+    this.origin = model
+  }
+
+  static override from_values(values: object): ClearInput {
+    const {model} = values as {model: InputWidget}
+    return new ClearInput(model)
+  }
+}
 
 export abstract class InputWidgetView extends ControlView {
   declare model: InputWidget
@@ -31,16 +45,11 @@ export abstract class InputWidgetView extends ControlView {
     yield this.input_el
   }
 
-  override *children(): IterViews {
-    yield* super.children()
-
+  override _children_views(): ChildView[] {
     const {title, description} = this
-    if (title instanceof View) {
-      yield title
-    }
-    if (description instanceof View) {
-      yield description
-    }
+    const title_view = title instanceof View ? [title] : []
+    const description_view = description instanceof View ? [description] : []
+    return [...super._children_views(), ...title_view, ...description_view]
   }
 
   override async lazy_initialize(): Promise<void> {
@@ -50,27 +59,16 @@ export abstract class InputWidgetView extends ControlView {
     await this._build_description()
   }
 
-  override remove(): void {
-    const {title, description} = this
-    if (title instanceof View) {
-      title.remove()
-    }
-    if (description instanceof View) {
-      description.remove()
-    }
-    super.remove()
-  }
-
   override connect_signals(): void {
     super.connect_signals()
     const {title, description} = this.model.properties
     this.on_change(title, async () => {
       await this._build_title()
-      this.render()
+      this.rerender()
     })
     this.on_change(description, async () => {
       await this._build_description()
-      this.render()
+      this.rerender()
     })
   }
 
@@ -102,7 +100,7 @@ export abstract class InputWidgetView extends ControlView {
         desc_el.title = description
       } else {
         if (description.model.target == "auto") {
-          description.target = desc_el
+          description.target_override.value = desc_el
         }
 
         let persistent = false
@@ -141,17 +139,20 @@ export abstract class InputWidgetView extends ControlView {
             persistent = false
             toggle(false)
           }
-        })
+        }, {signal: this.abort_signal})
         window.addEventListener("blur", () => {
           persistent = false
           toggle(false)
-        })
+        }, {signal: this.abort_signal})
       }
       return desc_el
     }
   }
 
   protected async _build_title(): Promise<void> {
+    if (this.title instanceof View) {
+      this.title.remove()
+    }
     const {title} = this.model
     if (title instanceof HTML) {
       this.title = await build_view(title, {parent: this})
@@ -161,6 +162,9 @@ export abstract class InputWidgetView extends ControlView {
   }
 
   protected async _build_description(): Promise<void> {
+    if (this.description instanceof View) {
+      this.description.remove()
+    }
     const {description} = this.model
     if (description instanceof Tooltip) {
       this.description = await build_view(description, {parent: this})

@@ -13,6 +13,18 @@ const request_fullscreen = (() => {
 export class FullscreenToolView extends ActionToolView {
   declare model: FullscreenTool
 
+  override initialize(): void {
+    super.initialize()
+
+    const handler = () => {
+      const active = document.fullscreenElement == this.parent.el
+      this.model.active = active
+    }
+
+    document.addEventListener("fullscreenchange", handler, {signal: this.abort_signal})
+    document.addEventListener("webkitfullscreenchange", handler, {signal: this.abort_signal})
+  }
+
   async fullscreen(): Promise<void> {
     if (document.fullscreenElement != null) {
       await document.exitFullscreen()

@@ -23,7 +23,6 @@ from copy import copy
 
 # External imports
 import numpy as np
-import pandas as pd
 
 # Bokeh imports
 from bokeh.core.has_props import HasProps, Local
@@ -33,6 +32,7 @@ from bokeh.core.property.vectorization import (
     field,
     value,
 )
+from bokeh.util.warnings import BokehDeprecationWarning
 from tests.support.util.api import verify_all
 
 # Module under test
@@ -45,10 +45,12 @@ import bokeh.core.property.dataspec as bcpd # isort:skip
 ALL = (
     'AlphaSpec',
     'AngleSpec',
+    'BoolSpec',
     'ColorSpec',
     'DashPatternSpec',
     'DataSpec',
     'DistanceSpec',
+    'FloatSpec',
     'FontSizeSpec',
     'FontStyleSpec',
     'HatchPatternSpec',
@@ -61,6 +63,7 @@ ALL = (
     'StringSpec',
     'TextAlignSpec',
     'TextBaselineSpec',
+    'UnitsSpec',
 )
 
 #-----------------------------------------------------------------------------
@@ -141,6 +144,16 @@ class Test_AngleSpec:
 
         assert new_value_copy == new_value
 
+
+class Test_BoolSpec:
+    def test_is_valid(self) -> None:
+        prop = bcpd.BoolSpec(default=True)
+
+        assert prop.is_valid(False)
+        assert prop.is_valid(True)
+
+        assert not prop.is_valid(0)
+        assert not prop.is_valid(1)
 
 class Test_ColorSpec:
     def test_field(self) -> None:
@@ -415,70 +428,80 @@ class Test_NumberSpec:
         assert Foo.__dict__["x"].get_value(f) == Value(32)
 
     def tests_accepts_timedelta(self):
-        class Foo(HasProps):
-            dt = bcpd.NumberSpec("dt", accept_datetime=True)
-            ndt = bcpd.NumberSpec("ndt", accept_datetime=False)
-
-        f = Foo()
-
-        # FYI Numpy erroneously raises an annoying warning about elementwise
-        # comparison below because a timedelta is compared to a float.
-        # https://github.com/numpy/numpy/issues/10095
         with warnings.catch_warnings():
-            warnings.simplefilter(action='ignore', category=DeprecationWarning)
+            warnings.simplefilter(action="ignore", category=BokehDeprecationWarning)
 
-            f.dt = datetime.timedelta(3, 54)
-            assert f.dt == 259254000.0
+            class Foo(HasProps):
+                dt = bcpd.NumberSpec("dt", accept_datetime=True)
+                ndt = bcpd.NumberSpec("ndt", accept_datetime=False)
 
-            # counts as number.Real out of the box
-            f.dt = np.timedelta64(3000, "ms")
-            assert f.dt == np.timedelta64(3000, "ms")
+            f = Foo()
 
-            f.ndt = datetime.timedelta(3, 54)
-            assert f.ndt == 259254000.0
+            # FYI Numpy erroneously raises an annoying warning about elementwise
+            # comparison below because a timedelta is compared to a float.
+            # https://github.com/numpy/numpy/issues/10095
+            with warnings.catch_warnings():
+                warnings.simplefilter(action='ignore', category=DeprecationWarning)
 
-            # counts as number.Real out of the box
-            f.ndt = np.timedelta64(3000, "ms")
-            assert f.ndt == np.timedelta64(3000, "ms")
+                f.dt = datetime.timedelta(3, 54)
+                assert f.dt == 259254000.0
+
+                # counts as number.Real out of the box
+                f.dt = np.timedelta64(3000, "ms")
+                assert f.dt == np.timedelta64(3000, "ms")
+
+                f.ndt = datetime.timedelta(3, 54)
+                assert f.ndt == 259254000.0
+
+                # counts as number.Real out of the box
+                f.ndt = np.timedelta64(3000, "ms")
+                assert f.ndt == np.timedelta64(3000, "ms")
 
     def tests_accepts_timedelta_with_pandas(self):
-        class Foo(HasProps):
-            dt = bcpd.NumberSpec("dt", accept_datetime=True)
-            ndt = bcpd.NumberSpec("ndt", accept_datetime=False)
+        pd = pytest.importorskip("pandas")
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=BokehDeprecationWarning)
 
-        f = Foo()
+            class Foo(HasProps):
+                dt = bcpd.NumberSpec("dt", accept_datetime=True)
+                ndt = bcpd.NumberSpec("ndt", accept_datetime=False)
 
-        # counts as number.Real out of the box
-        f.dt = pd.Timedelta("3000ms")
-        assert f.dt == 3000.0
+            f = Foo()
 
-        f.ndt = pd.Timedelta("3000ms")
-        assert f.ndt == 3000.0
+            # counts as number.Real out of the box
+            f.dt = pd.Timedelta("3000ms")
+            assert f.dt == 3000.0
+
+            f.ndt = pd.Timedelta("3000ms")
+            assert f.ndt == 3000.0
 
     def test_accepts_datetime(self) -> None:
-        class Foo(HasProps):
-            dt = bcpd.NumberSpec("dt", accept_datetime=True)
-            ndt = bcpd.NumberSpec("ndt", accept_datetime=False)
+        with warnings.catch_warnings():
+            warnings.simplefilter(action="ignore", category=BokehDeprecationWarning)
 
-        f = Foo()
+            class Foo(HasProps):
+                dt = bcpd.NumberSpec("dt", accept_datetime=True)
+                ndt = bcpd.NumberSpec("ndt", accept_datetime=False)
 
-        f.dt = datetime.datetime(2016, 5, 11)
-        assert f.dt == 1462924800000.0
+            f = Foo()
 
-        f.dt = np.datetime64("2016-05-11")
-        assert f.dt == 1462924800000.0
+            f.dt = datetime.datetime(2016, 5, 11)
+            assert f.dt == 1462924800000.0
 
-        f.dt = datetime.date(2016, 5, 11)
-        assert f.dt == 1462924800000.0
+            f.dt = np.datetime64("2016-05-11")
+            assert f.dt == 1462924800000.0
 
-        with pytest.raises(ValueError):
-            f.ndt = datetime.datetime(2016, 5, 11)
+            f.dt = datetime.date(2016, 5, 11)
+            assert f.dt == 1462924800000.0
 
-        with pytest.raises(ValueError):
-            f.ndt = datetime.date(2016, 5, 11)
+            with pytest.raises(ValueError):
+                f.ndt = datetime.datetime(2016, 5, 11)
 
-        with pytest.raises(ValueError):
-            f.ndt = np.datetime64("2016-05-11")
+            with pytest.raises(ValueError):
+                f.ndt = datetime.date(2016, 5, 11)
+
+            with pytest.raises(ValueError):
+                f.ndt = np.datetime64("2016-05-11")
 
     def test_default(self) -> None:
         class Foo(HasProps):

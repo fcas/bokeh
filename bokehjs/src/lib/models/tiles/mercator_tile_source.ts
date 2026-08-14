@@ -10,6 +10,10 @@ export namespace MercatorTileSource {
   export type Props = TileSource.Props & {
     snap_to_zoom: p.Property<boolean>
     wrap_around: p.Property<boolean>
+  } & Internal
+
+  export type Internal = {
+    _resolutions: p.Property<number[]>
   }
 }
 
@@ -28,18 +32,17 @@ export class MercatorTileSource extends TileSource {
       wrap_around:  [ Bool, true ],
     }))
 
+    this.internal<MercatorTileSource.Internal, MercatorTileSource>(({Float, List}) => ({
+      _resolutions: [ List(Float), (obj) => { // TODO computed property of min_zoom, max_zoom, etc.
+        return range(obj.min_zoom, obj.max_zoom+1).map((z) => obj.get_resolution(z))
+      } ],
+    }))
+
     this.override<MercatorTileSource.Props>({
       x_origin_offset:    20037508.34,
       y_origin_offset:    20037508.34,
       initial_resolution: 156543.03392804097,
     })
-  }
-
-  protected _resolutions: number[]
-
-  override initialize(): void {
-    super.initialize()
-    this._resolutions = range(this.min_zoom, this.max_zoom+1).map((z) => this.get_resolution(z))
   }
 
   protected _computed_initial_resolution(): number {
@@ -140,6 +143,23 @@ export class MercatorTileSource extends TileSource {
     return [xmin - x_adjust, ymin - y_adjust, xmax + x_adjust, ymax + y_adjust]
   }
 
+  rescale(extent: Extent, height: number, width: number, last_height: number, last_width: number): Extent {
+    const [xmin, ymin, xmax, ymax] = extent
+    const x_delta = xmax-xmin
+    const y_delta = ymax-ymin
+
+    const x_scale = width/last_width
+    const y_scale = height/last_height
+
+    const desired_x_delta = x_delta*x_scale
+    const desired_y_delta = y_delta*y_scale
+
+    const x_adjust = desired_x_delta - x_delta
+    const y_adjust = desired_y_delta - y_delta
+
+    return [xmin - x_adjust/2, ymin - y_adjust/2, xmax + x_adjust/2, ymax + y_adjust/2]
+  }
+
   tms_to_wmts(x: number, y: number, z: number): [number, number, number] {
     // Note this works both ways
     return [x, 2**z - 1 - y, z]
@@ -195,6 +215,11 @@ export class MercatorTileSource extends TileSource {
   }
 
   get_tiles_by_extent(extent: Extent, level: number, tile_border: number = 1): [number, number, number, Bounds][] {
+    // skip calculation if any axis has undefined extent
+    if (extent.some(value => !isFinite(value))) {
+      return []
+    }
+
     // unpack extent and convert to tile coordinates
     const [xmin, ymin, xmax, ymax] = extent
     let [txmin, tymin] = this.meters_to_tile(xmin, ymin, level)

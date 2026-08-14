@@ -1,7 +1,7 @@
 import type * as types from "./types"
 import * as tp from "./util/types"
 import {is_Color} from "./util/color"
-import {keys, values, typed_values, typed_entries, is_empty, PlainObjectProxy} from "./util/object"
+import {keys, values, entries, typed_values, typed_entries, is_empty, PlainObjectProxy} from "./util/object"
 import {has_refs} from "./util/refs"
 
 type ESMap<K, V> = globalThis.Map<K, V>
@@ -16,13 +16,30 @@ type DOMNode = globalThis.Node
 const DOMNode = globalThis.Node
 
 export abstract class Kind<T> {
-  __type__: T
+  declare __type__: T
 
   coerce?(value: unknown): unknown
 
   abstract valid(value: unknown): value is this["__type__"]
 
   abstract may_have_refs(): boolean
+
+  get kind_name(): string {
+    return this.constructor.name
+  }
+
+  get kind_args(): unknown[] {
+    return []
+  }
+
+  toString(): string {
+    const {kind_name, kind_args} = this
+    if (kind_args.length == 0) {
+      return kind_name
+    } else {
+      return `${kind_name}(${kind_args.map((arg) => `${arg}`).join(", ")})`
+    }
+  }
 }
 
 export type Constructor<T> = Function & {prototype: T}
@@ -39,10 +56,6 @@ export namespace Kinds {
       return value !== undefined
     }
 
-    override toString(): string {
-      return "Any"
-    }
-
     override may_have_refs(): boolean {
       return true
     }
@@ -53,10 +66,6 @@ export namespace Kinds {
       return value !== undefined
     }
 
-    override toString(): string {
-      return "Unknown"
-    }
-
     override may_have_refs(): boolean {
       return true
     }
@@ -65,10 +74,6 @@ export namespace Kinds {
   export class Bool extends Primitive<boolean> {
     valid(value: unknown): value is boolean {
       return tp.isBoolean(value)
-    }
-
-    override toString(): string {
-      return "Bool"
     }
   }
 
@@ -81,11 +86,12 @@ export namespace Kinds {
       return value instanceof this.obj_type
     }
 
+    get type_name(): string {
+      return this.obj_type.name
+    }
+
     override toString(): string {
-      const tp = this.obj_type
-      // NOTE: `__name__` is injected by a compiler transform
-      const name = (tp as any).__name__ ?? tp.toString()
-      return `Ref(${name})`
+      return `${this.kind_name}(${this.type_name})`
     }
 
     may_have_refs(): boolean {
@@ -99,10 +105,6 @@ export namespace Kinds {
       return tp.isObject(value)
     }
 
-    override toString(): string {
-      return "AnyRef"
-    }
-
     may_have_refs(): boolean {
       return true
     }
@@ -112,29 +114,17 @@ export namespace Kinds {
     valid(value: unknown): value is number {
       return tp.isNumber(value)
     }
-
-    override toString(): string {
-      return "Float"
-    }
   }
 
   export class Int extends Float {
     override valid(value: unknown): value is number {
       return super.valid(value) && tp.isInteger(value)
     }
-
-    override toString(): string {
-      return "Int"
-    }
   }
 
   export class Percent extends Float {
     override valid(value: unknown): value is number {
       return super.valid(value) && 0 <= value && value <= 1
-    }
-
-    override toString(): string {
-      return "Percent"
     }
   }
 
@@ -152,8 +142,29 @@ export namespace Kinds {
       return this.types.some((type) => type.valid(value))
     }
 
-    override toString(): string {
-      return `Or(${this.types.map((type) => type.toString()).join(", ")})`
+    override get kind_args(): unknown[] {
+      return this.types
+    }
+
+    may_have_refs(): boolean {
+      return this.types.some((type) => type.may_have_refs())
+    }
+  }
+
+  export class And<T0, T1> extends Kind<T0 & T1> {
+    readonly types: [Kind<T0>, Kind<T1>]
+
+    constructor(type0: Kind<T0>, type1: Kind<T1>) {
+      super()
+      this.types = [type0, type1]
+    }
+
+    valid(value: unknown): value is T0 & T1 {
+      return this.types.some((type) => type.valid(value)) // TODO not sure if this is correct, probably not
+    }
+
+    override get kind_args(): unknown[] {
+      return this.types
     }
 
     may_have_refs(): boolean {
@@ -183,8 +194,8 @@ export namespace Kinds {
       return true
     }
 
-    override toString(): string {
-      return `Tuple(${this.types.map((type) => type.toString()).join(", ")})`
+    override get kind_args(): unknown[] {
+      return this.types
     }
 
     may_have_refs(): boolean {
@@ -224,7 +235,7 @@ export namespace Kinds {
 
     override toString(): string {
       const items = typed_entries(this.struct_type).map(([key, kind]) => `${key.toString()}: ${kind}`).join(", ")
-      return `Struct({${items}})`
+      return `${this.kind_name}({${items}})`
     }
 
     may_have_refs(): boolean {
@@ -267,7 +278,7 @@ export namespace Kinds {
 
     override toString(): string {
       const items = typed_entries(this.struct_type).map(([key, kind]) => `${key.toString()}?: ${kind}`).join(", ")
-      return `Struct({${items}})`
+      return `${this.kind_name}({${items}})`
     }
 
     may_have_refs(): boolean {
@@ -284,8 +295,8 @@ export namespace Kinds {
       return tp.isIterable(value)
     }
 
-    override toString(): string {
-      return `Iterable(${this.item_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.item_type]
     }
 
     may_have_refs(): boolean {
@@ -302,8 +313,8 @@ export namespace Kinds {
       return tp.isArray(value) || tp.isTypedArray(value) // TODO: too specific
     }
 
-    override toString(): string {
-      return `Arrayable(${this.item_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.item_type]
     }
 
     may_have_refs(): boolean {
@@ -320,8 +331,8 @@ export namespace Kinds {
       return tp.isArray(value) && value.every((item) => this.item_type.valid(item))
     }
 
-    override toString(): string {
-      return `List(${this.item_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.item_type]
     }
 
     may_have_refs(): boolean {
@@ -329,13 +340,19 @@ export namespace Kinds {
     }
   }
 
+  export class NonEmptyList<ItemType> extends List<ItemType> {
+    override valid(value: unknown): value is ItemType[] {
+      return super.valid(value) && value.length != 0
+    }
+
+    override get kind_args(): unknown[] {
+      return [this.item_type]
+    }
+  }
+
   export class Null extends Primitive<null> {
     valid(value: unknown): value is null {
       return value === null
-    }
-
-    override toString(): string {
-      return "Null"
     }
   }
 
@@ -348,8 +365,8 @@ export namespace Kinds {
       return value === null || this.base_type.valid(value)
     }
 
-    override toString(): string {
-      return `Nullable(${this.base_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.base_type]
     }
 
     may_have_refs(): boolean {
@@ -366,8 +383,8 @@ export namespace Kinds {
       return value === undefined || this.base_type.valid(value)
     }
 
-    override toString(): string {
-      return `Opt(${this.base_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.base_type]
     }
 
     may_have_refs(): boolean {
@@ -380,10 +397,6 @@ export namespace Kinds {
       return value instanceof ArrayBuffer
     }
 
-    override toString(): string {
-      return "Bytes"
-    }
-
     may_have_refs(): boolean {
       return false
     }
@@ -393,9 +406,19 @@ export namespace Kinds {
     valid(value: unknown): value is string {
       return tp.isString(value)
     }
+  }
 
-    override toString(): string {
-      return "Str"
+  export class PrefixedStr<P extends string> extends Primitive<`${P}${string}`> {
+    constructor(readonly prefix: P) {
+      super()
+    }
+
+    valid(value: unknown): value is this["__type__"] {
+      return tp.isString(value) && value.startsWith(this.prefix)
+    }
+
+    override get kind_args(): unknown[] {
+      return [this.prefix]
     }
   }
 
@@ -408,8 +431,8 @@ export namespace Kinds {
       return super.valid(value) && this.regex.test(value)
     }
 
-    override toString(): string {
-      return `Regex(${this.regex.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.regex]
     }
   }
 
@@ -429,8 +452,8 @@ export namespace Kinds {
       yield* this.values
     }
 
-    override toString(): string {
-      return `Enum(${[...this.values].map((v) => v.toString()).join(", ")})`
+    override get kind_args(): unknown[] {
+      return [...this.values]
     }
   }
 
@@ -454,12 +477,41 @@ export namespace Kinds {
       return true
     }
 
-    override toString(): string {
-      return `Dict(${this.item_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.item_type]
     }
 
     may_have_refs(): boolean {
       return this.item_type.may_have_refs()
+    }
+  }
+
+  export class KeyVal<KeyType extends string, ItemType> extends Kind<types.KeyVal<KeyType, ItemType>> {
+
+    constructor(readonly key_type: Kind<KeyType>, readonly item_type: Kind<ItemType>) {
+      super()
+    }
+
+    valid(value: unknown): value is this["__type__"] {
+      if (!(value instanceof ESMap || tp.isPlainObject(value))) {
+        return false
+      }
+
+      for (const [key, item] of entries(value)) {
+        if (!this.key_type.valid(key) || !this.item_type.valid(item)) {
+          return false
+        }
+      }
+
+      return true
+    }
+
+    override get kind_args(): unknown[] {
+      return [this.key_type, this.item_type]
+    }
+
+    may_have_refs(): boolean {
+      return this.key_type.may_have_refs() || this.item_type.may_have_refs()
     }
   }
 
@@ -492,8 +544,8 @@ export namespace Kinds {
       return true
     }
 
-    override toString(): string {
-      return `Mapping(${this.key_type.toString()}, ${this.item_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.key_type, this.item_type]
     }
 
     may_have_refs(): boolean {
@@ -521,8 +573,8 @@ export namespace Kinds {
       return true
     }
 
-    override toString(): string {
-      return `Set(${this.item_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.item_type]
     }
 
     may_have_refs(): boolean {
@@ -533,10 +585,6 @@ export namespace Kinds {
   export class Color extends Kind<types.Color> {
     valid(value: unknown): value is types.Color {
       return is_Color(value)
-    }
-
-    override toString(): string {
-      return "Color"
     }
 
     may_have_refs(): boolean {
@@ -550,19 +598,22 @@ export namespace Kinds {
       return super.valid(value) // TODO: && this._parse(value)
     }
     */
-
-    override toString(): string {
-      return "CSSLength"
-    }
   }
 
   export class Func<Args extends unknown[], Ret> extends Kind<(...args: Args) => Ret> {
+    constructor(readonly args_types?: TupleKind<Args>, readonly ret_type?: Kind<Ret>) {
+      super()
+    }
+
     valid(value: unknown): value is this["__type__"] {
       return tp.isFunction(value)
     }
 
     override toString(): string {
-      return "Func(...)"
+      const {args_types, ret_type} = this
+      const args = args_types == null ? "?" : args_types.map((type) => type.toString()).join(", ")
+      const ret = ret_type == null ? "?" : ret_type.toString()
+      return `${this.kind_name}((${args}), ${ret})`
     }
 
     may_have_refs(): boolean {
@@ -579,8 +630,8 @@ export namespace Kinds {
       return this.base_type.valid(value) && value >= 0
     }
 
-    override toString(): string {
-      return `NonNegative(${this.base_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.base_type]
     }
 
     may_have_refs(): boolean {
@@ -597,8 +648,8 @@ export namespace Kinds {
       return this.base_type.valid(value) && value > 0
     }
 
-    override toString(): string {
-      return `Positive(${this.base_type.toString()})`
+    override get kind_args(): unknown[] {
+      return [this.base_type]
     }
 
     may_have_refs(): boolean {
@@ -609,10 +660,6 @@ export namespace Kinds {
   export class Node extends Kind<DOMNode> {
     valid(value: unknown): value is DOMNode {
       return value instanceof DOMNode
-    }
-
-    override toString(): string {
-      return "Node"
     }
 
     may_have_refs(): boolean {
@@ -628,24 +675,29 @@ export const Float = new Kinds.Float()
 export const Int = new Kinds.Int()
 export const Bytes = new Kinds.Bytes()
 export const Str = new Kinds.Str()
+export const PrefixedStr = <Prefix extends string>(prefix: Prefix) => new Kinds.PrefixedStr(prefix)
 export const Regex = (regex: RegExp) => new Kinds.Regex(regex)
 export const Null = new Kinds.Null()
 export const Nullable = <BaseType>(base_type: Kind<BaseType>) => new Kinds.Nullable(base_type)
 export const Opt = <BaseType>(base_type: Kind<BaseType>) => new Kinds.Opt(base_type)
 export const Or = <T extends [unknown, ...unknown[]]>(...types: Kinds.TupleKind<T>) => new Kinds.Or(types)
+export const And = <T0, T1>(type0: Kind<T0>, type1: Kind<T1>) => new Kinds.And(type0, type1)
 export const Tuple = <T extends [unknown, ...unknown[]]>(...types: Kinds.TupleKind<T>) => new Kinds.Tuple(types)
 export const Struct = <T extends {[key: string]: unknown}>(struct_type: Kinds.ObjectKind<T>) => new Kinds.Struct(struct_type)
 export const PartialStruct = <T extends {[key: string]: unknown}>(struct_type: Kinds.ObjectKind<T>) => new Kinds.PartialStruct(struct_type)
 export const Iterable = <ItemType>(item_type: Kind<ItemType>) => new Kinds.Iterable(item_type)
 export const Arrayable = <ItemType>(item_type: Kind<ItemType>) => new Kinds.Arrayable(item_type)
 export const List = <ItemType>(item_type: Kind<ItemType>) => new Kinds.List(item_type)
+export const NonEmptyList = <ItemType>(item_type: Kind<ItemType>) => new Kinds.NonEmptyList(item_type)
 export const Dict = <V>(item_type: Kind<V>) => new Kinds.Dict(item_type)
+export const KeyVal = <K extends string, V>(key_type: Kind<K>, item_type: Kind<V>) => new Kinds.KeyVal(key_type, item_type)
 export const Mapping = <K, V>(key_type: Kind<K>, item_type: Kind<V>) => new Kinds.Mapping(key_type, item_type)
 export const Set = <V>(item_type: Kind<V>) => new Kinds.Set(item_type)
 export const Enum = <T extends string | number>(...values: T[]) => new Kinds.Enum(values)
 export const Ref = <ObjType extends object>(obj_type: Constructor<ObjType>) => new Kinds.Ref<ObjType>(obj_type)
 export const AnyRef = <ObjType extends object>() => new Kinds.AnyRef<ObjType>()
-export const Func = <Args extends unknown[], Ret>() => new Kinds.Func<Args, Ret>()
+export const Func = <Args extends unknown[], Ret>(args_types?: Kinds.TupleKind<Args>, ret_type?: Kind<Ret>) => new Kinds.Func<Args, Ret>(args_types, ret_type)
+export const Func0 = <Ret>(ret_type: Kind<Ret>) => new Kinds.Func<[], Ret>([], ret_type)
 export const Node = new Kinds.Node()
 
 export const NonNegative = <BaseType extends number>(base_type: Kind<BaseType>) => new Kinds.NonNegative(base_type)
@@ -660,6 +712,9 @@ export const CSSLength = new Kinds.CSSLength()
 export const FontSize = Str
 export const Font = Str
 export const Angle = Float
+
+export type Float = typeof Float["__type__"]
+export type Dict<V> = Kinds.Dict<V>["__type__"]
 
 // backwards compatibility aliases (these collide with built-in types)
 /** @deprecated */

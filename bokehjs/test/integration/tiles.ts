@@ -1,4 +1,4 @@
-import {display, fig, row} from "./_util"
+import {display, fig, row} from "#framework/layouts"
 
 import {Range1d} from "@bokehjs/models/ranges"
 import type {Plot} from "@bokehjs/models/plots"
@@ -19,8 +19,8 @@ describe("TileRenderer", () => {
     // CARTODBPOSITRON, CARTO_ATTRIBUTION
     const url = "https://tiles.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
     const attribution =
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors,' +
-        '&copy; <a href="https://cartodb.com/attributions">CartoDB</a>'
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors,' +
+      '&copy; <a href="https://cartodb.com/attributions">CartoDB</a>'
     const tile_provider = new WMTSTileSource({url, attribution})
 
     function add_tile(plot: Plot, tile_source: TileSource, attrs: Partial<TileRenderer.Attrs> = {}): TileRenderer {
@@ -33,5 +33,32 @@ describe("TileRenderer", () => {
     add_tile(p1, tile_provider, {smoothing: false})
 
     await display(row([p0, p1]))
+  })
+
+  it("should hide attribution for invisible renderers", async () => {
+    const visible_source = new WMTSTileSource({
+      url: "/assets/tiles/osm/{Z}_{X}_{Y}.png",
+      attribution: "visible attribution",
+    })
+    const hidden_source = new WMTSTileSource({
+      url: "/assets/tiles/osm/{Z}_{X}_{Y}.png",
+      attribution: "hidden attribution",
+    })
+
+    const visible = new TileRenderer({tile_source: visible_source})
+    const hidden = new TileRenderer({tile_source: hidden_source})
+
+    const plot = fig([300, 300], {
+      x_range: [-2000000, 6000000],
+      y_range: [-1000000, 7000000],
+      x_axis_type: "mercator",
+      y_axis_type: "mercator",
+      renderers: [visible, hidden],
+    })
+
+    const {view} = await display(plot)
+
+    hidden.visible = false
+    await view.ready
   })
 })

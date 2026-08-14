@@ -50,7 +50,6 @@ from typing import Sequence
 # Bokeh imports
 from bokeh import __version__
 from bokeh.settings import settings
-from bokeh.util.strings import nice_join
 
 # Bokeh imports
 from . import subcommands
@@ -87,11 +86,14 @@ def main(argv: Sequence[str]) -> None:
     * :ref:`json <bokeh.command.subcommands.json>`
     * :ref:`secret <bokeh.command.subcommands.secret>`
     * :ref:`serve <bokeh.command.subcommands.serve>`
+    * :ref:`settings <bokeh.command.subcommands.settings>`
     * :ref:`static <bokeh.command.subcommands.static>`
 
     '''
     if len(argv) == 1:
-        die(f"ERROR: Must specify subcommand, one of: {nice_join(x.name for x in subcommands.all)}")
+        from bokeh.util.strings import nice_join
+
+        die(f"Must specify subcommand, one of: {nice_join(x.name for x in subcommands.all)}")
 
     parser = argparse.ArgumentParser(
         prog=argv[0],
@@ -113,7 +115,7 @@ def main(argv: Sequence[str]) -> None:
         if settings.dev:
             raise
         else:
-            die("ERROR: " + str(e))
+            die(str(e))
 
     if ret is False:
         sys.exit(1)

@@ -1,14 +1,17 @@
-import {expect} from "assertions"
-import {fig, display} from "../../_util"
-import {mouse_enter, mouse_leave} from "../../../interactive"
+import {expect, expect_instanceof} from "#framework/assertions"
+import {fig, display} from "#framework/layouts"
+import {mouse_enter, mouse_leave} from "#framework/interactive"
 
 import {Toolbar} from "@bokehjs/models/tools/toolbar"
+import {ToolGroup} from "@bokehjs/models/tools/tool_group"
 import {HoverTool} from "@bokehjs/models/tools/inspectors/hover_tool"
 import {SelectTool} from "@bokehjs/models/tools/gestures/select_tool"
 import {PanTool} from "@bokehjs/models/tools/gestures/pan_tool"
 import {TapTool} from "@bokehjs/models/tools/gestures/tap_tool"
 import {build_view} from "@bokehjs/core/build_views"
 import {gridplot} from "@bokehjs/api/gridplot"
+import {ExamineTool, Plot, CustomAction, Legend, LegendItem, CustomJS, Range1d} from "@bokehjs/models"
+import * as tb_css from "@bokehjs/styles/tool_button.css"
 
 describe("Toolbar", () => {
 
@@ -45,7 +48,7 @@ describe("Toolbar", () => {
       expect(toolbar.gestures.pan.active).to.be.null
     })
 
-    it("should correctly active tool and deactive currently active one", () => {
+    it("should correctly activate tool and deactivate currently active one", () => {
       // activate the tool as setup
       pan_1.active = true
       toolbar._active_change(pan_1)
@@ -200,29 +203,175 @@ describe("ToolbarView", () => {
     })
   })
 
+  describe("should allow activation and deactivation", () => {
+    it("of ExamineTool", async () => {
+      const tool = new ExamineTool()
+      const toolbar = new Toolbar({tools: [tool]})
+      const plot = new Plot({toolbar})
+      const {view} = await display(plot)
+      const toolbar_view = view.owner.get_one(toolbar)
+      const tool_view = view.owner.get_one(tool)
+      const tool_button_view = toolbar_view.tool_button_views[0]
+      expect(tool_button_view.model.tool.active).to.be.false
+      expect(tool_view.dialog.model.visible).to.be.false
+      tool_button_view.tap()
+      await view.ready
+      expect(tool_button_view.model.tool.active).to.be.true
+      expect(tool_view.dialog.model.visible).to.be.true
+      tool_button_view.tap()
+      await view.ready
+      expect(tool_button_view.model.tool.active).to.be.false
+      expect(tool_view.dialog.model.visible).to.be.false
+    })
+
+    describe("of CustomAction", () => {
+      async function test(initial: boolean, fn: (legend: Legend, tool: CustomAction) => void) {
+        const legend = new Legend({
+          visible: initial,
+          items: [
+            new LegendItem({label: "Label"}),
+          ],
+        })
+        const tool = new CustomAction({
+          icon: ".bk-tool-icon-list",
+          active: initial,
+        })
+        fn(legend, tool)
+        const toolbar = new Toolbar({tools: [tool]})
+        const plot = new Plot({
+          toolbar,
+          center: [legend],
+          width: 200,
+          height: 100,
+          x_range: new Range1d({start: 0, end: 1}),
+          y_range: new Range1d({start: 0, end: 1}),
+        })
+        const {view} = await display(plot)
+        const toolbar_view = view.owner.get_one(toolbar)
+        const tool_button_view = toolbar_view.tool_button_views[0]
+        expect(tool_button_view.model.tool.active).to.be.equal(initial)
+        expect(legend.visible).to.be.equal(initial)
+        /**
+          Alternatively `await tap(tool_button_view.el)`, but it's slow
+          and unreliable (sometimes doesn't trigger, maybe due to page
+          scrolling or something like that).
+         */
+        tool_button_view.tap()
+        await view.ready
+        expect(tool_button_view.model.tool.active).to.be.equal(!initial)
+        expect(legend.visible).to.be.equal(!initial)
+        tool_button_view.tap()
+        await view.ready
+        expect(tool_button_view.model.tool.active).to.be.equal(initial)
+        expect(legend.visible).to.be.equal(initial)
+      }
+
+      describe("with JS callback and active_callback='auto'", () => {
+        const fn = (legend: Legend, tool: CustomAction) => {
+          tool.callback = () => {
+            legend.visible = !legend.visible
+          }
+          tool.active_callback = "auto"
+        }
+        it("and Legend initially not visible", async () => {
+          await test(false, fn)
+        })
+        it("and Legend initially visible", async () => {
+          await test(true, fn)
+        })
+      })
+
+      describe("with JS callback returning a boolean and active_callback=null", () => {
+        const fn = (legend: Legend, tool: CustomAction) => {
+          tool.callback = () => {
+            legend.visible = !legend.visible
+            return legend.visible
+          }
+          tool.active_callback = null
+        }
+        it("and Legend initially not visible", async () => {
+          await test(false, fn)
+        })
+        it("and Legend initially visible", async () => {
+          await test(true, fn)
+        })
+      })
+
+      describe("with JS callbacks", () => {
+        const fn = (legend: Legend, tool: CustomAction) => {
+          tool.callback = () => {
+            legend.visible = !legend.visible
+          }
+          tool.active_callback = () => {
+            return legend.visible
+          }
+        }
+        it("and Legend initially not visible", async () => {
+          await test(false, fn)
+        })
+        it("and Legend initially visible", async () => {
+          await test(true, fn)
+        })
+      })
+
+      describe("with CustomJS callbacks", () => {
+        const fn = (legend: Legend, tool: CustomAction) => {
+          tool.callback = new CustomJS({
+            args: {legend},
+            code: `
+            export default ({legend}) => {
+              legend.visible = !legend.visible
+            }
+            `,
+          })
+          tool.active_callback = new CustomJS({
+            args: {legend},
+            code: `
+            export default ({legend}) => {
+              return legend.visible
+            }
+            `,
+          })
+        }
+        it("and Legend initially not visible", async () => {
+          await test(false, fn)
+        })
+        it("and Legend initially visible", async () => {
+          await test(true, fn)
+        })
+      })
+    })
+  })
+
   describe("toggleable attribute with inspect tools", () => {
     it("should not show inspect tools if toggleable=false", async () => {
       const hover = new HoverTool({toggleable: false})
       const tb = new Toolbar({tools: [hover]})
       const tbv = await build_view(tb, {parent: null})
+      tbv.render()
 
-      expect(tbv.tool_buttons.length).to.be.equal(0)
+      expect(hover.visible).to.be.false
+      expect(tbv.tool_button_views[0].class_list.has(tb_css.hidden)).to.be.true
     })
 
     it("should show inspect tools if toggleable=true", async () => {
       const hover = new HoverTool({toggleable: true})
       const tb = new Toolbar({tools: [hover]})
       const tbv = await build_view(tb, {parent: null})
+      tbv.render()
 
-      expect(tbv.tool_buttons.length).to.be.equal(1)
+      expect(hover.visible).to.be.true
+      expect(tbv.tool_button_views[0].class_list.has(tb_css.hidden)).to.be.false
     })
 
     it("should show inspect tools if toggleable is not set", async () => {
       const hover = new HoverTool()
       const tb = new Toolbar({tools: [hover]})
       const tbv = await build_view(tb, {parent: null})
+      tbv.render()
 
-      expect(tbv.tool_buttons.length).to.be.equal(1)
+      expect(hover.visible).to.be.true
+      expect(tbv.tool_button_views[0].class_list.has(tb_css.hidden)).to.be.false
     })
   })
 
@@ -254,57 +403,223 @@ describe("ToolbarView", () => {
     })
 
     it("should not add tools with visible=false", async () => {
-      const hover = new HoverTool({visible: false})
       const pan = new PanTool({visible: false})
       const tap = new TapTool()
+      const hover = new HoverTool({visible: false})
 
-      const tb = new Toolbar({tools: [hover, pan, tap]})
-      const tb_visible_true = new Toolbar({tools: [tap]})
+      const tb = new Toolbar({tools: [pan, tap, hover]})
       const tbv = await build_view(tb, {parent: null})
+      tbv.render()
 
-      expect(tbv.tool_buttons.length).to.be.equal(1)
-      expect(tbv.tool_buttons[0].tool.tool_name).to.be.equal("Tap")
-
-      const tool_names = tbv.tool_buttons.map((button) => button.tool.tool_name)
-      const tb_names = tb_visible_true.tools.map((tool) => tool.tool_name)
-      expect(tool_names).to.be.equal(tb_names)
+      expect(tbv.tool_button_views[0].class_list.has(tb_css.hidden)).to.be.true
+      expect(tbv.tool_button_views[1].class_list.has(tb_css.hidden)).to.be.false
+      expect(tbv.tool_button_views[2].class_list.has(tb_css.hidden)).to.be.true
     })
 
     it("should have default tools all be visible", async () => {
-      const hover = new HoverTool()
       const pan = new PanTool()
       const tap = new TapTool()
+      const hover = new HoverTool()
 
-      const tb = new Toolbar({tools: [hover, pan, tap]})
+      const tb = new Toolbar({tools: [pan, tap, hover]})
       const tbv = await build_view(tb, {parent: null})
-      expect(tbv.tool_buttons.length).to.be.equal(3)
+      tbv.render()
+
+      expect(tbv.tool_button_views[0].class_list.has(tb_css.hidden)).to.be.false
+      expect(tbv.tool_button_views[1].class_list.has(tb_css.hidden)).to.be.false
+      expect(tbv.tool_button_views[2].class_list.has(tb_css.hidden)).to.be.false
     })
 
     it("should show no tools if all tools have visible=false", async () => {
-      const hover = new HoverTool({visible: false})
       const pan = new PanTool({visible: false})
       const tap = new TapTool({visible: false})
-      const tb = new Toolbar({tools: [hover, pan, tap]})
+      const hover = new HoverTool({visible: false})
+
+      const tb = new Toolbar({tools: [pan, tap, hover]})
       const tbv = await build_view(tb, {parent: null})
-      expect(tbv.tool_buttons.length).to.be.equal(0)
+      tbv.render()
+
+      expect(tbv.tool_button_views[0].class_list.has(tb_css.hidden)).to.be.true
+      expect(tbv.tool_button_views[1].class_list.has(tb_css.hidden)).to.be.true
+      expect(tbv.tool_button_views[2].class_list.has(tb_css.hidden)).to.be.true
     })
 
     it("should properly show tools after changing visibility", async () => {
       const hover = new HoverTool()
-
       const tb = new Toolbar({tools: [hover]})
-      let tbv = await build_view(tb, {parent: null})
+      const tbv = await build_view(tb, {parent: null})
+      tbv.render()
 
-      expect(tbv.tool_buttons.length).to.be.equal(1)
+      expect(tbv.tool_button_views[0].class_list.has(tb_css.hidden)).to.be.false
 
       hover.visible = false
-      tbv = await build_view(tb, {parent: null})
-      expect(tbv.tool_buttons.length).to.be.equal(0)
+      await tbv.ready
+
+      expect(tbv.tool_button_views[0].class_list.has(tb_css.hidden)).to.be.true
 
       hover.visible = true
-      tbv = await build_view(tb, {parent: null})
-      expect(tbv.tool_buttons.length).to.be.equal(1)
-      expect(tbv.tool_buttons[0].tool.tool_name).to.be.equal("Hover")
+      await tbv.ready
+
+      expect(tbv.tool_button_views[0].class_list.has(tb_css.hidden)).to.be.false
+    })
+  })
+
+  describe("should support tool grouping", () => {
+    it("and should group tools when Toolbar.group == true", async () => {
+      const pan0 = new PanTool()
+      const pan1 = new PanTool()
+      const tap0 = new TapTool()
+      const tap1 = new TapTool()
+      const tap2 = new TapTool()
+      const hover0 = new HoverTool()
+      const hover1 = new HoverTool()
+      const hover2 = new HoverTool()
+
+      const tb = new Toolbar({
+        tools: [pan0, pan1, tap0, tap1, tap2, hover0, hover1, hover2],
+        group: true,
+      })
+      const tbv = await build_view(tb, {parent: null})
+
+      expect(tbv.tool_buttons.length).to.be.equal(6)
+
+      expect(tbv.tool_buttons[0].tool).to.be.equal(pan0)
+      expect(tbv.tool_buttons[1].tool).to.be.equal(pan1)
+      expect(tbv.tool_buttons[2].tool).to.be.equal(tap0)
+      expect(tbv.tool_buttons[3].tool).to.be.equal(tap1)
+      expect(tbv.tool_buttons[4].tool).to.be.equal(tap2)
+
+      expect_instanceof(tbv.tool_buttons[5].tool, ToolGroup)
+      expect(tbv.tool_buttons[5].tool.tools).to.be.equal([hover0, hover1, hover2])
+    })
+
+    it("and should not group tools when Toolbar.group == false", async () => {
+      const pan0 = new PanTool()
+      const pan1 = new PanTool()
+      const tap0 = new TapTool()
+      const tap1 = new TapTool()
+      const tap2 = new TapTool()
+      const hover0 = new HoverTool()
+      const hover1 = new HoverTool()
+      const hover2 = new HoverTool()
+
+      const tb = new Toolbar({
+        tools: [pan0, pan1, tap0, tap1, tap2, hover0, hover1, hover2],
+        group: false,
+      })
+      const tbv = await build_view(tb, {parent: null})
+
+      expect(tbv.tool_buttons.map((button) => button.tool)).to.be.equal([pan0, pan1, tap0, tap1, tap2, hover0, hover1, hover2])
+    })
+
+    it("and should allow to configure which types of tools to group", async () => {
+      const pan0 = new PanTool()
+      const pan1 = new PanTool()
+      const tap0 = new TapTool()
+      const tap1 = new TapTool()
+      const tap2 = new TapTool()
+      const hover0 = new HoverTool()
+      const hover1 = new HoverTool()
+      const hover2 = new HoverTool()
+
+      const tb = new Toolbar({
+        tools: [pan0, pan1, tap0, tap1, tap2, hover0, hover1, hover2],
+        group: true,
+        group_types: ["tap", "hover"],
+      })
+      const tbv = await build_view(tb, {parent: null})
+
+      expect(tbv.tool_buttons.length).to.be.equal(4)
+
+      expect(tbv.tool_buttons[0].tool).to.be.equal(pan0)
+      expect(tbv.tool_buttons[1].tool).to.be.equal(pan1)
+
+      expect_instanceof(tbv.tool_buttons[2].tool, ToolGroup)
+      expect(tbv.tool_buttons[2].tool.tools).to.be.equal([tap0, tap1, tap2])
+
+      expect_instanceof(tbv.tool_buttons[3].tool, ToolGroup)
+      expect(tbv.tool_buttons[3].tool.tools).to.be.equal([hover0, hover1, hover2])
+    })
+
+    it("and should allow to group tools by group name", async () => {
+      const tap0 = new TapTool({group: "A"})
+      const tap1 = new TapTool({group: "A"})
+      const tap2 = new TapTool({group: "A"})
+      const tap3 = new TapTool({group: "B"})
+      const tap4 = new TapTool({group: "B"})
+      const tap5 = new TapTool({group: "C"})
+      const tap6 = new TapTool({group: false})
+      const tap7 = new TapTool()
+      const tap8 = new TapTool()
+
+      const hover0 = new HoverTool()
+      const hover1 = new HoverTool()
+      const hover2 = new HoverTool({group: false})
+      const hover3 = new HoverTool({group: "A"})
+      const hover4 = new HoverTool({group: "A"})
+      const hover5 = new HoverTool()
+      const hover6 = new HoverTool({group: "A"})
+
+      const tb = new Toolbar({
+        tools: [
+          tap0, tap1, tap2, tap3, tap4, tap5, tap6, tap7, tap8,
+          hover0, hover1, hover2, hover3, hover4, hover5, hover6,
+        ],
+        group: true,
+        group_types: ["tap", "hover"],
+      })
+      const tbv = await build_view(tb, {parent: null})
+
+      expect(tbv.tool_buttons.length).to.be.equal(8)
+
+      expect_instanceof(tbv.tool_buttons[0].tool, ToolGroup)
+      expect(tbv.tool_buttons[0].tool.tools).to.be.equal([tap0, tap1, tap2])
+
+      expect_instanceof(tbv.tool_buttons[1].tool, ToolGroup)
+      expect(tbv.tool_buttons[1].tool.tools).to.be.equal([tap3, tap4])
+
+      expect(tbv.tool_buttons[2].tool).to.be.equal(tap5)
+
+      expect(tbv.tool_buttons[3].tool).to.be.equal(tap6)
+
+      expect_instanceof(tbv.tool_buttons[4].tool, ToolGroup)
+      expect(tbv.tool_buttons[4].tool.tools).to.be.equal([tap7, tap8])
+
+      expect_instanceof(tbv.tool_buttons[5].tool, ToolGroup)
+      expect(tbv.tool_buttons[5].tool.tools).to.be.equal([hover0, hover1, hover5])
+
+      expect(tbv.tool_buttons[6].tool).to.be.equal(hover2)
+
+      expect_instanceof(tbv.tool_buttons[7].tool, ToolGroup)
+      expect(tbv.tool_buttons[7].tool.tools).to.be.equal([hover3, hover4, hover6])
+    })
+
+    it("and should allow to change Toolbar.group", async () => {
+      const tap0 = new TapTool()
+      const tap1 = new TapTool()
+      const hover0 = new HoverTool()
+      const hover1 = new HoverTool()
+      const hover2 = new HoverTool()
+
+      const tb = new Toolbar({
+        tools: [tap0, tap1, hover0, hover1, hover2],
+        group: true,
+        group_types: ["hover"],
+      })
+      const tbv = await build_view(tb, {parent: null})
+
+      expect(tbv.tool_buttons.length).to.be.equal(3)
+
+      expect(tbv.tool_buttons[0].tool).to.be.equal(tap0)
+      expect(tbv.tool_buttons[1].tool).to.be.equal(tap1)
+
+      expect_instanceof(tbv.tool_buttons[2].tool, ToolGroup)
+      expect(tbv.tool_buttons[2].tool.tools).to.be.equal([hover0, hover1, hover2])
+
+      tb.group = false
+      await tbv.ready
+
+      expect(tbv.tool_buttons.map((button) => button.tool)).to.be.equal([tap0, tap1, hover0, hover1, hover2])
     })
   })
 })

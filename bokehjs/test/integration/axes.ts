@@ -1,4 +1,5 @@
-import {display, row, with_internal} from "./_util"
+import {display, fig, row} from "#framework/layouts"
+import {with_internal} from "#framework/util"
 
 import type {Axis} from "@bokehjs/models"
 import {
@@ -11,9 +12,13 @@ import {
   LogAxis,
   LogScale,
   NoOverlap,
+  PanTool,
   Plot,
   Range1d,
   TeX,
+  Toolbar,
+  ToolbarPanel,
+  WheelZoomTool,
 } from "@bokehjs/models"
 
 import type {Factor} from "@bokehjs/models/ranges/factor_range"
@@ -191,6 +196,14 @@ import {radians} from "@bokehjs/core/util/math"
     it("should support major_label_policy=NoOverlap(min_distance=50) with major_label_orientation=normal", async () => {
       await plot({major_label_policy: new NoOverlap({min_distance: 50}), major_label_orientation: "normal"}, {num_ticks: 20})
     })
+
+    it("should support single line axis_label and axis_label_standoff=70 and axis_label_standoff_mode=axis", async () => {
+      await plot({axis_label: "This is an axis label", axis_label_standoff: 70, axis_label_standoff_mode: "axis"}, {minor_size: 100})
+    })
+
+    it("should support single line axis_label and axis_label_standoff=20 and axis_label_standoff_mode=tick_labels", async () => {
+      await plot({axis_label: "This is an axis label", axis_label_standoff: 20, axis_label_standoff_mode: "tick_labels"}, {minor_size: 100})
+    })
   }
 
   describe("LinearAxis", () => {
@@ -255,6 +268,22 @@ import {radians} from "@bokehjs/core/util/math"
             ]),
           })
         })
+      })
+    })
+
+    describe("with fixed location", () => {
+      it("should be added without effecting the position of the toolbar", async () => {
+        const tools = [new PanTool(), new WheelZoomTool()]
+        const p = fig([300, 300], {toolbar_location: "right"})
+        p.scatter([1, 2, 3], [1, 2, 3])
+        p.extra_x_ranges = {["x"]: new Range1d({start: 0.9, end: 3.1})}
+        p.extra_y_ranges = {["y"]: new Range1d({start: 0.9, end: 3.1})}
+        p.add_layout(new LinearAxis({x_range_name: "x", fixed_location: 1.5}), "below")
+        p.add_layout(new LinearAxis({y_range_name: "y", fixed_location: 2.5}), "right")
+        p.add_layout(new ToolbarPanel({toolbar: new Toolbar({tools, location: "above"})}), "above")
+        p.add_layout(new ToolbarPanel({toolbar: new Toolbar({tools, location: "left"})}), "left")
+        p.add_layout(new ToolbarPanel({toolbar: new Toolbar({tools, location: "below"})}), "below")
+        await display(p)
       })
     })
   })

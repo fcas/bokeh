@@ -23,13 +23,17 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 import os
-from types import ModuleType
+from typing import TYPE_CHECKING
 
 # Bokeh imports
-from ...core.types import PathLike
 from ...util.callback_manager import _check_callback
 from .code_runner import CodeRunner
 from .lifecycle import LifecycleHandler
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
+    from ...core.types import PathLike
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -71,7 +75,10 @@ class ServerLifecycleHandler(LifecycleHandler):
 
         if not self._runner.failed:
             # unlike ScriptHandler, we only load the module one time
-            self._module = self._runner.new_module()
+            module = self._runner.new_module()
+            if module is None:
+                return
+            self._module = module
 
             def extract_callbacks() -> None:
                 contents = self._module.__dict__

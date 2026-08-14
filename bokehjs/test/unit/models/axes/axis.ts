@@ -1,13 +1,15 @@
-import {expect} from "assertions"
-import {display} from "../../_util"
+import {expect} from "#framework/assertions"
+import {fig, display} from "#framework/layouts"
+import {PlotActions, xy} from "#framework/interactive"
 
-import {Axis} from "@bokehjs/models/axes/axis"
+import {LinearAxis} from "@bokehjs/models/axes/linear_axis"
 import {BasicTicker} from "@bokehjs/models/tickers/basic_ticker"
 import {BasicTickFormatter} from "@bokehjs/models/formatters/basic_tick_formatter"
 import {Plot} from "@bokehjs/models/plots/plot"
 import {FactorRange} from "@bokehjs/models/ranges/factor_range"
 import {Range1d} from "@bokehjs/models/ranges/range1d"
 import {CategoricalScale} from "@bokehjs/models/scales/categorical_scale"
+import {WheelZoomTool} from "@bokehjs/models/tools/gestures/wheel_zoom_tool"
 import {Toolbar} from "@bokehjs/models/tools/toolbar"
 import type {TextBox} from "@bokehjs/core/graphics"
 import {TeXView, TeX} from "@bokehjs/models/text/math_text"
@@ -21,7 +23,7 @@ describe("Axis", () => {
     })
     const ticker = new BasicTicker()
     const formatter = new BasicTickFormatter()
-    const axis = new Axis({
+    const axis = new LinearAxis({
       ticker,
       formatter,
       major_label_overrides: new Map([[0, "zero"], [4, "four"], [10, "ten"]]),
@@ -41,7 +43,7 @@ describe("Axis", () => {
     })
     const ticker = new BasicTicker()
     const formatter = new BasicTickFormatter()
-    const axis = new Axis({
+    const axis = new LinearAxis({
       ticker,
       formatter,
       major_label_overrides: new Map<number, string | TeX>([[0, "zero"], [4, new TeX({text: "\\pi"})], [10, "$$ten$$"]]),
@@ -59,7 +61,7 @@ describe("Axis", () => {
   it("should convert mathstrings on axis labels to TeX", async () => {
     const ticker = new BasicTicker()
     const formatter = new BasicTickFormatter()
-    const axis = new Axis({
+    const axis = new LinearAxis({
       ticker,
       formatter,
       axis_label: "$$\\sin(x)$$",
@@ -80,7 +82,7 @@ describe("Axis", () => {
   it("should convert mathstrings with line breaks in between delimiters on axis labels to TeX", async () => {
     const ticker = new BasicTicker()
     const formatter = new BasicTickFormatter()
-    const axis = new Axis({
+    const axis = new LinearAxis({
       ticker,
       formatter,
       axis_label: `$$
@@ -107,7 +109,7 @@ describe("Axis", () => {
     })
     const ticker = new BasicTicker()
     const formatter = new BasicTickFormatter()
-    const axis = new Axis({
+    const axis = new LinearAxis({
       ticker,
       formatter,
       fixed_location: 10,
@@ -118,43 +120,6 @@ describe("Axis", () => {
     expect(axis_view.loc).to.be.equal(10)
   })
 
-  it("should return zero offsets when fixed_location is numeric", async () => {
-    const plot = new Plot({
-      x_range: new Range1d({start: 0, end: 10}),
-      y_range: new Range1d({start: 0, end: 10}),
-    })
-    const ticker = new BasicTicker()
-    const formatter = new BasicTickFormatter()
-    const axis = new Axis({
-      ticker,
-      formatter,
-      fixed_location: 5,
-    })
-    plot.add_layout(axis, "left")
-    const {view: plot_view} = await display(plot)
-    const axis_view = plot_view.owner.get_one(axis)
-    expect(axis_view.offsets).to.be.equal([0, 0])
-  })
-
-  it("should return zero offsets when fixed_location is categorical", async () => {
-    const plot = new Plot({
-      x_range: new FactorRange({factors: ["foo", "bar"]}),
-      x_scale: new CategoricalScale(),
-      y_range: new Range1d({start: 0, end: 10}),
-    })
-    const ticker = new BasicTicker()
-    const formatter = new BasicTickFormatter()
-    const axis = new Axis({
-      ticker,
-      formatter,
-      fixed_location: "foo",
-    })
-    plot.add_layout(axis, "left")
-    const {view: plot_view} = await display(plot)
-    const axis_view = plot_view.owner.get_one(axis)
-    expect(axis_view.offsets).to.be.equal([0, 0])
-  })
-
   it("loc should return synthetic for categorical fixed_location", async () => {
     const plot = new Plot({
       x_range: new FactorRange({factors: ["foo", "bar"]}),
@@ -163,7 +128,7 @@ describe("Axis", () => {
     })
     const ticker = new BasicTicker()
     const formatter = new BasicTickFormatter()
-    const axis = new Axis({
+    const axis = new LinearAxis({
       ticker,
       formatter,
       fixed_location: "foo",
@@ -173,15 +138,75 @@ describe("Axis", () => {
     const axis_view = plot_view.owner.get_one(axis)
     expect(axis_view.loc).to.be.equal(0.5)
   })
+
+  it("should allow zooming unsing Range1d when no bounds are set", async () => {
+    const x_range = new Range1d({start: 0, end: 3})
+    const y_range = new Range1d({start: 0, end: 3})
+
+    const wheel_zoom = new WheelZoomTool({maintain_focus: false})
+    const p = fig([200, 200], {x_range, y_range, tools: [wheel_zoom], active_scroll: wheel_zoom})
+    p.scatter({x: [1, 2, 3], y: [1, 2, 3], size: 20})
+
+    const {view} = await display(p)
+
+    expect(x_range.interval).to.be.equal([0, 3])
+
+    const actions = new PlotActions(view)
+    await actions.scroll_down(xy(2, 2), 1)
+    await view.ready
+
+    expect(x_range.start).to.be.below(0)
+    expect(x_range.end).to.be.above(3)
+  })
+
+  it("should respect bounds when zooming unsing Range1d", async () => {
+    const x_range = new Range1d({start: 0, end: 3, bounds: [0, 3]})
+    const y_range = new Range1d({start: 0, end: 3})
+
+    const wheel_zoom = new WheelZoomTool({maintain_focus: false})
+    const p = fig([200, 200], {x_range, y_range, tools: [wheel_zoom], active_scroll: wheel_zoom})
+    p.scatter({x: [1, 2, 3], y: [1, 2, 3], size: 20})
+
+    const {view} = await display(p)
+
+    expect(x_range.interval).to.be.equal([0, 3])
+
+    const actions = new PlotActions(view)
+    await actions.scroll_down(xy(2, 2), 1)
+    await view.ready
+
+    expect(x_range.interval).to.be.equal([0, 3])
+  })
+
+  it("should allow zooming unsing FactorRange when no bounds are set", async () => {
+    const factors = ["A", "B", "C"]
+    const x_range = new FactorRange({factors, start: 0, end: 3})
+    const y_range = new Range1d({start: 0, end: 3})
+
+    const wheel_zoom = new WheelZoomTool({maintain_focus: false})
+    const p = fig([200, 200], {x_range, y_range, tools: [wheel_zoom], active_scroll: wheel_zoom})
+    p.scatter({x: factors, y: [1, 2, 3], size: 20})
+
+    const {view} = await display(p)
+
+    expect(x_range.interval).to.be.equal([0, 3])
+
+    const actions = new PlotActions(view)
+    await actions.scroll_down(xy(2, 2), 1)
+    await view.ready
+
+    expect(x_range.start).to.be.below(0)
+    expect(x_range.end).to.be.above(3)
+  })
 })
 
 describe("AxisView", () => {
 
-  async function build(axis_attrs: Partial<Axis.Attrs> = {}) {
+  async function build(axis_attrs: Partial<LinearAxis.Attrs> = {}) {
     const ticker = new BasicTicker()
     const formatter = new BasicTickFormatter()
 
-    const axis = new Axis({
+    const axis = new LinearAxis({
       major_label_standoff: 11,
       major_tick_out: 12,
       ticker,

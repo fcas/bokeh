@@ -59,7 +59,7 @@ __version__ = importlib_metadata.version("bokeh")
 #-----------------------------------------------------------------------------
 
 # deprecated, remove at some point
-def download():
+def download() -> None:
     from warnings import warn
 
     from .util.warnings import BokehUserWarning
@@ -68,7 +68,7 @@ def download():
         "the 'bokeh_sampledata' package. Use 'pip install bokeh_sampledata' "
         "or 'conda install bokeh_sampledata' to install it.", BokehUserWarning)
 
-def license():
+def license() -> None:
     ''' Print the Bokeh license to the console.
 
     Returns:
@@ -97,21 +97,23 @@ del importlib_metadata
 from .util import logconfig # isort:skip
 del logconfig
 
-# Configure warnings to always show nice messages, despite Python's active
-# efforts to hide them from users.
-import warnings # isort:skip
-from .util.warnings import BokehDeprecationWarning, BokehUserWarning # isort:skip
-warnings.simplefilter('always', BokehDeprecationWarning)
-warnings.simplefilter('always', BokehUserWarning)
+def _configure_warnings() -> None:
+    # Configure warnings to always show nice messages, despite Python's active
+    # efforts to hide them from users.
+    import warnings
 
-original_formatwarning = warnings.formatwarning
-def _formatwarning(message, category, filename, lineno, line=None):
     from .util.warnings import BokehDeprecationWarning, BokehUserWarning
-    if category not in (BokehDeprecationWarning, BokehUserWarning):
-        return original_formatwarning(message, category, filename, lineno, line)
-    return f"{category.__name__}: {message}\n"
-warnings.formatwarning = _formatwarning
 
-del _formatwarning
-del BokehDeprecationWarning, BokehUserWarning
-del warnings
+    warnings.simplefilter('always', BokehDeprecationWarning)
+    warnings.simplefilter('always', BokehUserWarning)
+
+    original_formatwarning = warnings.formatwarning
+    def _formatwarning(message: Warning | str, category: type[Warning], filename: str, lineno: int, line: str | None = None) -> str:
+        from .util.warnings import BokehDeprecationWarning, BokehUserWarning
+        if category not in (BokehDeprecationWarning, BokehUserWarning):
+            return original_formatwarning(message, category, filename, lineno, line)
+        return f"{category.__name__}: {message}\n"
+    warnings.formatwarning = _formatwarning
+
+_configure_warnings()
+del _configure_warnings

@@ -4,8 +4,9 @@ import type {Menu} from "./menus/menu"
 import type {Align} from "core/enums"
 import type {SizingPolicy} from "core/layout"
 import type {ViewOf} from "core/view"
-import type {StyleSheet, StyleSheetLike} from "core/dom"
+import type {StyleSheetLike} from "core/dom"
 import {build_view} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import {InlineStyleSheet} from "core/dom"
 import {CanvasLayer} from "core/util/canvas"
 import type {XY} from "core/util/bbox"
@@ -30,11 +31,10 @@ const {round, floor} = Math
 export abstract class UIElementView extends StyledElementView {
   declare model: UIElement
 
-  protected readonly _display = new InlineStyleSheet()
+  protected readonly display = new InlineStyleSheet("", "display")
 
-  protected override *_stylesheets(): Iterable<StyleSheet> {
-    yield* super._stylesheets()
-    yield this._display
+  override computed_stylesheets(): InlineStyleSheet[] {
+    return [...super.computed_stylesheets(), this.display]
   }
 
   override stylesheets(): StyleSheetLike[] {
@@ -42,7 +42,7 @@ export abstract class UIElementView extends StyledElementView {
   }
 
   update_style(): void {
-    this.style.clear()
+    this.self_style.clear()
   }
 
   box_sizing(): DOMBoxSizing {
@@ -109,6 +109,17 @@ export abstract class UIElementView extends StyledElementView {
 
   protected _context_menu: ViewOf<Menu> | null = null
 
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this._context_menu]
+  }
+
+  /**
+   * Allows to provide a context dependent menu when `UIElement.context_menu` is `"auto"`.
+   */
+  protected _provide_context_menu(): Menu | null {
+    return null
+  }
+
   override initialize(): void {
     super.initialize()
 
@@ -118,9 +129,16 @@ export abstract class UIElementView extends StyledElementView {
 
   override async lazy_initialize(): Promise<void> {
     await super.lazy_initialize()
-    const {context_menu} = this.model
-    if (context_menu != null) {
-      this._context_menu = await build_view(context_menu, {parent: this})
+    const menu = (() => {
+      const {context_menu} = this.model
+      if (context_menu == "auto") {
+        return this._provide_context_menu()
+      } else {
+        return context_menu
+      }
+    })()
+    if (menu != null) {
+      this._context_menu = await build_view(menu, {parent: this})
     }
   }
 
@@ -145,16 +163,16 @@ export abstract class UIElementView extends StyledElementView {
 
       const context_menu = this.get_context_menu({x, y})
       if (context_menu != null) {
-        event.stopPropagation()
-        event.preventDefault()
-        context_menu.show({x, y})
+        if (context_menu.show({x, y})) {
+          event.stopPropagation()
+          event.preventDefault()
+        }
       }
     }
   }
 
   override remove(): void {
     this._resize_observer.disconnect()
-    this._context_menu?.remove()
     super.remove()
   }
 
@@ -207,10 +225,9 @@ export abstract class UIElementView extends StyledElementView {
 
   protected _apply_visible(): void {
     if (this.model.visible) {
-      this._display.clear()
+      this.display.clear()
     } else {
-      // in case `display` element style was set, use `!important` to work around this
-      this._display.replace(":host { display: none !important; }")
+      this.display.replace(`${this.host_selector} { display: none; }`)
     }
   }
 
@@ -243,7 +260,7 @@ export namespace UIElement {
 
   export type Props = StyledElement.Props & {
     visible: p.Property<boolean>
-    context_menu: p.Property<Menu | null>
+    context_menu: p.Property<Menu | "auto" | null>
   }
 }
 
@@ -258,9 +275,9 @@ export abstract class UIElement extends StyledElement {
   }
 
   static {
-    this.define<UIElement.Props>(({Bool, AnyRef, Nullable}) => ({
+    this.define<UIElement.Props>(({Bool, AnyRef, Nullable, Or, Auto}) => ({
       visible: [ Bool, true ],
-      context_menu: [ Nullable(AnyRef<Menu>()), null ],
+      context_menu: [ Nullable(Or(AnyRef<Menu>(), Auto)), null ],
     }))
   }
 }

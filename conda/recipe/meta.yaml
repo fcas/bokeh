@@ -28,18 +28,17 @@ requirements:
     - python
     - python-dateutil
     - pyyaml
-    - ripgrep
     - setuptools >=62.3.3
     - yaml
 
   host:
-    - python >=3.10
+    - python >=3.12
 
   run:
-    - python >=3.10
+    - python >=3.12
 
     {% for dep in data['project']['dependencies'] %}
-    - {{ dep.lower() }}
+    - {{ dep.lower().split(";")[0] }}
     {% endfor %}
 
 about:

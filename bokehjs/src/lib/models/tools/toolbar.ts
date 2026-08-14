@@ -1,26 +1,30 @@
 import {logger} from "core/logging"
 import type {StyleSheetLike} from "core/dom"
 import {div, a} from "core/dom"
-import type {ViewStorage, IterViews} from "core/build_views"
-import {build_views, remove_views} from "core/build_views"
+import type {ViewStorage, ChildView, ViewOf} from "core/build_views"
+import {build_views} from "core/build_views"
 import type * as p from "core/properties"
 import {UIElement, UIElementView} from "../ui/ui_element"
-import {Logo, Location} from "core/enums"
+import {Logo, Location, ToolName} from "core/enums"
 import {every, sort_by, includes, intersection, split, clear} from "core/util/array"
-import {join} from "core/util/iterator"
+import {join, enumerate} from "core/util/iterator"
 import {typed_keys, values, entries} from "core/util/object"
 import {isArray} from "core/util/types"
 import type {EventRole} from "./tool"
 import {Tool} from "./tool"
 import type {ToolLike} from "./tool_proxy"
 import {ToolProxy} from "./tool_proxy"
+import {ToolGroup} from "./tool_group"
 import {ToolButton} from "./tool_button"
 import {GestureTool} from "./gestures/gesture_tool"
 import {InspectTool} from "./inspectors/inspect_tool"
 import {ActionTool} from "./actions/action_tool"
 import {HelpTool} from "./actions/help_tool"
+import {Menu, DividerItem} from "../ui/menus"
 import type {At} from "core/util/menus"
 import {ContextMenu} from "core/util/menus"
+import {Signal0} from "core/signaling"
+import {version} from "version"
 
 import toolbars_css, * as toolbars from "styles/toolbar.css"
 import logos_css, * as logos from "styles/logo.css"
@@ -36,6 +40,9 @@ export class ToolbarView extends UIElementView {
   get tool_buttons(): ToolButton[] {
     return this._tool_buttons.flat()
   }
+  get tool_button_views(): ViewOf<ToolButton>[] {
+    return this.tool_buttons.map((tb) => this._tool_button_views.get(tb)).filter((view) => view != null)
+  }
 
   protected _overflow_menu: ContextMenu
   protected _overflow_el: HTMLElement
@@ -49,9 +56,8 @@ export class ToolbarView extends UIElementView {
     return !this.model.visible ? false : (!this.model.autohide || (this._visible ?? false))
   }
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield* this._tool_button_views.values()
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), ...this._tool_button_views.values()]
   }
 
   override has_finished(): boolean {
@@ -92,18 +98,24 @@ export class ToolbarView extends UIElementView {
   override connect_signals(): void {
     super.connect_signals()
 
-    const {buttons, tools, location, autohide} = this.model.properties
-    this.on_change([buttons, tools], async () => {
+    const {buttons, tools, location, autohide, group, group_types} = this.model.properties
+    this.on_change([buttons, tools, group, group_types], async () => {
       await this._build_tool_button_views()
-      this.render()
+      this.rerender()
     })
 
     this.on_change(location, () => {
-      this.render()
+      this.rerender()
     })
 
     this.on_change(autohide, () => {
       this._on_visible_change()
+    })
+
+    this.on_transitive_change(tools, () => {
+      this.rerender()
+    }, {
+      signal: (obj) => obj.properties.visible.change,
     })
   }
 
@@ -112,26 +124,72 @@ export class ToolbarView extends UIElementView {
   }
 
   override remove(): void {
-    remove_views(this._tool_button_views)
+    this._destroy_proxies()
     super.remove()
   }
 
+  // Manually keep track of view constructed ToolProxy models, because models don't
+  // have any sensible life cycle management (at least from views' perspective).
+  private readonly _our_proxies: ToolProxy<Tool>[] = []
+
+  private _destroy_proxies(): void {
+    for (const proxy of this._our_proxies) {
+      proxy.destroy()
+    }
+    clear(this._our_proxies)
+  }
+
+  /**
+   * Group similar tools into tool proxies.
+   */
+  private _group_tools(tools: ToolLike<Tool>[]): ToolLike<Tool>[] {
+    const {group_types} = this.model
+    const grouped: Map<string, ToolLike<Tool>[]> = new Map()
+    for (const [tool, i] of enumerate(tools)) {
+      const group_type = group_types.find((type) => Tool.is_alias_of(tool, type))
+      if (group_type != null && tool.group !== false) {
+        const key = tool.group === true ? tool.type : `${tool.type}_${tool.group}`
+        const group = grouped.get(key)
+        if (group != null) {
+          group.push(tool)
+        } else {
+          grouped.set(key, [tool])
+        }
+      } else {
+        // The key doesn't matter, just use something unique.
+        grouped.set(`${i}`, [tool])
+      }
+    }
+    return Array.from(grouped.values(), (group) => {
+      if (group.length > 1) {
+        const proxy = new ToolGroup({tools: group})
+        this._our_proxies.push(proxy)
+        return proxy
+      } else {
+        return group[0]
+      }
+    })
+  }
+
   protected async _build_tool_button_views(): Promise<void> {
+    this._destroy_proxies()
+
     this._tool_buttons = (() => {
       const {buttons} = this.model
       if (buttons == "auto") {
-        const groups = [
+        const tool_bars: ToolLike<Tool>[][] = [
           ...values(this.model.gestures).map((gesture) => gesture.tools),
           this.model.actions,
           this.model.inspectors,
           this.model.auxiliaries,
         ]
-        const buttons = groups.map((group) => {
-          return group
-            .filter((tool) => tool.visible)
-            .map((tool) => tool.tool_button())
+
+        const {group} = this.model
+        const button_bars = tool_bars.map((bar) => {
+          const grouped = group ? this._group_tools(bar) : bar
+          return grouped.map((tool) => tool.tool_button())
         })
-        return buttons
+        return button_bars
       } else {
         return split(buttons, null)
       }
@@ -192,24 +250,30 @@ export class ToolbarView extends UIElementView {
 
     if (this.model.logo != null) {
       const gray = this.model.logo === "grey" ? logos.grey : null
-      const logo_el = a({href: "https://bokeh.org/", target: "_blank", class: [logos.logo, logos.logo_small, gray]})
+      const logo_el = a({href: "https://bokeh.org/", target: "_blank", class: [logos.logo, logos.logo_small, gray], title: `Bokeh ${version}`})
       this._items.push(logo_el)
       this.shadow_el.appendChild(logo_el)
     }
 
     for (const [, button_view] of this._tool_button_views) {
-      button_view.render_to(this.shadow_el)
+      button_view.render()
     }
 
-    const bars = this._tool_buttons.map((group) => group.map((button) => this._tool_button_views.get(button)!.el))
-    const non_empty = bars.filter((bar) => bar.length != 0)
+    const bars = this._tool_buttons.map((group) => {
+      return group
+        .filter((button) => button.tool.visible)
+        .map((button) => this._tool_button_views.get(button))
+        .filter((view) => view != null)
+        .map((view) => view.el)
+    }).filter((bar) => bar.length != 0)
 
     const divider = () => div({class: toolbars.divider})
 
-    for (const el of join<HTMLElement>(non_empty, divider)) {
+    for (const el of join<HTMLElement>(bars, divider)) {
       this._items.push(el)
-      this.shadow_el.append(el)
     }
+
+    this.shadow_el.append(...this._items)
   }
 
   override _after_render(): void {
@@ -253,16 +317,37 @@ export class ToolbarView extends UIElementView {
     if (this._overflow_menu.is_open) {
       this._overflow_menu.show(this._menu_at())
     }
+
+    for (const tb_view of this.tool_button_views) {
+      tb_view.update_bbox()
+    }
+  }
+
+  toggle_auto_scroll(force?: boolean): void {
+    if (this.model.active_scroll != "auto") {
+      return
+    }
+
+    for (const tool of this.model.tools) {
+      if (tool.event_types.includes("scroll")) {
+        tool.active = force ?? !tool.active
+        break
+      }
+    }
   }
 }
 
 import {Struct, Ref, Nullable, List, Or} from "core/kinds"
 
 const GestureToolLike = Or(Ref(GestureTool), Ref(ToolProxy<GestureTool>))
+type GestureToolLike = GestureTool | ToolProxy<GestureTool>
+
 const GestureEntry = Struct({
   tools: List(GestureToolLike),
   active: Nullable(GestureToolLike),
 })
+type GestureEntry = typeof GestureEntry["__type__"]
+
 const GesturesMap = Struct({
   pan:       GestureEntry,
   scroll:    GestureEntry,
@@ -280,20 +365,14 @@ type GesturesMap = typeof GesturesMap["__type__"]
 type GestureType = keyof GesturesMap
 
 // XXX: add appropriate base classes to get rid of this
-export type Drag = Tool
-export const Drag = Tool
 export type Inspection = Tool
 export const Inspection = Tool
-export type Scroll = Tool
-export const Scroll = Tool
-export type Tap = Tool
-export const Tap = Tool
 
 type ActiveGestureToolsProps = {
-  active_drag: p.Property<ToolLike<Drag> | "auto" | null>
-  active_scroll: p.Property<ToolLike<Scroll> | "auto" | null>
-  active_tap: p.Property<ToolLike<Tap> | "auto" | null>
-  active_multi: p.Property<ToolLike<GestureTool> | "auto" | null>
+  active_drag: p.Property<GestureToolLike | "auto" | null>
+  active_scroll: p.Property<GestureToolLike | "auto" | null>
+  active_tap: p.Property<GestureToolLike | "auto" | null>
+  active_multi: p.Property<GestureToolLike | "auto" | null>
 }
 
 export namespace Toolbar {
@@ -303,6 +382,8 @@ export namespace Toolbar {
     tools: p.Property<(Tool | ToolProxy<Tool>)[]>
     logo: p.Property<Logo | null>
     autohide: p.Property<boolean>
+    group: p.Property<boolean>
+    group_types: p.Property<ToolName[]>
 
     // internal
     buttons: p.Property<(ToolButton | null)[] | "auto">
@@ -352,11 +433,13 @@ export class Toolbar extends UIElement {
       tools:          [ List(Or(Ref(Tool), Ref(ToolProxy))), [] ],
       logo:           [ Nullable(Logo), "normal" ],
       autohide:       [ Bool, false ],
-      active_drag:    [ Nullable(Or(Ref(Drag), Auto)), "auto" ],
-      active_inspect: [ Nullable(Or(Ref(Inspection), List(Ref(Inspection)), Auto)), "auto" ],
-      active_scroll:  [ Nullable(Or(Ref(Scroll), Auto)), "auto" ],
-      active_tap:     [ Nullable(Or(Ref(Tap), Auto)), "auto" ],
-      active_multi:   [ Nullable(Or(Ref(GestureTool), Auto)), "auto" ],
+      group:          [ Bool, true ],
+      group_types:    [ List(ToolName), ["hover"] ],
+      active_drag:    [ Nullable(Or(GestureToolLike, Auto)), "auto" ],
+      active_inspect: [ Nullable(Or(Ref(Inspection), List(Ref(Inspection)), Ref(ToolProxy), Auto)), "auto" ],
+      active_scroll:  [ Nullable(Or(GestureToolLike, Auto)), "auto" ],
+      active_tap:     [ Nullable(Or(GestureToolLike, Auto)), "auto" ],
+      active_multi:   [ Nullable(Or(GestureToolLike, Auto)), "auto" ],
     }))
 
     this.internal<Toolbar.Props>(({List, Bool, Ref, Or, Null, Auto}) => {
@@ -373,6 +456,8 @@ export class Toolbar extends UIElement {
     })
   }
 
+  readonly active_changed: Signal0<this> = new Signal0(this, "active_changed")
+
   get horizontal(): boolean {
     return this.location == "above" || this.location == "below"
   }
@@ -387,14 +472,14 @@ export class Toolbar extends UIElement {
     const {tools, active_drag, active_inspect, active_scroll, active_tap, active_multi} = this.properties
     this.on_change([tools, active_drag, active_inspect, active_scroll, active_tap, active_multi], () => {
       this._init_tools()
-      this._activate_tools()
+      this._activate_tools(true)
     })
   }
 
   override initialize(): void {
     super.initialize()
     this._init_tools()
-    this._activate_tools()
+    this._activate_tools(false)
   }
 
   protected _init_tools(): void {
@@ -402,20 +487,20 @@ export class Toolbar extends UIElement {
 
     const visited = new Set<ToolLike<Tool>>()
     function isa<A extends Tool>(tool: ToolLike<Tool>, type: AbstractConstructor<A>): tool is ToolLike<A> {
-      const is = (tool instanceof ToolProxy ? tool.underlying : tool) instanceof type
+      const is = tool.underlying instanceof type
       if (is) {
         visited.add(tool)
       }
       return is
     }
 
-    const new_inspectors = this.tools.filter(t => isa(t, InspectTool)) as ToolLike<InspectTool>[]
+    const new_inspectors = this.tools.filter(t => isa(t, InspectTool))
     this.inspectors = new_inspectors
 
-    const new_help = this.tools.filter(t => isa(t, HelpTool)) as ToolLike<HelpTool>[]
+    const new_help = this.tools.filter(t => isa(t, HelpTool))
     this.help = new_help
 
-    const new_actions = this.tools.filter(t => isa(t, ActionTool)) as ToolLike<ActionTool>[]
+    const new_actions = this.tools.filter(t => isa(t, ActionTool))
     this.actions = new_actions
 
     const new_gestures = create_gesture_map()
@@ -437,7 +522,7 @@ export class Toolbar extends UIElement {
     this.auxiliaries = new_auxiliaries
   }
 
-  protected _activate_tools(): void {
+  protected _activate_tools(emit: boolean): void {
     if (this.active_inspect == "auto") {
       // do nothing as all tools are active be default
     } else if (this.active_inspect == null) {
@@ -481,7 +566,12 @@ export class Toolbar extends UIElement {
     for (const gesture of values(this.gestures)) {
       for (const tool of gesture.tools) {
         // XXX: connect once
-        this.connect(tool.properties.active.change, () => this._active_change(tool))
+        this.connect(tool.properties.active.change, () => {
+          this._active_change(tool)
+          if (emit) {
+            this.active_changed.emit()
+          }
+        })
       }
     }
 
@@ -500,22 +590,55 @@ export class Toolbar extends UIElement {
       return et == "tap" || et == "pan" || tool.supports_auto()
     }
 
+    const is_active_gesture = (active_tool: ToolLike<GestureTool>): boolean => {
+      return this.tools.includes(active_tool) || (active_tool instanceof Tool && this.tools.some((tool) => tool instanceof ToolProxy && tool.tools.includes(active_tool)))
+    }
+
+    const _resolve_gesture_activation = (gesture: GestureEntry, active_attr: keyof ActiveGestureToolsProps | null): void => {
+      // some tools may already be initialized as active
+      if (gesture.tools.every((tool) => !tool.active)) {
+        return
+      }
+
+      // active attr takes precedence over any active initialization
+      if (active_attr != null && this[active_attr] != null && this[active_attr] != "auto") {
+        gesture.tools.forEach((tool) => {
+          if (tool.tool_name != this[active_attr]) {
+            tool.active = false
+          }
+        })
+        return
+      }
+
+      for (const tool of gesture.tools) {
+        if (!tool.active) {
+          continue
+        }
+
+        if (gesture.active == null) {
+          _activate_gesture(tool)
+        } else if (gesture.active.id != tool.id && gesture.active.tool_name != tool.tool_name) {
+          tool.active = false
+        }
+      }
+    }
+
     for (const [event_role, gesture] of entries(this.gestures)) {
       const et = event_role as EventRole
       const active_attr = _get_active_attr(et)
+      _resolve_gesture_activation(gesture, active_attr)
       if (active_attr != null) {
         const active_tool = this[active_attr]
         if (active_tool == "auto") {
-          if (gesture.tools.length != 0) {
+          if (gesture.tools.length != 0 && gesture.active == null) {
             const [tool] = gesture.tools
             if (_supports_auto(et, tool)) {
               _activate_gesture(tool)
             }
           }
         } else if (active_tool != null) {
-          // TODO: allow to activate a proxy of tools with any child?
-          if (includes(this.tools, active_tool)) {
-            _activate_gesture(active_tool as ToolLike<GestureTool>) // XXX: remove this cast
+          if (is_active_gesture(active_tool)) {
+            _activate_gesture(active_tool)
           } else {
             this[active_attr] = null
           }
@@ -526,6 +649,10 @@ export class Toolbar extends UIElement {
           }
         }
       }
+    }
+
+    if (emit) {
+      this.active_changed.emit()
     }
   }
 
@@ -545,5 +672,21 @@ export class Toolbar extends UIElement {
         this.gestures[et].active = null
       }
     }
+  }
+
+  to_menu(): Menu {
+    const groups = [
+      ...values(this.gestures).map((gesture) => gesture.tools),
+      this.actions,
+      this.inspectors,
+      this.auxiliaries,
+    ]
+
+    const entries = groups
+      .filter((group) => group.length != 0)
+      .map((group) => group.map((tool) => tool.menu_item()))
+
+    const items = [...join(entries, () => new DividerItem())]
+    return new Menu({items})
   }
 }

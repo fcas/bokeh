@@ -363,6 +363,18 @@ The default behavior of the help button's tooltip is as follows:
 
 More information can be found in the reference guide entry for |HelpButton|.
 
+.. _ug_interaction_widgets_examples_light_dark:
+
+LightDark
+~~~~~~~~~~~
+
+A widget to change between light and dark color schemes:
+
+.. bokeh-plot:: __REPO__/examples/interaction/widgets/light_dark.py
+    :source-position: below
+
+More information can be found in the reference guide entry for |LightDark|.
+
 .. _ug_interaction_widgets_examples_multichoice:
 
 MultiChoice
@@ -433,6 +445,20 @@ A widget for displaying a block of pre-formatted text in an HTML <pre> tag:
     :source-position: below
 
 More information can be found in the reference guide entry for |PreText|.
+
+Progress
+~~~~~~~~
+
+An indicator widget allowing to visualize progress of a task, computation,
+etc. (determinate mode) or allowing to indicate work being done if the
+amount of work cannot be determined (indeterminate mode):
+
+.. bokeh-plot:: __REPO__/examples/interaction/widgets/progress.py
+    :source-position: below
+
+More information can be found in the reference guide entry for |Progress|.
+
+.. _ug_interaction_widgets_examples_progress:
 
 RadioButtonGroup
 ~~~~~~~~~~~~~~~~
@@ -526,6 +552,12 @@ Tab panes allow multiple plots or layouts to be shown in selectable tabs:
 
 More information can be found in the reference guide entry for |Tabs|.
 
+.. note::
+    When displaying a large number of tabs, the tab headers will automatically
+    become scrollable if they exceed the available width (for horizontal tabs)
+    or height (for vertical tabs). This allows you to navigate through many tabs
+    without affecting the layout of the plots or other content.
+
 .. _ug_interaction_widgets_examples_textareainput:
 
 TextAreaInput
@@ -585,6 +617,7 @@ More information can be found in the reference guide entry for |Toggle|.
 .. |Div|                    replace:: :class:`~bokeh.models.widgets.markups.Div`
 .. |Dropdown|               replace:: :class:`~bokeh.models.widgets.buttons.Dropdown`
 .. |FileInput|              replace:: :class:`~bokeh.models.widgets.inputs.FileInput`
+.. |LightDark|              replace:: :class:`~bokeh.models.widgets.inputs.LightDark`
 .. |HelpButton|             replace:: :class:`~bokeh.models.widgets.buttons.HelpButton`
 .. |MultiChoice|            replace:: :class:`~bokeh.models.widgets.inputs.MultiChoice`
 .. |MultiSelect|            replace:: :class:`~bokeh.models.widgets.inputs.MultiSelect`
@@ -592,6 +625,7 @@ More information can be found in the reference guide entry for |Toggle|.
 .. |Paragraph|              replace:: :class:`~bokeh.models.widgets.markups.Paragraph`
 .. |PasswordInput|          replace:: :class:`~bokeh.models.widgets.inputs.PasswordInput`
 .. |PreText|                replace:: :class:`~bokeh.models.widgets.markups.PreText`
+.. |Progress|               replace:: :class:`~bokeh.models.widgets.inputs.Progress`
 .. |RadioButtonGroup|       replace:: :class:`~bokeh.models.widgets.groups.RadioButtonGroup`
 .. |RadioGroup|             replace:: :class:`~bokeh.models.widgets.groups.RadioGroup`
 .. |RangeSlider|            replace:: :class:`~bokeh.models.widgets.sliders.RangeSlider`

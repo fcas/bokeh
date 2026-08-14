@@ -11,7 +11,12 @@
 from __future__ import annotations
 
 # Standard library imports
-from typing import TYPE_CHECKING
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    cast,
+)
 
 import logging # isort:skip
 
@@ -25,25 +30,22 @@ log = logging.getLogger(__name__)
 import numpy as np
 
 # Bokeh imports
-from ..core.enums import HorizontalLocation, MarkerType, VerticalLocation
-from ..core.properties import (
-    Auto,
-    Datetime,
-    Either,
-    Enum,
-    Float,
-    Instance,
-    InstanceDefault,
-    Int,
-    List,
-    Nullable,
-    Object,
-    Seq,
-    String,
-    TextLike,
-    TimeDelta,
-    Tuple,
+from ..core.enums import (
+    AxisType,
+    HorizontalLocation,
+    MarkerType,
+    VerticalLocation,
 )
+from ..core.property.auto import Auto
+from ..core.property.container import List, Seq, Tuple
+from ..core.property.data_frame import EagerSeries, PandasGroupBy
+from ..core.property.datetime import Datetime, TimeDelta
+from ..core.property.either import Either
+from ..core.property.enum import Enum
+from ..core.property.instance import Instance, InstanceDefault
+from ..core.property.nullable import Nullable
+from ..core.property.primitive import Float, Int, String
+from ..core.property.text_like import TextLike
 from ..models import (
     ColumnDataSource,
     CoordinateMapping,
@@ -69,18 +71,29 @@ from ._graph import get_graph_kwargs
 from ._plot import get_range, get_scale, process_axis_and_grid
 from ._stack import double_stack, single_stack
 from ._tools import process_active_tools, process_tools_arg
-from .contour import ContourRenderer, from_contour
+from .contour import from_contour
 from .glyph_api import _MARKER_SHORTCUTS, GlyphAPI
 
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike
+
+    from ..models.glyphs import (
+        HArea,
+        HBar,
+        Line,
+        VArea,
+        VBar,
+    )
+    from ..models.renderers.contour_renderer import ContourRenderer
+    from ..models.renderers.glyph_renderer import GlyphRenderer
+    from ..util.datatypes import SequenceLike
 
 #-----------------------------------------------------------------------------
 # Globals and constants
 #-----------------------------------------------------------------------------
 
 #: A default set of tools configured if no configuration is provided
-DEFAULT_TOOLS = "pan,wheel_zoom,box_zoom,save,reset,help"
+DEFAULT_TOOLS = "pan,wheel_zoom,auto_box_zoom,save,reset,help"
 
 __all__ = (
     'figure',
@@ -108,11 +121,13 @@ class figure(Plot, GlyphAPI):
         * :func:`~bokeh.plotting.figure.arc`
         * :func:`~bokeh.plotting.figure.asterisk`
         * :func:`~bokeh.plotting.figure.bezier`
+        * :func:`~bokeh.plotting.figure.block`
         * :func:`~bokeh.plotting.figure.circle`
         * :func:`~bokeh.plotting.figure.circle_cross`
         * :func:`~bokeh.plotting.figure.circle_dot`
         * :func:`~bokeh.plotting.figure.circle_x`
         * :func:`~bokeh.plotting.figure.circle_y`
+        * :func:`~bokeh.plotting.figure.contour`
         * :func:`~bokeh.plotting.figure.cross`
         * :func:`~bokeh.plotting.figure.dash`
         * :func:`~bokeh.plotting.figure.diamond`
@@ -132,8 +147,10 @@ class figure(Plot, GlyphAPI):
         * :func:`~bokeh.plotting.figure.image_url`
         * :func:`~bokeh.plotting.figure.inverted_triangle`
         * :func:`~bokeh.plotting.figure.line`
+        * :func:`~bokeh.plotting.figure.mathml`
         * :func:`~bokeh.plotting.figure.multi_line`
         * :func:`~bokeh.plotting.figure.multi_polygons`
+        * :func:`~bokeh.plotting.figure.ngon`
         * :func:`~bokeh.plotting.figure.patch`
         * :func:`~bokeh.plotting.figure.patches`
         * :func:`~bokeh.plotting.figure.plus`
@@ -150,6 +167,7 @@ class figure(Plot, GlyphAPI):
         * :func:`~bokeh.plotting.figure.star`
         * :func:`~bokeh.plotting.figure.star_dot`
         * :func:`~bokeh.plotting.figure.step`
+        * :func:`~bokeh.plotting.figure.tex`
         * :func:`~bokeh.plotting.figure.text`
         * :func:`~bokeh.plotting.figure.triangle`
         * :func:`~bokeh.plotting.figure.triangle_dot`
@@ -177,6 +195,18 @@ class figure(Plot, GlyphAPI):
 
     * :func:`~bokeh.plotting.figure.hexbin`
 
+    To simplify plotting of geographical maps the figure class offers some helper functions:
+
+    * :func:`~bokeh.plotting.figure.borders`
+    * :func:`~bokeh.plotting.figure.coastlines`
+    * :func:`~bokeh.plotting.figure.land`
+    * :func:`~bokeh.plotting.figure.lakes`
+    * :func:`~bokeh.plotting.figure.ocean`
+    * :func:`~bokeh.plotting.figure.rivers`
+    * :func:`~bokeh.plotting.figure.projection_boundary`
+    * :func:`~bokeh.plotting.figure.provinces`
+    * :func:`~bokeh.plotting.figure.states`
+
     In addition to all the ``figure`` property attributes, the following
     options are also accepted:
 
@@ -188,12 +218,12 @@ class figure(Plot, GlyphAPI):
     __view_model__ = "Figure"
 
     def __init__(self, *arg, **kw) -> None:
-        opts = FigureOptions(kw)
+        opts = cast(Any, FigureOptions(kw))
 
         names = self.properties()
         for name in kw.keys():
             if name not in names:
-                self._raise_attribute_error_with_matches(name, names | opts.properties())
+                self._raise_attribute_error_with_matches(name, set(names) | set(opts.properties()))
 
         super().__init__(*arg, **kw)
 
@@ -233,7 +263,7 @@ class figure(Plot, GlyphAPI):
             x_target: Range, y_target: Range,
         ) -> GlyphAPI:
         """ Create a new sub-coordinate system and expose a plotting API. """
-        coordinates = CoordinateMapping(x_source=x_source, y_source=y_source, x_target=x_target, y_target=y_target)
+        coordinates = CoordinateMapping(x_source=cast(Range, x_source), y_source=cast(Range, y_source), x_target=x_target, y_target=y_target)
         return GlyphAPI(self, coordinates)
 
     def hexbin(self, x, y, size, orientation="pointytop", palette="Viridis256", line_color=None, fill_color=None, aspect_scale=1, **kwargs):
@@ -273,16 +303,16 @@ class figure(Plot, GlyphAPI):
                 Whether the hexagonal tiles should be oriented with a pointed
                 corner on top, or a flat side on top. (default: "pointytop")
 
-            palette (str or seq[color], optional) :
+            palette (str or seq[ColorLike], optional) :
                 A palette (or palette name) to use to colormap the bins according
                 to count. (default: 'Viridis256')
 
                 If ``fill_color`` is supplied, it overrides this value.
 
-            line_color (color, optional) :
+            line_color (ColorLike, optional) :
                 The outline color for hex tiles, or None (default: None)
 
-            fill_color (color, optional) :
+            fill_color (ColorLike, optional) :
                 An optional fill color for hex tiles, or None. If None, then
                 the ``palette`` will be used to color map the tiles by
                 count. (default: None)
@@ -335,19 +365,23 @@ class figure(Plot, GlyphAPI):
         '''
         from ..util.hex import hexbin
 
-        bins = hexbin(x, y, size, orientation, aspect_scale=aspect_scale)
+        bins = hexbin(x, y, size, cast(Any, orientation), aspect_scale=aspect_scale)
 
         if fill_color is None:
             fill_color = linear_cmap('c', palette, 0, max(bins.counts))
 
         source = ColumnDataSource(data=dict(q=bins.q, r=bins.r, c=bins.counts))
 
-        r = self.hex_tile(q="q", r="r", size=size, orientation=orientation, aspect_scale=aspect_scale,
+        r = self.hex_tile(q="q", r="r", size=size, orientation=cast(Any, orientation), aspect_scale=aspect_scale,
                           source=source, line_color=line_color, fill_color=fill_color, **kwargs)
 
         return (r, bins)
 
-    def harea_stack(self, stackers, **kw):
+    def harea_stack(
+        self,
+        stackers: SequenceLike[str],
+        **kw: Any,
+    ) -> list[GlyphRenderer[HArea]]:
         ''' Generate multiple ``HArea`` renderers for levels stacked left
         to right.
 
@@ -369,7 +403,7 @@ class figure(Plot, GlyphAPI):
         Examples:
 
             Assuming a ``ColumnDataSource`` named ``source`` with columns
-            *2016* and *2017*, then the following call to ``harea_stack`` will
+            *2016* and *2017*, then the following call to ``harea_stack``
             will create two ``HArea`` renderers that stack:
 
             .. code-block:: python
@@ -389,7 +423,11 @@ class figure(Plot, GlyphAPI):
             result.append(self.harea(**kw))
         return result
 
-    def hbar_stack(self, stackers, **kw):
+    def hbar_stack(
+        self,
+        stackers: SequenceLike[str],
+        **kw: Any,
+    ) -> list[GlyphRenderer[HBar]]:
         ''' Generate multiple ``HBar`` renderers for levels stacked left to right.
 
         Args:
@@ -410,7 +448,7 @@ class figure(Plot, GlyphAPI):
         Examples:
 
             Assuming a ``ColumnDataSource`` named ``source`` with columns
-            *2016* and *2017*, then the following call to ``hbar_stack`` will
+            *2016* and *2017*, then the following call to ``hbar_stack``
             will create two ``HBar`` renderers that stack:
 
             .. code-block:: python
@@ -430,14 +468,21 @@ class figure(Plot, GlyphAPI):
             result.append(self.hbar(**kw))
         return result
 
-    def _line_stack(self, x, y, **kw):
+    def _line_stack(
+        self,
+        stackers: SequenceLike[str],
+        spec: Literal["x", "y"],
+        **kw: Any,
+    ) -> list[GlyphRenderer[Line]]:
         ''' Generate multiple ``Line`` renderers for lines stacked vertically
         or horizontally.
 
         Args:
-            x (seq[str]) :
+            stackers (seq[str]) : a sequence of data source field names to
+                stack successively.
 
-            y (seq[str]) :
+            spec (str) : the line coordinate to stack, either ``"x"`` or
+                ``"y"``.
 
         Additionally, the ``name`` of the renderer will be set to
         the value of each successive stacker (this is useful with the
@@ -454,7 +499,7 @@ class figure(Plot, GlyphAPI):
 
             Assuming a ``ColumnDataSource`` named ``source`` with columns
             *2016* and *2017*, then the following call to ``line_stack`` with
-            stackers for the y-coordinates will will create two ``Line``
+            stackers for the y-coordinates will create two ``Line``
             renderers that stack:
 
             .. code-block:: python
@@ -469,26 +514,16 @@ class figure(Plot, GlyphAPI):
                 p.line(y=stack('2016', '2017'), x='x', color='red',  source=source, name='2017')
 
         '''
-        if all(isinstance(val, list | tuple) for val in (x,y)):
-            raise ValueError("Only one of x or y may be a list of stackers")
+        result: list[GlyphRenderer[Line]] = []
+        for kw in single_stack(stackers, spec, **kw):
+            result.append(self.line(**kw))
+        return result
 
-        result = []
-
-        if isinstance(y, list | tuple):
-            kw['x'] = x
-            for kw in single_stack(y, "y", **kw):
-                result.append(self.line(**kw))
-            return result
-
-        if isinstance(x, list | tuple):
-            kw['y'] = y
-            for kw in single_stack(x, "x", **kw):
-                result.append(self.line(**kw))
-            return result
-
-        return [self.line(x, y, **kw)]
-
-    def hline_stack(self, stackers, **kw):
+    def hline_stack(
+        self,
+        stackers: SequenceLike[str],
+        **kw: Any,
+    ) -> list[GlyphRenderer[Line]]:
         ''' Generate multiple ``Line`` renderers for lines stacked horizontally.
 
         Args:
@@ -510,7 +545,7 @@ class figure(Plot, GlyphAPI):
 
             Assuming a ``ColumnDataSource`` named ``source`` with columns
             *2016* and *2017*, then the following call to ``hline_stack`` with
-            stackers for the x-coordinates will will create two ``Line``
+            stackers for the x-coordinates will create two ``Line``
             renderers that stack:
 
             .. code-block:: python
@@ -525,9 +560,13 @@ class figure(Plot, GlyphAPI):
                 p.line(x=stack('2016', '2017'), y='y', color='red',  source=source, name='2017')
 
         '''
-        return self._line_stack(x=stackers, **kw)
+        return self._line_stack(stackers, "x", **kw)
 
-    def varea_stack(self, stackers, **kw):
+    def varea_stack(
+        self,
+        stackers: SequenceLike[str],
+        **kw: Any,
+    ) -> list[GlyphRenderer[VArea]]:
         ''' Generate multiple ``VArea`` renderers for levels stacked bottom
         to top.
 
@@ -549,7 +588,7 @@ class figure(Plot, GlyphAPI):
         Examples:
 
             Assuming a ``ColumnDataSource`` named ``source`` with columns
-            *2016* and *2017*, then the following call to ``varea_stack`` will
+            *2016* and *2017*, then the following call to ``varea_stack``
             will create two ``VArea`` renderers that stack:
 
             .. code-block:: python
@@ -569,7 +608,11 @@ class figure(Plot, GlyphAPI):
             result.append(self.varea(**kw))
         return result
 
-    def vbar_stack(self, stackers, **kw):
+    def vbar_stack(
+        self,
+        stackers: SequenceLike[str],
+        **kw: Any,
+    ) -> list[GlyphRenderer[VBar]]:
         ''' Generate multiple ``VBar`` renderers for levels stacked bottom
         to top.
 
@@ -591,7 +634,7 @@ class figure(Plot, GlyphAPI):
         Examples:
 
             Assuming a ``ColumnDataSource`` named ``source`` with columns
-            *2016* and *2017*, then the following call to ``vbar_stack`` will
+            *2016* and *2017*, then the following call to ``vbar_stack``
             will create two ``VBar`` renderers that stack:
 
             .. code-block:: python
@@ -611,7 +654,11 @@ class figure(Plot, GlyphAPI):
             result.append(self.vbar(**kw))
         return result
 
-    def vline_stack(self, stackers, **kw):
+    def vline_stack(
+        self,
+        stackers: SequenceLike[str],
+        **kw: Any,
+    ) -> list[GlyphRenderer[Line]]:
         ''' Generate multiple ``Line`` renderers for lines stacked vertically.
 
         Args:
@@ -633,7 +680,7 @@ class figure(Plot, GlyphAPI):
 
             Assuming a ``ColumnDataSource`` named ``source`` with columns
             *2016* and *2017*, then the following call to ``vline_stack`` with
-            stackers for the y-coordinates will will create two ``Line``
+            stackers for the y-coordinates will create two ``Line``
             renderers that stack:
 
             .. code-block:: python
@@ -648,7 +695,7 @@ class figure(Plot, GlyphAPI):
                 p.line(y=stack('2016', '2017'), x='x', color='red',  source=source, name='2017')
 
         '''
-        return self._line_stack(y=stackers, **kw)
+        return self._line_stack(stackers, "y", **kw)
 
     def graph(self, node_source: ColumnDataSource, edge_source: ColumnDataSource, layout_provider: LayoutProvider, **kwargs):
         ''' Creates a network graph using the given node, edge and layout provider.
@@ -703,7 +750,7 @@ class figure(Plot, GlyphAPI):
 
             z (array-like[float] of shape (ny, nx)) :
                 A 2D NumPy array of gridded values to calculate the contours
-                of.  May be a masked array, and any invalid values (``np.inf``
+                of.  It may be a masked array, and any invalid values (``np.inf``
                 or ``np.nan``) will also be masked out.
 
             levels (array-like[float]) :
@@ -731,13 +778,309 @@ class figure(Plot, GlyphAPI):
         self.renderers.append(contour_renderer)
         return contour_renderer
 
-def markers():
+    def borders(self, projection, scale="110m", **line_kwargs):
+        """ Adds the borders of countries to a map with respect to a given projection.
+
+        .. note::
+            This function requires the optional package `Cartopy <https://cartopy.readthedocs.io>`__.
+
+        Args:
+            projection (cartopy.crs.Projection): Cartopy projection for a geographic map.
+            scale (str, "110m"): Scale of the feature resolution. Valid strings are "110m",
+                "50m" and "10m".
+
+        .. note::
+            This functions allows all parameters and keyword arguments defined by the
+            :func:`~bokeh.plotting.figure.multi_line` function.
+
+        Example:
+
+            .. bokeh-plot::
+                :source-position: above
+
+                import cartopy.crs as ccrs
+
+                from bokeh.plotting import figure, show
+
+                p = figure()
+                p.borders(ccrs.PlateCarree())
+                show(p)
+        """
+        from ._geo_feature import add_borders
+        self = add_borders(self, projection, scale, **line_kwargs)
+
+    def coastlines(self, projection, scale="110m", **line_kwargs):
+        """ Adds coastlines to a map with respect to a given projection.
+
+        .. note::
+            This function requires the optional package `Cartopy <https://cartopy.readthedocs.io>`__.
+
+        Args:
+            projection (cartopy.crs.Projection): Cartopy projection for a geographic map.
+            scale (str, "110m"): Scale of the feature resolution. Valid strings are "110m",
+                "50m" and "10m".
+
+        .. note::
+            This functions allows all parameters and keyword arguments defined by the
+            :func:`~bokeh.plotting.figure.multi_line` function.
+
+        Example:
+
+            .. bokeh-plot::
+                :source-position: above
+
+                import cartopy.crs as ccrs
+
+                from bokeh.plotting import figure, show
+
+                p = figure()
+                p.coastlines(ccrs.PlateCarree())
+                show(p)
+        """
+        from ._geo_feature import add_coastlines
+        self = add_coastlines(self, projection, scale, **line_kwargs)
+
+    def land(self, projection, scale="110m", **poly_kwargs):
+        """ Adds land geometries including islands to a map with respect to a
+        given projection.
+
+        .. note::
+            This function requires the optional package `Cartopy <https://cartopy.readthedocs.io>`__.
+
+        Args:
+            projection (cartopy.crs.Projection): Cartopy projection for a geographic map.
+            scale (str, "110m"): Scale of the feature resolution. Valid strings are "110m",
+                "50m" and "10m".
+
+        Keyword Arguments:
+            draw_polygon_border (bool, False): Enables the plotting of the geometry border.
+            draw_polygon_color (str, "black"): Sets the color of the geometry border.
+
+        .. note::
+            This functions allows all parameters and keyword arguments defined by the
+            :func:`~bokeh.plotting.figure.multi_polygons` function.
+
+        Example:
+
+            .. bokeh-plot::
+                :source-position: above
+
+                import cartopy.crs as ccrs
+
+                from bokeh.plotting import figure, show
+
+                p = figure()
+                p.land(ccrs.PlateCarree())
+                show(p)
+        """
+        from ._geo_feature import add_land
+        self = add_land(self, projection, scale, **poly_kwargs)
+
+    def lakes(self, projection, scale="110m", **poly_kwargs):
+        """ Adds lakes to a map with respect to a given projection.
+
+        .. note::
+            This function requires the optional package `Cartopy <https://cartopy.readthedocs.io>`__.
+
+        Args:
+            projection (cartopy.crs.Projection): Cartopy projection for a geographic map.
+            scale (str, "110m"): Scale of the feature resolution. Valid strings are "110m",
+                "50m" and "10m".
+
+        Keyword Arguments:
+            draw_polygon_border (bool, False): Enables the plotting of the geometry border.
+            draw_polygon_color (str, "black"): Sets the color of the geometry border.
+
+        .. note::
+            This functions allows all parameters and keyword arguments defined by the
+            :func:`~bokeh.plotting.figure.multi_polygons` function.
+
+        Example:
+
+            .. bokeh-plot::
+                :source-position: above
+
+                import cartopy.crs as ccrs
+
+                from bokeh.plotting import figure, show
+
+                p = figure()
+                p.lakes(ccrs.PlateCarree())
+                show(p)
+        """
+        from ._geo_feature import add_lakes
+        self = add_lakes(self, projection, scale, **poly_kwargs)
+
+    def ocean(self, projection, scale="110m", **poly_kwargs):
+        """ Adds ocean to a map with respect to a given projection.
+
+        .. note::
+            This function requires the optional package `Cartopy <https://cartopy.readthedocs.io>`__.
+
+        Args:
+            projection (cartopy.crs.Projection): Cartopy projection for a geographic map.
+            scale (str, "110m"): Scale of the feature resolution. Valid strings are "110m",
+                "50m" and "10m".
+
+        Keyword Arguments:
+            draw_polygon_border (bool, False): Enables the plotting of the geometry border.
+            draw_polygon_color (str, "black"): Sets the color of the geometry border.
+
+        .. note::
+            This functions allows all parameters and keyword arguments defined by the
+            :func:`~bokeh.plotting.figure.multi_polygons` function.
+
+        Example:
+
+            .. bokeh-plot::
+                :source-position: above
+
+                import cartopy.crs as ccrs
+
+                from bokeh.plotting import figure, show
+
+                p = figure()
+                p.ocean(ccrs.PlateCarree())
+                show(p)
+        """
+        from ._geo_feature import add_ocean
+        self = add_ocean(self, projection, scale, **poly_kwargs)
+
+    def rivers(self, projection, scale="110m", **line_kwargs):
+        """ Adds rivers to a map with respect to a given projection.
+
+        .. note::
+            This function requires the optional package `Cartopy <https://cartopy.readthedocs.io>`__.
+
+        Args:
+            projection (cartopy.crs.Projection): Cartopy projection for a geographic map.
+            scale (str, "110m"): Scale of the feature resolution. Valid strings are "110m",
+                "50m" and "10m".
+
+        .. note::
+            This functions allows all parameters and keyword arguments defined by the
+            :func:`~bokeh.plotting.figure.multi_line` function.
+
+        Example:
+
+            .. bokeh-plot::
+                :source-position: above
+
+                import cartopy.crs as ccrs
+
+                from bokeh.plotting import figure, show
+
+                p = figure()
+                p.rivers(ccrs.PlateCarree())
+                show(p)
+        """
+        from ._geo_feature import add_rivers
+        self = add_rivers(self, projection, scale, **line_kwargs)
+
+    def projection_boundary(self, projection, **line_kwargs):
+        """ Adds the boundary of a given projection to a map.
+
+        .. note::
+            This function requires the optional package `Cartopy <https://cartopy.readthedocs.io>`__.
+
+        Args:
+            projection (cartopy.crs.Projection): Cartopy projection for a geographic map.
+            scale (str, "110m"): Scale of the feature resolution. Valid strings are "110m",
+                "50m" and "10m".
+
+        .. note::
+            This functions allows all parameters and keyword arguments defined by the
+            :func:`~bokeh.plotting.figure.line` function.
+
+        Example:
+
+            .. bokeh-plot::
+                :source-position: above
+
+                import cartopy.crs as ccrs
+
+                from bokeh.plotting import figure, show
+
+                p = figure()
+                p.projection_boundary(ccrs.EckertIII())
+                show(p)
+        """
+        from ._geo_feature import add_projection_boundary
+        self = add_projection_boundary(self, projection, **line_kwargs)
+
+    def provinces(self, projection, scale="110m", **line_kwargs):
+        """ Adds the borders of provinces to a map with respect to a given projection.
+
+        .. note::
+            This function requires the optional package `Cartopy <https://cartopy.readthedocs.io>`__.
+
+        Args:
+            projection (cartopy.crs.Projection): Cartopy projection for a geographic map.
+            scale (str, "110m"): Scale of the feature resolution. Valid strings are "110m",
+                "50m" and "10m".
+
+        .. note::
+            This functions allows all parameters and keyword arguments defined by the
+            :func:`~bokeh.plotting.figure.multi_line` function.
+
+        Example:
+
+            .. bokeh-plot::
+                :source-position: above
+
+                import cartopy.crs as ccrs
+
+                from bokeh.plotting import figure, show
+
+                p = figure()
+                p.provinces(ccrs.PlateCarree())
+                show(p)
+        """
+        from ._geo_feature import add_provinces
+        self = add_provinces(self, projection, scale, **line_kwargs)
+
+    def states(self, projection, scale="110m", **poly_kwargs):
+        """ Adds states and provinces as multi-polygons to a map for a given projection.
+
+        .. note::
+            This function requires the optional package `Cartopy <https://cartopy.readthedocs.io>`__.
+
+        Args:
+            projection (cartopy.crs.Projection): Cartopy projection for a geographic map.
+            scale (str, "110m"): Scale of the feature resolution. Valid strings are "110m",
+                "50m" and "10m".
+
+        Keyword Arguments:
+            draw_polygon_border (bool, False): Enables the plotting of the geometry border.
+            draw_polygon_color (str, "black"): Sets the color of the geometry border.
+
+        .. note::
+            This functions allows all parameters and keyword arguments defined by the
+            :func:`~bokeh.plotting.figure.multi_polygons` function.
+
+        Example:
+
+            .. bokeh-plot::
+                :source-position: above
+
+                import cartopy.crs as ccrs
+
+                from bokeh.plotting import figure, show
+
+                p = figure()
+                p.states(ccrs.PlateCarree(), draw_polygon_border=True)
+                show(p)
+        """
+        from ._geo_feature import add_states
+        self = add_states(self, projection, scale, **poly_kwargs)
+
+def markers() -> None:
     ''' Prints a list of valid marker types for scatter()
 
     Returns:
         None
     '''
-    print("Available markers: \n\n - " + "\n - ".join(list(MarkerType)))
+    print("Available markers: \n\n - " + "\n - ".join(map(str, MarkerType)))
     print()
     print("Shortcuts: \n\n" + "\n".join(f" {short!r}: {name}" for (short, name) in _MARKER_SHORTCUTS.items()))
 
@@ -808,17 +1151,15 @@ class BaseFigureOptions(Options):
 
 RangeLike = Either(
     Instance(Range),
-    Either(
-        Tuple(Float, Float),
-        Tuple(Datetime, Datetime),
-        Tuple(TimeDelta, TimeDelta),
-    ),
+    Tuple(Float, Float),
+    Tuple(Datetime, Datetime),
+    Tuple(TimeDelta, TimeDelta),
     Seq(String),
-    Object("pandas.Series"),
-    Object("pandas.core.groupby.GroupBy"),
+    EagerSeries,
+    PandasGroupBy,
 )
 
-AxisType = Nullable(Either(Auto, Enum("linear", "log", "datetime", "mercator")))
+AxisInit = Nullable(Either(Auto, Enum(AxisType)))
 
 class FigureOptions(BaseFigureOptions):
 
@@ -830,11 +1171,11 @@ class FigureOptions(BaseFigureOptions):
     Customize the y-range of the plot.
     """)
 
-    x_axis_type = AxisType(default="auto", help="""
+    x_axis_type = AxisInit(default="auto", help="""
     The type of the x-axis.
     """)
 
-    y_axis_type = AxisType(default="auto", help="""
+    y_axis_type = AxisInit(default="auto", help="""
     The type of the y-axis.
     """)
 

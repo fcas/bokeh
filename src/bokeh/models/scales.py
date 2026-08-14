@@ -13,6 +13,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -20,9 +22,13 @@ log = logging.getLogger(__name__)
 # Imports
 #-----------------------------------------------------------------------------
 
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
 from ..core.has_props import abstract
-from ..core.properties import Instance, Required
+from ..core.property.instance import Instance
+from ..core.property.required import Required
 from .transforms import Transform
 
 #-----------------------------------------------------------------------------
@@ -48,28 +54,28 @@ class Scale(Transform):
 
     JavaScript implementations should implement the following methods:
 
-    .. code-block
+    .. code-block:: typescript
 
         compute(x: number): number {
-            # compute and return the transform of a single value
+            // compute and return the transform of a single value
         }
 
         v_compute(xs: Arrayable<number>): Arrayable<number> {
-            # compute and return the transform of an array of values
+            // compute and return the transform of an array of values
         }
 
         invert(sx: number): number {
-            # compute and return the inverse transform of a single value
+            // compute and return the inverse transform of a single value
         }
 
         v_invert(sxs: Arrayable<number>): Arrayable<number> {
-            # compute and return the inverse transform of an array of values
+            // compute and return the inverse transform of an array of values
         }
 
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -79,7 +85,7 @@ class ContinuousScale(Scale):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -89,7 +95,7 @@ class LinearScale(ContinuousScale):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class LogScale(ContinuousScale):
@@ -98,7 +104,7 @@ class LogScale(ContinuousScale):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class CategoricalScale(Scale):
@@ -108,7 +114,7 @@ class CategoricalScale(Scale):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class CompositeScale(Scale):
@@ -118,7 +124,7 @@ class CompositeScale(Scale):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     source_scale = Required(Instance(Scale), help="""

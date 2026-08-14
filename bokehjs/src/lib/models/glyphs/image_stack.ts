@@ -28,7 +28,7 @@ export class ImageStackView extends ImageBaseView {
   }
 
   protected _update_image(): void {
-    if (this.glglyph != null) {
+    if (this.has_webgl()) {
       this.glglyph.set_image_changed()
     }
 
@@ -37,6 +37,11 @@ export class ImageStackView extends ImageBaseView {
       this._set_data(null)
       this.renderer.request_paint()
     }
+  }
+
+  protected override get _can_inherit_image_data(): boolean {
+    return super._can_inherit_image_data &&
+      this._can_inherit_from(this.model.properties.color_mapper, this.base)
   }
 
   protected _flat_img_to_buf8(img: NDArrayType<number>): Uint8ClampedArray {

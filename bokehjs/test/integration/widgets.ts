@@ -1,16 +1,17 @@
-import {display, column} from "./_util"
-import {tap, mouse_click} from "../interactive"
-import {expect_not_null} from "../unit/assertions"
+import {display, column} from "#framework/layouts"
+import {tap, mouse_click} from "#framework/interactive"
+import {expect_not_null} from "#framework/assertions"
 
 import {range} from "@bokehjs/core/util/array"
 import {ButtonType} from "@bokehjs/core/enums"
 import type {Color} from "@bokehjs/core/types"
 
+import {HTML} from "@bokehjs/models/dom"
 import {ColumnDataSource, Row} from "@bokehjs/models"
 
 import {
   Button, Toggle, Dropdown,
-  Checkbox, Switch,
+  Checkbox, Switch, LightDark,
   CheckboxGroup, RadioGroup,
   CheckboxButtonGroup, RadioButtonGroup,
   PaletteSelect,
@@ -21,6 +22,8 @@ import {
   DatePicker, DateRangePicker, MultipleDatePicker,
   DatetimePicker, DatetimeRangePicker, MultipleDatetimePicker,
   Paragraph, Div, PreText,
+  Progress,
+  Markdown,
 } from "@bokehjs/models/widgets"
 
 import {
@@ -139,6 +142,22 @@ describe("Widgets", () => {
       await view.ready
     })
 
+    it("with swatch_width=20px", async () => {
+      const obj = new PaletteSelect({value: "Magma", items, ncols: 3, swatch_width: 20})
+      const {view} = await display(obj, [500, 200])
+
+      await tap(view.input_el)
+      await view.ready
+    })
+
+    it("with swatch_height=50px", async () => {
+      const obj = new PaletteSelect({value: "Magma", items, ncols: 3, swatch_height: 50})
+      const {view} = await display(obj, [500, 400])
+
+      await tap(view.input_el)
+      await view.ready
+    })
+
     it("with disabled=true", async () => {
       const obj = new PaletteSelect({value: "Accent", items, disabled: true})
       const {view} = await display(obj, [250, 50])
@@ -160,12 +179,67 @@ describe("Widgets", () => {
 
   it("should allow Switch with active=false", async () => {
     const obj = new Switch({active: false})
-    await display(obj, [500, 50])
+    await display(obj, [100, 30])
   })
 
   it("should allow Switch with active=true", async () => {
     const obj = new Switch({active: true})
-    await display(obj, [500, 50])
+    await display(obj, [100, 30])
+  })
+
+  it("should allow Switch with active=null", async () => {
+    const obj = new Switch({active: null})
+    await display(obj, [100, 30])
+  })
+
+  it("should allow Switch with active=false and off_icon", async () => {
+    const obj = new Switch({active: false, off_icon: "dark_theme"})
+    await display(obj, [100, 30])
+  })
+
+  it("should allow Switch with active=true and on_icon", async () => {
+    const obj = new Switch({active: true, on_icon: "light_theme"})
+    await display(obj, [100, 30])
+  })
+
+  it("should allow Switch with active=null and indeterminate_icon", async () => {
+    const obj = new Switch({active: null, indeterminate_icon: "system_theme"})
+    await display(obj, [100, 30])
+  })
+
+  it("should allow Switch with active=true and label", async () => {
+    const obj = new Switch({active: true, label: "Display:"})
+    await display(obj, [100, 30])
+  })
+
+  describe("should support Progress indicator widget", () => {
+    describe("in determinate mode", () => {
+      it("and horizontal orientation", async () => {
+        const obj = new Progress({
+          mode: "determinate",
+          orientation: "horizontal",
+          value: 105,
+          min: 0,
+          max: 179,
+          label: "@{index} of @{total} (@{percent}%)",
+          width: 200,
+        })
+        await display(obj, [300, 100])
+      })
+
+      it("and vertical orientation", async () => {
+        const obj = new Progress({
+          mode: "determinate",
+          orientation: "vertical",
+          value: 105,
+          min: 0,
+          max: 179,
+          label: "@{index} of @{total} (@{percent}%)",
+          height: 200,
+        })
+        await display(obj, [100, 300])
+      })
+    })
   })
 
   it("should allow CheckboxGroup", async () => {
@@ -425,6 +499,11 @@ describe("Widgets", () => {
     await display(obj, [500, 100])
   })
 
+  it("should allow Markdown", async () => {
+    const obj = new Markdown({text: "**Bold text** with some *italic text* and `inline code`."})
+    await display(obj, [500, 100])
+  })
+
   it("should allow DataTable in force_fit mode", async () => {
     const source = new ColumnDataSource({data: {index: [0, 1, 2, 10], bar: [3.4, 1.2, 0, -10]}})
     const index_col = new TableColumn({field: "index", title: "Index"})
@@ -472,6 +551,18 @@ describe("Widgets", () => {
     const table = new DataTable({source, columns, autosize_mode: "none"})
     const {view} = await display(table, [600, 400])
     foo_col.visible = false
+    await view.ready
+  })
+
+  it("should allow DataTable with and without HTML column titles", async () => {
+    const source = new ColumnDataSource({data: {c1: [0, 1, 2, 10], c2: [10, 20, 30, 40], c3: [3.4, 1.2, 0, -10]}})
+    const columns = [
+      new TableColumn({field: "c1", title: "a<b", width: 200}),
+      new TableColumn({field: "c2", title: new HTML({html: "a<b"}), width: 200}),
+      new TableColumn({field: "c3", title: new HTML({html: "<b>a&lt;b</b>"}), width: 200}),
+    ]
+    const table = new DataTable({source, columns, autosize_mode: "none"})
+    const {view} = await display(table, [600, 400])
     await view.ready
   })
 
@@ -552,6 +643,112 @@ describe("Widgets", () => {
     })
 
     await display(obj, [320, 120])
+  })
+
+  describe("should support LightDark widget", () => {
+    it("with active=false and widgets following a dark color scheme", async () => {
+      const light_dark = new LightDark({active: false})
+      const w0 = new Button({label: "Button"})
+      const w1 = new Toggle({label: "Toggle"})
+      const w2 = new Dropdown({label: "Dropdown"})
+      const w3 = new CheckboxGroup({labels: ["Option 1", "Option 2", "Option 3"], active: [0, 1]})
+      const w4 = new RadioGroup({labels: ["Option 1", "Option 2", "Option 3"], active: 0})
+      const w5 = new CheckboxButtonGroup({labels: ["Option 1", "Option 2", "Option 3"], active: [0, 1]})
+      const w6 = new RadioButtonGroup({labels: ["Option 1", "Option 2", "Option 3"], active: 0})
+      const w7 = new TextInput({title: "Initial temperature:", placeholder: "Enter temperature ...", prefix: "T", suffix: "\u2103"})
+      const w8 = new PasswordInput({value: "foo"})
+      const w9 = new AutocompleteInput({
+        placeholder: "Enter value ...",
+        completions: ["aaa", "aab", "aac", "baa", "caa"],
+      })
+      const w10 = new MultiChoice({options: ["Option 1", "Option 2", "Option 3"]})
+      const w11 = new Select({options: ["Option 1", "Option 2", "Option 3"], value: "Option 1"})
+      const w12 = new Slider({value: 10, start: 0, end: 100, step: 0.5})
+      const w_columns = [
+        column([light_dark, w0, w1, w2, w3, w4, w5, w6]),
+        column([w5, w6, w7, w8, w9, w10, w11, w12]),
+      ]
+      const layout = new Row({children: w_columns})
+      await display(layout, [540, 350])
+    })
+
+    it("with active=false and widgets following a dark color scheme inside a layout with a stylesheet", async () => {
+      const light_dark = new LightDark({active: false})
+      const w0 = new Button({label: "Button"})
+      const w1 = new Toggle({label: "Toggle"})
+      const w2 = new Dropdown({label: "Dropdown"})
+      const w3 = new CheckboxGroup({labels: ["Option 1", "Option 2", "Option 3"], active: [0, 1]})
+      const w4 = new RadioGroup({labels: ["Option 1", "Option 2", "Option 3"], active: 0})
+      const w5 = new CheckboxButtonGroup({labels: ["Option 1", "Option 2", "Option 3"], active: [0, 1]})
+      const w6 = new RadioButtonGroup({labels: ["Option 1", "Option 2", "Option 3"], active: 0})
+      const w7 = new TextInput({title: "Initial temperature:", placeholder: "Enter temperature ...", prefix: "T", suffix: "\u2103"})
+      const w8 = new PasswordInput({value: "foo"})
+      const w9 = new AutocompleteInput({
+        placeholder: "Enter value ...",
+        completions: ["aaa", "aab", "aac", "baa", "caa"],
+      })
+      const w10 = new MultiChoice({options: ["Option 1", "Option 2", "Option 3"]})
+      const w11 = new Select({options: ["Option 1", "Option 2", "Option 3"], value: "Option 1"})
+      const w12 = new Slider({value: 10, start: 0, end: 100, step: 0.5})
+      const w_columns = [
+        column([light_dark, w0, w1, w2, w3, w4, w5, w6]),
+        column([w5, w6, w7, w8, w9, w10, w11, w12]),
+      ]
+      const layout = new Row({children: w_columns, stylesheets: [":host { background-color: var(--background-color); }"]})
+      await display(layout, [540, 350])
+    })
+
+    it("with active=true and widgets following a light color scheme", async () => {
+      const light_dark = new LightDark({active: true})
+      const w0 = new Button({label: "Button"})
+      const w1 = new Toggle({label: "Toggle"})
+      const w2 = new Dropdown({label: "Dropdown"})
+      const w3 = new CheckboxGroup({labels: ["Option 1", "Option 2", "Option 3"], active: [0, 1]})
+      const w4 = new RadioGroup({labels: ["Option 1", "Option 2", "Option 3"], active: 0})
+      const w5 = new CheckboxButtonGroup({labels: ["Option 1", "Option 2", "Option 3"], active: [0, 1]})
+      const w6 = new RadioButtonGroup({labels: ["Option 1", "Option 2", "Option 3"], active: 0})
+      const w7 = new TextInput({title: "Initial temperature:", placeholder: "Enter temperature ...", prefix: "T", suffix: "\u2103"})
+      const w8 = new PasswordInput({value: "foo"})
+      const w9 = new AutocompleteInput({
+        placeholder: "Enter value ...",
+        completions: ["aaa", "aab", "aac", "baa", "caa"],
+      })
+      const w10 = new MultiChoice({options: ["Option 1", "Option 2", "Option 3"]})
+      const w11 = new Select({options: ["Option 1", "Option 2", "Option 3"], value: "Option 1"})
+      const w12 = new Slider({value: 10, start: 0, end: 100, step: 0.5})
+      const w_columns = [
+        column([light_dark, w0, w1, w2, w3, w4, w5, w6]),
+        column([w5, w6, w7, w8, w9, w10, w11, w12]),
+      ]
+      const layout = new Row({children: w_columns})
+      await display(layout, [540, 350])
+    })
+
+    it("with active=null and widgets following the system color scheme", async () => {
+      const light_dark = new LightDark({active: null})
+      const w0 = new Button({label: "Button"})
+      const w1 = new Toggle({label: "Toggle"})
+      const w2 = new Dropdown({label: "Dropdown"})
+      const w3 = new CheckboxGroup({labels: ["Option 1", "Option 2", "Option 3"], active: [0, 1]})
+      const w4 = new RadioGroup({labels: ["Option 1", "Option 2", "Option 3"], active: 0})
+      const w5 = new CheckboxButtonGroup({labels: ["Option 1", "Option 2", "Option 3"], active: [0, 1]})
+      const w6 = new RadioButtonGroup({labels: ["Option 1", "Option 2", "Option 3"], active: 0})
+      const w7 = new TextInput({title: "Initial temperature:", placeholder: "Enter temperature ...", prefix: "T", suffix: "\u2103"})
+      const w8 = new PasswordInput({value: "foo"})
+      const w9 = new AutocompleteInput({
+        placeholder: "Enter value ...",
+        completions: ["aaa", "aab", "aac", "baa", "caa"],
+      })
+      const w10 = new MultiChoice({options: ["Option 1", "Option 2", "Option 3"]})
+      const w11 = new Select({options: ["Option 1", "Option 2", "Option 3"], value: "Option 1"})
+      const w12 = new Slider({value: 10, start: 0, end: 100, step: 0.5})
+      const w_columns = [
+        column([light_dark, w0, w1, w2, w3, w4, w5, w6]),
+        column([w5, w6, w7, w8, w9, w10, w11, w12]),
+      ]
+      const layout = new Row({children: w_columns})
+      await display(layout, [540, 350])
+    })
   })
 })
 

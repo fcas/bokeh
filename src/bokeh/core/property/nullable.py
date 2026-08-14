@@ -19,16 +19,14 @@ log = logging.getLogger(__name__)
 #-----------------------------------------------------------------------------
 
 # Standard library imports
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 # Bokeh imports
 from ._sphinx import property_link, register_type_link, type_link
-from .bases import (
-    Init,
-    Property,
-    SingleParameterizedProperty,
-    TypeOrInst,
-)
+from .bases import SingleParameterizedProperty
+
+if TYPE_CHECKING:
+    from .bases import Init, Property, TypeOrInst
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -38,13 +36,11 @@ __all__ = (
     "Nullable",
 )
 
-T = TypeVar("T")
-
 #-----------------------------------------------------------------------------
 # General API
 #-----------------------------------------------------------------------------
 
-class Nullable(SingleParameterizedProperty[T | None]):
+class Nullable[T](SingleParameterizedProperty[T | None]):
     """ A property accepting ``None`` or a value of some other type. """
 
     def __init__(self, type_param: TypeOrInst[Property[T]], *, default: Init[T | None] = None, help: str | None = None) -> None:

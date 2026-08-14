@@ -21,18 +21,33 @@ const toString = Object.prototype.toString
 
 export class EqNotImplemented extends Error {}
 
+export type ComparatorOptions = {
+  /**
+   * Compare the structure of objects even if an identity check would be more
+   * robust (default: false)
+   */
+  structural?: boolean
+  /**
+   * Don't throw any exceptions if values don't support equality, but simply
+   * return they aren't equal (default: false)
+   */
+  no_fail?: boolean
+}
+
 export class Comparator {
   private readonly a_stack: unknown[] = []
   private readonly b_stack: unknown[] = []
 
   readonly structural: boolean
+  readonly no_fail: boolean
 
-  constructor(options?: {structural?: boolean}) {
-    this.structural = options?.structural ?? false
+  constructor(options: ComparatorOptions = {}) {
+    this.structural = options.structural ?? false
+    this.no_fail = options.no_fail ?? false
   }
 
   eq(a: any, b: any): boolean {
-    if (Object.is(a, b)) {
+    if (a === b || Object.is(a, b)) {
       return true
     }
 
@@ -97,10 +112,16 @@ export class Comparator {
         case "[object Float64Array]": {
           return this.arrays(a, b)
         }
-        case "[object Map]":
+        case "[object ArrayBuffer]":
+        case "[object SharedArrayBuffer]": {
+          return this.array_buffers(a, b)
+        }
+        case "[object Map]": {
           return this.maps(a, b)
-        case "[object Set]":
+        }
+        case "[object Set]": {
           return this.sets(a, b)
+        }
         case "[object Object]": {
           if (a.constructor == b.constructor && (a.constructor == null || a.constructor === Object)) {
             return this.objects(a, b)
@@ -117,7 +138,11 @@ export class Comparator {
         return this.nodes(a, b)
       }
 
-      throw new EqNotImplemented(`can't compare objects of type ${class_name}`)
+      if (this.no_fail) {
+        return false
+      } else {
+        throw new EqNotImplemented(`can't compare objects of type ${class_name}`)
+      }
     })()
 
     a_stack.pop()
@@ -127,7 +152,7 @@ export class Comparator {
   }
 
   numbers(a: number, b: number): boolean {
-    return Object.is(a, b)
+    return a === b || Object.is(a, b)
   }
 
   arrays(a: ArrayLike<unknown>, b: ArrayLike<unknown>): boolean {
@@ -144,6 +169,11 @@ export class Comparator {
     }
 
     return true
+  }
+
+  array_buffers(a: ArrayBufferLike, b: ArrayBufferLike): boolean {
+    // compare array buffers byte-wise; this doesn't allocate any memory
+    return this.arrays(new Uint8Array(a), new Uint8Array(b))
   }
 
   iterables(a: Iterable<unknown>, b: Iterable<unknown>): boolean {
@@ -223,19 +253,23 @@ export class Comparator {
   }
 
   nodes(a: Node, b: Node): boolean {
-    if (a.nodeType != b.nodeType) {
-      return false
-    }
+    if (this.structural) {
+      if (a.nodeType != b.nodeType) {
+        return false
+      }
 
-    if (a.textContent != b.textContent) {
-      return false
-    }
+      if (a.textContent != b.textContent) {
+        return false
+      }
 
-    if (!this.iterables(a.childNodes, b.childNodes)) {
-      return false
-    }
+      if (!this.iterables(a.childNodes, b.childNodes)) {
+        return false
+      }
 
-    return true
+      return true
+    } else {
+      return a === b
+    }
   }
 }
 

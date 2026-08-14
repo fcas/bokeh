@@ -10,6 +10,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportArgumentType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -17,15 +19,14 @@ log = logging.getLogger(__name__)
 # Imports
 #-----------------------------------------------------------------------------
 
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
 from ..core.has_props import abstract
-from ..core.properties import (
-    Dict,
-    Int,
-    List,
-    Seq,
-    Struct,
-)
+from ..core.property.container import Dict, List, Seq
+from ..core.property.primitive import Int
+from ..core.property.struct import Struct
 from ..model import Model
 
 #-----------------------------------------------------------------------------
@@ -56,7 +57,7 @@ class Selection(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     indices = Seq(Int, default=[], help="""
@@ -99,7 +100,7 @@ class SelectionPolicy(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -112,7 +113,7 @@ class IntersectRenderers(SelectionPolicy):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -125,7 +126,7 @@ class UnionRenderers(SelectionPolicy):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 

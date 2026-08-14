@@ -110,11 +110,11 @@ Use ``conda env create`` at the root level of your *source checkout* directory
 to set up the environment and install all necessary packages. The "test"
 environment files are versioned by Python version.
 
-For example, to install an environment for Python 3.10, invoke:
+For example, to install an environment for Python 3.12, invoke:
 
 .. code-block:: sh
 
-    conda env create -n bkdev -f conda/environment-test-3.10.yml
+    conda env create -n bkdev -f conda/environment-test-3.12.yml
 
 .. note::
     Use the ``conda -n bkdev`` option to make ``bkdev`` the name of your
@@ -190,7 +190,7 @@ your *source checkout* directory:
 
 .. code-block:: sh
 
-    python scripts/hooks/install.py
+    python tools/hooks/install.py
 
 This configures pre-commit to use two `Git hooks`_ that will check your code
 whenever you push a commit to Bokeh's GitHub repository:
@@ -216,7 +216,7 @@ To uninstall the Git hooks, run the following command from the top level of your
 
 .. code-block:: sh
 
-    python scripts/hooks/uninstall.py
+    python tools/hooks/uninstall.py
 
 .. _contributor_guide_setup_install_locally:
 
@@ -258,26 +258,9 @@ different local version instead, set the ``BOKEHJS_ACTION`` environment variable
     :ref:`contributor_guide_setup_installing_node_packages` section above before
     rebuilding BokehJS.
 
-    In case you **update from a development environment based on Bokeh 2.3 or
-    older**, you most likely also need to delete the ``bokehjs/build`` folder in
-    your local environment before building and installing a fresh BokehJS.
-
-.. _contributor_guide_setup_sample_data:
-
-7. Download sample data
------------------------
-
-Several tests and examples require Bokeh's sample data to be available on your
-hard drive. After :ref:`installing <contributor_guide_setup_install_locally>`
-Bokeh, use the following command to download and install the data:
-
-.. code-block:: sh
-
-    pip install bokeh_sampledata
-
 .. _contributor_guide_setup_environment_variables:
 
-8. Set environment variables
+7. Set environment variables
 ----------------------------
 
 Bokeh uses :ref:`environment variables <ug_settings>` to control several
@@ -285,6 +268,21 @@ aspects of how the different parts of the library operate and interact.
 
 To learn about all environment variables available in Bokeh, see
 :ref:`bokeh.settings` in the reference guide.
+
+Only set the environment variables in this section for the command or terminal
+session that needs them. In particular, avoid making them permanent settings in
+your ``bkdev`` environment, because different development tasks need different
+resource configuration:
+
+* To run examples or local applications with your locally built BokehJS, set
+  ``BOKEH_RESOURCES`` for that command or terminal session.
+* To run tests, leave ``BOKEH_RESOURCES`` and ``BOKEH_DEV`` unset. Bokeh's test
+  suite selects the resources it needs, and some tests fail during collection if
+  ``BOKEH_RESOURCES`` is set.
+* To build the documentation, follow the
+  :ref:`documentation build instructions <contributor_guide_documentation_build>`.
+  Documentation builds use ``GOOGLE_API_KEY`` and, when needed,
+  ``BOKEH_DOCS_CDN`` instead of ``BOKEH_RESOURCES``.
 
 ``BOKEH_RESOURCES``
 ~~~~~~~~~~~~~~~~~~~
@@ -299,6 +297,11 @@ BokehJS locally, you need to change how Bokeh loads those JavaScript resources.
 You will not see any effects of your local changes to BokehJS unless you
 configure Bokeh to use your local version of BokehJS instead of the default
 version from the CDN.
+
+Note that ``BOKEH_RESOURCES`` should only be set when running examples or
+local applications where you need to load your local BokehJS build. When you
+run tests or build the docs, you should not set this variable (or unset it if
+it is already set) or you might get an error.
 
 You have the following three options to use your local version of BokehJS:
 
@@ -425,7 +428,10 @@ See :class:`~bokeh.resources.Resources` for more details.
 
 There are several other environment variables that are helpful when working on
 Bokeh's codebase. The most common settings for local development are combined in
-the variable ``BOKEH_DEV``.
+the variable ``BOKEH_DEV``. Use ``BOKEH_DEV`` when you are developing examples
+or applications, or when you need to run the local resource server for
+``BOKEH_RESOURCES=server-dev``. Do not leave ``BOKEH_DEV`` enabled when running
+the test suite, because it implies ``BOKEH_RESOURCES=server``.
 
 To enable development settings, set ``BOKEH_DEV`` to ``true``:
 
@@ -480,7 +486,7 @@ is called.
 
 .. _contributor_guide_setup_test_setup:
 
-9. Test your local setup
+8. Test your local setup
 ------------------------
 
 Run the following tests to check that everything is installed and set up
@@ -500,14 +506,16 @@ You should see output similar to:
 
 .. code-block:: sh
 
-    Python version      :  3.9.7 | packaged by conda-forge | (default, Sep 29 2021, 19:20:46)
-    IPython version     :  7.20.0
-    Tornado version     :  6.1
-    Bokeh version       :  3.0.0dev1+20.g6c394d579
-    BokehJS static path :  /opt/anaconda/envs/test/lib/python3.9/site-packages/bokeh/server/static
-    node.js version     :  v16.12.0
-    npm version         :  7.24.2
-    Operating system    :  Linux-5.11.0-40-generic-x86_64-with-glibc2.31
+    Python version        :  3.12.3 | packaged by conda-forge | (main, Apr 15 2024, 18:38:13) [GCC 12.3.0]
+    IPython version       :  8.19.0
+    Tornado version       :  6.3.3
+    NumPy version         :  2.0.0
+    Bokeh version         :  3.5.1
+    BokehJS static path   :  /opt/anaconda/envs/test/lib/python3.12/site-packages/bokeh/server/static
+    node.js version       :  v20.12.2
+    npm version           :  10.8.2
+    jupyter_bokeh version :  (not installed)
+    Operating system      :  Linux-5.15.0-86-generic-x86_64-with-glibc2.35
 
 Run examples
 ~~~~~~~~~~~~
@@ -759,7 +767,7 @@ Slack`_.
 
 .. _Node.js: https://nodejs.org/en/
 .. _Selenium: https://www.selenium.dev/
-.. _Anaconda: https://www.anaconda.com/distribution/
+.. _Anaconda: https://www.anaconda.com/download/
 .. _Bokeh's contributor Slack: https://slack-invite.bokeh.org/
 .. _conda package manager: https://docs.conda.io/projects/conda/en/latest/
 .. _Installation: https://conda.io/projects/conda/en/latest/user-guide/install/index.html

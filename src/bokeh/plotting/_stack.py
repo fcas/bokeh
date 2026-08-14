@@ -17,8 +17,12 @@ log = logging.getLogger(__name__)
 # Imports
 #-----------------------------------------------------------------------------
 
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
 from ..transform import stack
+from ..util.datatypes import SequenceLike, is_SequenceLike
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -37,11 +41,17 @@ __all__ = (
 # Dev API
 #-----------------------------------------------------------------------------
 
-def single_stack(stackers, spec, **kw):
+def _validate_stackers(stackers: object) -> None:
+    if not is_SequenceLike(stackers):
+        raise ValueError("Stackers must be a sequence")
+
+def single_stack(stackers: SequenceLike[str], spec: str, **kw: Any) -> list[dict[str, Any]]:
+    _validate_stackers(stackers)
+
     if spec in kw:
         raise ValueError(f"Stack property '{spec}' cannot appear in keyword args")
 
-    lengths = { len(x) for x in kw.values() if isinstance(x, list | tuple) }
+    lengths = { len(x) for x in kw.values() if isinstance(x, (list, tuple)) }
 
     # lengths will be empty if there are no kwargs supplied at all
     if len(lengths) > 0:
@@ -50,18 +60,18 @@ def single_stack(stackers, spec, **kw):
         if lengths.pop() != len(stackers):
             raise ValueError("Keyword argument sequences for broadcasting must be the same length as stackers")
 
-    s = []
+    s: list[str] = []
 
-    _kw = []
+    _kw: list[dict[str, Any]] = []
 
     for i, val in enumerate(stackers):
-        d  = {'name': val}
+        d: dict[str, Any] = {'name': val}
         s.append(val)
 
         d[spec] = stack(*s)
 
         for k, v in kw.items():
-            if isinstance(v, list | tuple):
+            if isinstance(v, (list, tuple)):
                 d[k] = v[i]
             else:
                 d[k] = v
@@ -70,12 +80,14 @@ def single_stack(stackers, spec, **kw):
 
     return _kw
 
-def double_stack(stackers, spec0, spec1, **kw):
+def double_stack(stackers: SequenceLike[str], spec0: str, spec1: str, **kw: Any) -> list[dict[str, Any]]:
+    _validate_stackers(stackers)
+
     for name in (spec0, spec1):
         if name in kw:
             raise ValueError(f"Stack property '{name}' cannot appear in keyword args")
 
-    lengths = { len(x) for x in kw.values() if isinstance(x, list | tuple) }
+    lengths = { len(x) for x in kw.values() if isinstance(x, (list, tuple)) }
 
     # lengths will be empty if there are no kwargs supplied at all
     if len(lengths) > 0:
@@ -84,13 +96,13 @@ def double_stack(stackers, spec0, spec1, **kw):
         if lengths.pop() != len(stackers):
             raise ValueError("Keyword argument sequences for broadcasting must be the same length as stackers")
 
-    s0 = []
-    s1 = []
+    s0: list[str] = []
+    s1: list[str] = []
 
-    _kw = []
+    _kw: list[dict[str, Any]] = []
 
     for i, val in enumerate(stackers):
-        d  = {'name': val}
+        d: dict[str, Any] = {'name': val}
         s0 = list(s1)
         s1.append(val)
 
@@ -98,7 +110,7 @@ def double_stack(stackers, spec0, spec1, **kw):
         d[spec1] = stack(*s1)
 
         for k, v in kw.items():
-            if isinstance(v, list | tuple):
+            if isinstance(v, (list, tuple)):
                 d[k] = v[i]
             else:
                 d[k] = v

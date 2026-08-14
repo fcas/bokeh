@@ -8,19 +8,24 @@
   gap: 0.5em;
 }
 
-.bk-item {
-  --active-tool-highlight: #26aae1;
+.bk-swatch {
+  width: 100px;
+  height: auto;
+  align-self: stretch;
+}
 
-  border: 1px solid transparent;
+.bk-item {
+  border: var(--border-width) var(--border-style) transparent;
+  color: var(--inherit-color);
 
   &.bk-active {
-    border-color: var(--active-tool-highlight);
+    border-color: var(--highlight-color);
   }
   &:hover {
-    background-color: #f9f9f9;
+    background-color: var(--hover-color);
   }
   &:focus, &:focus-visible {
-    outline: 1px dotted var(--active-tool-highlight);
+    outline: var(--outline-width) var(--outline-style) var(--highlight-color);
     outline-offset: -1px;
   }
   &::-moz-focus-inner {

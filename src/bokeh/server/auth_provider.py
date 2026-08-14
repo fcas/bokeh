@@ -7,6 +7,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportArgumentType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -17,7 +19,6 @@ log = logging.getLogger(__name__)
 # Standard library imports
 import importlib.util
 from os.path import isfile
-from types import ModuleType
 from typing import (
     TYPE_CHECKING,
     Awaitable,
@@ -33,6 +34,8 @@ from tornado.web import RequestHandler
 from ..util.serialization import make_globally_unique_id
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from ..core.types import PathLike
 
 #-----------------------------------------------------------------------------
@@ -85,14 +88,14 @@ class AuthProvider:
 
     @property
     def get_login_url(self) -> Callable[[HTTPServerRequest], str] | None:
-        ''' A function that computes a URL to redirect unathenticated users
+        ''' A function that computes a URL to redirect unauthenticated users
         to for login.
 
         This property may return None, if a ``login_url`` is supplied
         instead.
 
         If a function is returned, it should accept a ``RequestHandler``
-        and return a login URL for unathenticated users.
+        and return a login URL for unauthenticated users.
 
         '''
         pass
@@ -140,7 +143,7 @@ class AuthProvider:
     def login_url(self) -> str | None:
         ''' A URL to redirect unauthenticated users to for login.
 
-        This proprty may return None, if a ``get_login_url`` function is
+        This property may return None, if a ``get_login_url`` function is
         supplied instead.
 
         '''
@@ -162,7 +165,7 @@ class AuthProvider:
     def logout_url(self) -> str | None:
         ''' A URL to redirect authenticated users to for logout.
 
-        This proprty may return None.
+        This property may return None.
 
         '''
         pass
@@ -217,31 +220,31 @@ class AuthModule(AuthProvider):
         super().__init__()
 
     @property
-    def get_user(self):
+    def get_user(self) -> Callable[[HTTPServerRequest], User] | None:
         return getattr(self._module, 'get_user', None)
 
     @property
-    def get_user_async(self):
+    def get_user_async(self) -> Callable[[HTTPServerRequest], Awaitable[User]] | None:
         return getattr(self._module, 'get_user_async', None)
 
     @property
-    def login_url(self):
+    def login_url(self) -> str | None:
         return getattr(self._module, 'login_url', None)
 
     @property
-    def get_login_url(self):
+    def get_login_url(self) -> Callable[[HTTPServerRequest], str] | None:
         return getattr(self._module, 'get_login_url', None)
 
     @property
-    def login_handler(self):
+    def login_handler(self) -> type[RequestHandler] | None:
         return getattr(self._module, 'LoginHandler', None)
 
     @property
-    def logout_url(self):
+    def logout_url(self) -> str | None:
         return getattr(self._module, 'logout_url', None)
 
     @property
-    def logout_handler(self):
+    def logout_handler(self) -> type[RequestHandler] | None:
         return getattr(self._module, 'LogoutHandler', None)
 
 class NullAuth(AuthProvider):
@@ -251,31 +254,31 @@ class NullAuth(AuthProvider):
 
     '''
     @property
-    def get_user(self):
+    def get_user(self) -> None:
         return None
 
     @property
-    def get_user_async(self):
+    def get_user_async(self) -> None:
         return None
 
     @property
-    def login_url(self):
+    def login_url(self) -> None:
         return None
 
     @property
-    def get_login_url(self):
+    def get_login_url(self) -> None:
         return None
 
     @property
-    def login_handler(self):
+    def login_handler(self) -> None:
         return None
 
     @property
-    def logout_url(self):
+    def logout_url(self) -> None:
         return None
 
     @property
-    def logout_handler(self):
+    def logout_handler(self) -> None:
         return None
 
 #-----------------------------------------------------------------------------
@@ -294,6 +297,9 @@ def load_auth_module(module_path: PathLike) -> ModuleType:
     '''
     module_name = "bokeh.auth_" + make_globally_unique_id().replace('-', '')
     spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load auth module from {module_path!r}")
+
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

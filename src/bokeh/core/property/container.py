@@ -28,10 +28,16 @@ from collections.abc import (
     Sequence,
     Sized,
 )
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    cast,
+    overload,
+)
 
 # Bokeh imports
 from ._sphinx import property_link, register_type_link, type_link
+from .any import Any as AnyVal
 from .bases import (
     ContainerProperty,
     Init,
@@ -39,7 +45,7 @@ from .bases import (
     SingleParameterizedProperty,
     TypeOrInst,
 )
-from .descriptors import ColumnDataPropertyDescriptor
+from .descriptors import ColumnDataPropertyDescriptor, PropertyDescriptor
 from .enum import Enum
 from .numeric import Int
 from .singletons import Intrinsic, Undefined
@@ -52,6 +58,7 @@ from .wrappers import (
 
 if TYPE_CHECKING:
     from ...document.events import DocumentPatchedEvent
+    from ...models.sources import ColumnDataSource
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -71,28 +78,30 @@ __all__ = (
     'Tuple',
 )
 
-T = TypeVar("T")
-
 #-----------------------------------------------------------------------------
 # General API
 #-----------------------------------------------------------------------------
 
-class Seq(ContainerProperty[T]):
+class Seq[T, TSeq](ContainerProperty[TSeq]):
     """ Accept non-string ordered sequences of values, e.g. list, tuple, array.
 
     """
 
-    def __init__(self, item_type: TypeOrInst[Property[T]], *, default: Init[T] = Undefined, help: str | None = None) -> None:
+    def __init__(self, item_type: TypeOrInst[Property[T]], *, default: Init[TSeq] = Undefined, help: str | None = None) -> None:
         super().__init__(item_type, default=default, help=help)
 
     @property
-    def item_type(self):
+    def item_type(self) -> Property[T]:
         return self.type_params[0]
 
     def validate(self, value: Any, detail: bool = True) -> None:
         super().validate(value, True)
 
-        if self._is_seq(value) and all(self.item_type.is_valid(item) for item in value):
+        if not self._is_seq(value):
+            msg = "" if not detail else f"expected sequence {self}, got {value!r} of type {type(value)!r}"
+            raise ValueError(msg)
+
+        if self._should_skip_item_validation() or all(self.item_type.is_valid(item) for item in value):
             return
 
         if self._is_seq(value):
@@ -106,28 +115,36 @@ class Seq(ContainerProperty[T]):
         msg = "" if not detail else f"expected an element of {self}, got {value!r}"
         raise ValueError(msg)
 
+    def _should_skip_item_validation(self) -> bool:
+        return isinstance(self.item_type, AnyVal)
+
     @classmethod
     def _is_seq(cls, value: Any) -> bool:
         return ((isinstance(value, Sequence) or cls._is_seq_like(value)) and not isinstance(value, str))
 
     @classmethod
     def _is_seq_like(cls, value: Any) -> bool:
-        return (isinstance(value, Container | Sized | Iterable)
+        return (isinstance(value, (Container, Sized, Iterable))
                 and hasattr(value, "__getitem__") # NOTE: this is what makes it disallow set type
                 and not isinstance(value, Mapping))
 
-class List(Seq[T]):
+class List[T](Seq[T, list[T]]):
     """ Accept Python list values.
 
     """
 
-    def __init__(self, item_type: TypeOrInst[Property[T]], *, default: Init[T] = [], help: str | None = None) -> None:
+    def __init__(self, item_type: TypeOrInst[Property[T]], *, default: Init[list[T]] = [], help: str | None = None) -> None:
         # TODO: refactor to not use mutable objects as default values.
         # Left in place for now because we want to allow None to express
         # optional values. Also in Dict.
         super().__init__(item_type, default=default, help=help)
 
-    def wrap(self, value: list[T]) -> PropertyValueList[T]:
+    @overload
+    def wrap(self, value: list[T]) -> PropertyValueList[T]: ...
+    @overload
+    def wrap[V](self, value: V) -> V: ...
+
+    def wrap(self, value: Any) -> Any:
         """ Some property types need to wrap their values in special containers, etc.
 
         """
@@ -140,21 +157,26 @@ class List(Seq[T]):
             return value
 
     @classmethod
-    def _is_seq(cls, value: Any):
+    def _is_seq(cls, value: Any) -> bool:
         return isinstance(value, list)
 
-class Set(Seq[T]):
+class Set[T](Seq[T, set[T]]):
     """ Accept Python ``set()`` values.
 
     """
 
-    def __init__(self, item_type: TypeOrInst[Property[T]], *, default: Init[T] = set(), help: str | None = None) -> None:
+    def __init__(self, item_type: TypeOrInst[Property[T]], *, default: Init[set[T]] = set(), help: str | None = None) -> None:
         # TODO: refactor to not use mutable objects as default values.
         # Left in place for now because we want to allow None to express
         # optional values. Also in Dict.
         super().__init__(item_type, default=default, help=help)
 
-    def wrap(self, value: set[T]) -> PropertyValueSet[T]:
+    @overload
+    def wrap(self, value: set[T]) -> PropertyValueSet[T]: ...
+    @overload
+    def wrap[V](self, value: V) -> V: ...
+
+    def wrap(self, value: Any) -> Any:
         """ Some property types need to wrap their values in special containers, etc. """
         if isinstance(value, set):
             if isinstance(value, PropertyValueSet):
@@ -168,7 +190,7 @@ class Set(Seq[T]):
     def _is_seq(cls, value: Any) -> bool:
         return isinstance(value, set)
 
-class Array(Seq[T]):
+class Array[T](Seq[T, Any]):
     """ Accept NumPy array values.
 
     """
@@ -178,7 +200,7 @@ class Array(Seq[T]):
         import numpy as np
         return isinstance(value, np.ndarray)
 
-class Dict(ContainerProperty[Any]):
+class Dict[K, V](ContainerProperty[dict[K, V]]):
     """ Accept Python dict values.
 
     If a default value is passed in, then a shallow copy of it will be
@@ -186,16 +208,16 @@ class Dict(ContainerProperty[Any]):
 
     """
 
-    def __init__(self, keys_type: TypeOrInst[Property[Any]], values_type: TypeOrInst[Property[Any]], *,
-            default: Init[T] = {}, help: str | None = None) -> None:
+    def __init__(self, keys_type: TypeOrInst[Property[K]], values_type: TypeOrInst[Property[V]], *,
+            default: Init[dict[K, V]] = {}, help: str | None = None) -> None:
         super().__init__(keys_type, values_type, default=default, help=help)
 
     @property
-    def keys_type(self):
+    def keys_type(self) -> Property[K]:
         return self.type_params[0]
 
     @property
-    def values_type(self):
+    def values_type(self) -> Property[V]:
         return self.type_params[1]
 
     def validate(self, value: Any, detail: bool = True) -> None:
@@ -223,7 +245,12 @@ class Dict(ContainerProperty[Any]):
         if err:
             raise err if detail else ValueError("")
 
-    def wrap(self, value):
+    @overload
+    def wrap(self, value: dict[K, V]) -> PropertyValueDict[V]: ...
+    @overload
+    def wrap[T](self, value: T) -> T: ...
+
+    def wrap(self, value: Any) -> Any:
         """ Some property types need to wrap their values in special containers, etc.
 
         """
@@ -235,7 +262,7 @@ class Dict(ContainerProperty[Any]):
         else:
             return value
 
-class ColumnData(Dict):
+class ColumnData(Dict[str, Any]):
     """ Accept a Python dictionary suitable as the ``data`` attribute of a
     :class:`~bokeh.models.sources.ColumnDataSource`.
 
@@ -244,7 +271,7 @@ class ColumnData(Dict):
 
     """
 
-    def make_descriptors(self, base_name):
+    def make_descriptors(self, name: str) -> list[PropertyDescriptor[Any]]:
         """ Return a list of ``ColumnDataPropertyDescriptor`` instances to
         install on a class, in order to delegate attribute access to this
         property.
@@ -258,17 +285,22 @@ class ColumnData(Dict):
         The descriptors returned are collected by the ``MetaHasProps``
         metaclass and added to ``HasProps`` subclasses during class creation.
         """
-        return [ ColumnDataPropertyDescriptor(base_name, self) ]
+        return [ ColumnDataPropertyDescriptor(name, self) ]
 
     def _hinted_value(self, value: Any, hint: DocumentPatchedEvent | None) -> Any:
         from ...document.events import ColumnDataChangedEvent, ColumnsStreamedEvent
         if isinstance(hint, ColumnDataChangedEvent):
-            return { col: hint.model.data[col] for col in hint.cols }
+            return { col: cast("ColumnDataSource", hint.model).data[col] for col in hint.cols or [] }
         if isinstance(hint, ColumnsStreamedEvent):
             return hint.data
         return value
 
-    def wrap(self, value):
+    @overload
+    def wrap(self, value: dict[str, Sequence[Any]]) -> PropertyValueColumnData: ...
+    @overload
+    def wrap[T](self, value: T) -> T: ...
+
+    def wrap(self, value: Any) -> Any:
         """ Some property types need to wrap their values in special containers, etc.
 
         """
@@ -280,36 +312,36 @@ class ColumnData(Dict):
         else:
             return value
 
-class Tuple(ContainerProperty):
+class Tuple(ContainerProperty[Any]):
     """ Accept Python tuple values.
 
     """
 
-    def __init__(self, *type_params: TypeOrInst[Property[Any]], default: Init[T] = Undefined, help: str | None = None) -> None:
+    def __init__(self, *type_params: TypeOrInst[Property[Any]], default: Init[Any] = Undefined, help: str | None = None) -> None:
         super().__init__(*type_params, default=default, help=help)
 
     def validate(self, value: Any, detail: bool = True) -> None:
         super().validate(value, detail)
 
-        if isinstance(value, tuple | list) and len(self.type_params) == len(value):
+        if isinstance(value, (tuple, list)) and len(self.type_params) == len(value):
             if all(type_param.is_valid(item) for type_param, item in zip(self.type_params, value)):
                 return
 
         msg = "" if not detail else f"expected an element of {self}, got {value!r}"
         raise ValueError(msg)
 
-    def transform(self, value):
+    def transform(self, value: Any) -> tuple[Any, ...]:
         """ Change the value into a JSON serializable format.
 
         """
         return tuple(typ.transform(x) for (typ, x) in zip(self.type_params, value))
 
-class RelativeDelta(Dict):
+class RelativeDelta(Dict[str, int]):
     """ Accept RelativeDelta dicts for time delta values.
 
     """
 
-    def __init__(self, default={}, *, help: str | None = None) -> None:
+    def __init__(self, default: Init[dict[str, int]] = {}, *, help: str | None = None) -> None:
         keys = Enum("years", "months", "days", "hours", "minutes", "seconds", "microseconds")
         values = Int
         super().__init__(keys, values, default=default, help=help)
@@ -317,12 +349,13 @@ class RelativeDelta(Dict):
     def __str__(self) -> str:
         return self.__class__.__name__
 
-class RestrictedDict(Dict):
+class RestrictedDict[K, V](Dict[K, V]):
     """ Check for disallowed key(s).
 
     """
 
-    def __init__(self, keys_type, values_type, disallow, default={}, *, help: str | None = None) -> None:
+    def __init__(self, keys_type: TypeOrInst[Property[Any]], values_type: TypeOrInst[Property[Any]], disallow: Iterable[Any],
+            default: Init[dict[K, V]] = {}, *, help: str | None = None) -> None:
         self._disallow = set(disallow)
         super().__init__(keys_type=keys_type, values_type=values_type, default=default, help=help)
 
@@ -335,9 +368,7 @@ class RestrictedDict(Dict):
             msg = "" if not detail else f"Disallowed keys: {error_keys!r}"
             raise ValueError(msg)
 
-TSeq = TypeVar("TSeq", bound=Seq[Any])
-
-class NonEmpty(SingleParameterizedProperty[TSeq]):
+class NonEmpty[TSeq: Seq[Any, Any]](SingleParameterizedProperty[TSeq]):
     """ Allows only non-empty containers. """
 
     def __init__(self, type_param: TypeOrInst[TSeq], *, default: Init[TSeq] = Intrinsic,
@@ -351,7 +382,7 @@ class NonEmpty(SingleParameterizedProperty[TSeq]):
             msg = "" if not detail else "Expected a non-empty container"
             raise ValueError(msg)
 
-class Len(SingleParameterizedProperty[TSeq]):
+class Len[TSeq: Seq[Any, Any]](SingleParameterizedProperty[TSeq]):
     """ Allows only containers of the given length. """
 
     def __init__(self, type_param: TypeOrInst[TSeq], length: int, *, default: Init[TSeq] = Intrinsic,
@@ -379,14 +410,14 @@ class Len(SingleParameterizedProperty[TSeq]):
 #-----------------------------------------------------------------------------
 
 @register_type_link(Dict)
-def _sphinx_type_dict(obj: Dict):
+def _sphinx_type_dict(obj: Dict[Any, Any]) -> str:
     return f"{property_link(obj)}({type_link(obj.keys_type)}, {type_link(obj.values_type)})"
 
 @register_type_link(Seq)
-def _sphinx_type_seq(obj: Seq[Any]):
+def _sphinx_type_seq(obj: Seq[Any, Any]) -> str:
     return f"{property_link(obj)}({type_link(obj.item_type)})"
 
 @register_type_link(Tuple)
-def _sphinx_type_tuple(obj: Tuple):
+def _sphinx_type_tuple(obj: Tuple) -> str:
     item_types = ", ".join(type_link(x) for x in obj.type_params)
     return f"{property_link(obj)}({item_types})"

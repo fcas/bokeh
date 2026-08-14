@@ -12,6 +12,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false, reportArgumentType=false, reportAttributeAccessIssue=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -19,8 +21,11 @@ log = logging.getLogger(__name__)
 # Imports
 #-----------------------------------------------------------------------------
 
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
-from ...core.properties import Instance, InstanceDefault
+from ...core.property.instance import Instance, InstanceDefault
 from ...core.validation import error
 from ...core.validation.errors import MALFORMED_GRAPH_SOURCE
 from ..glyphs import MultiLine, Scatter
@@ -58,7 +63,7 @@ class GraphRenderer(DataRenderer):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     @error(MALFORMED_GRAPH_SOURCE)

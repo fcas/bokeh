@@ -59,13 +59,11 @@ log = logging.getLogger(__name__)
 # Standard library imports
 import json
 from typing import (
-    TYPE_CHECKING,
     Any,
     ClassVar,
-    Generic,
-    TypeAlias,
+    NotRequired,
+    Protocol,
     TypedDict,
-    TypeVar,
 )
 
 # Bokeh imports
@@ -76,11 +74,6 @@ from ..core.json_encoder import serialize_json
 from ..core.serialization import Buffer, Serialized
 from ..core.types import ID
 from .exceptions import MessageError, ProtocolError
-
-if TYPE_CHECKING:
-    from typing_extensions import NotRequired
-
-    from ..client.websocket import WebSocketClientConnectionWrapper
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -107,16 +100,20 @@ class Header(TypedDict):
 class BufferHeader(TypedDict):
     id: ID
 
-Content = TypeVar("Content")
+type Metadata = dict[str, Any]
 
-Metadata: TypeAlias = dict[str, Any]
-
-BufferRef: TypeAlias = tuple[BufferHeader, bytes]
+type BufferRef = tuple[BufferHeader, bytes]
 
 class Empty(TypedDict):
     pass
 
-class Message(Generic[Content]):
+class MessageConnection(Protocol):
+    write_lock: Any
+
+    async def write_message(self, message: bytes | str,
+            binary: bool = False, locked: bool = True) -> Any: ...
+
+class Message[Content]:
     ''' The Message base class encapsulates creating, assembling, and
     validating the integrity of Bokeh Server messages. Additionally, it
     provide hooks
@@ -208,8 +205,7 @@ class Message(Generic[Content]):
         ''' Associate a buffer header and payload with this message.
 
         Args:
-            buf_header (``JSON``) : a buffer header
-            buf_payload (``JSON`` or bytes) : a buffer payload
+            buffer (Buffer) : a buffer
 
         Returns:
             None
@@ -218,13 +214,16 @@ class Message(Generic[Content]):
             MessageError
 
         '''
-        if 'num_buffers' in self._header:
-            self._header['num_buffers'] += 1
+        self.add_buffers(buffer)
+
+    def add_buffers(self, *buffers: Buffer) -> None:
+        if "num_buffers" in self._header:
+            self._header["num_buffers"] += len(buffers)
         else:
-            self._header['num_buffers'] = 1
+            self._header["num_buffers"] = len(buffers)
 
         self._header_json = None
-        self._buffers.append(buffer)
+        self._buffers.extend(buffers)
 
     def assemble_buffer(self, buf_header: BufferHeader, buf_payload: bytes) -> None:
         ''' Add a buffer header and payload that we read from the socket.
@@ -247,7 +246,7 @@ class Message(Generic[Content]):
             raise ProtocolError(f"too many buffers received expecting {num_buffers}")
         self._buffers.append(Buffer(buf_header["id"], buf_payload))
 
-    async def write_buffers(self, conn: WebSocketClientConnectionWrapper, locked: bool = True) -> int:
+    async def write_buffers(self, conn: MessageConnection, locked: bool = True) -> int:
         ''' Write any buffer headers and payloads to the given connection.
 
         Args:
@@ -292,7 +291,7 @@ class Message(Generic[Content]):
             header['reqid'] = request_id
         return header
 
-    async def send(self, conn: WebSocketClientConnectionWrapper) -> int:
+    async def send(self, conn: MessageConnection) -> int:
         ''' Send the message on the given connection.
 
         Args:
@@ -326,6 +325,13 @@ class Message(Generic[Content]):
             sent += await self.write_buffers(conn, locked=False)
 
             return sent
+
+    def prepare(self) -> None:
+        ''' Eagerly serialize all message fragments and freeze binary buffers. '''
+        self._buffers = [Buffer(buffer.id, buffer.to_bytes()) for buffer in self._buffers]
+        self._header_json = json.dumps(self.header)
+        self._metadata_json = json.dumps(self.metadata)
+        self._content_json = serialize_json(self.payload)
 
     @property
     def complete(self) -> bool:

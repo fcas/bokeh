@@ -1,4 +1,4 @@
-import {expect} from "assertions"
+import {expect} from "#framework/assertions"
 
 import {shuffle} from "@bokehjs/core/util/array"
 import {TileSource} from "@bokehjs/models/tiles/tile_source"
@@ -343,6 +343,19 @@ describe("tile sources", () => {
         7827151.69,
         7827151.69,
       ], 0.01)
+    })
+
+    it("should rescale", () => {
+      const source = new MercatorTileSource()
+      const rescaled_bounds = source.rescale(T.MERCATOR_BOUNDS, 400, 400, 600, 600)
+      expect(rescaled_bounds).to.be.similar([-13358338.8933333, -13358338.8933333, 13358338.8933333, 13358338.8933333])
+    })
+
+    it("should rescale and reverse rescale", () => {
+      const source = new MercatorTileSource()
+      const rescaled_bounds = source.rescale(T.MERCATOR_BOUNDS, 400, 400, 350, 300)
+      const reversed_rescaled_bounds = source.rescale(rescaled_bounds, 350, 300, 400, 400)
+      expect(reversed_rescaled_bounds).to.be.equal(T.MERCATOR_BOUNDS)
     })
 
     it("should get best zoom level based on extent and height/width", () => {

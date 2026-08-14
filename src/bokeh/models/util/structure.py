@@ -27,6 +27,8 @@ Based on a private class, _BokehStructureGraph.
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportArgumentType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ from itertools import permutations
 from typing import TYPE_CHECKING
 
 # Bokeh imports
-from bokeh.core.properties import UnsetValueError
+from bokeh.core.property.descriptors import UnsetValueError
 from bokeh.layouts import column
 from bokeh.models import (
     BoxZoomTool,
@@ -63,8 +65,6 @@ from bokeh.models import (
 )
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from ...core.types import ID
     from ...model import Model
 
@@ -118,7 +118,8 @@ class _BokehStructureGraph:
         self._prop_df = self._make_prop_dict()
         self._graph_plot = self._make_graph_plot()
         self._data_table = self._make_data_table()
-        self._graph_plot.title.text = f"Structure of model type {self._model.__class__.__name__} with id {self._model.id}"
+        if self._graph_plot.title is not None:
+            self._graph_plot.title.text = f"Structure of model type {self._model.__class__.__name__} with id {self._model.id}"
         self._structure_graph = self._combined()
 
     @property
@@ -187,16 +188,23 @@ class _BokehStructureGraph:
         for m in M.references():
             T[m.id] = {y.id for y in m.references()}
 
+        def model_name(id: ID) -> str:
+            model = M.select_one({"id": id})
+            assert model is not None
+            return model.__class__.__name__
+
         K.add_nodes_from(
-            [(x, {"model": M.select_one({"id": x}).__class__.__name__}) for x in T],
+            [(x, {"model": model_name(x)}) for x in T],
         )
         E = [(y, x) for x, y in permutations(T, 2) if T[x] <= T[y]]
         K.add_edges_from(E)
         dead_edges = []
         for id in K.nodes:
             H = M.select_one({"id": id})
+            assert H is not None
             for x in K.neighbors(id):
                 s = H.select_one({"id": x})
+                assert s is not None
                 keep_edge = False
                 for y in H.properties():
                     if test_condition(s, y, H):
@@ -209,7 +217,7 @@ class _BokehStructureGraph:
     def _obj_props_to_df2(self, obj: Model):
         """ Returns a pandas dataframe of the properties of a bokeh model
 
-        Each row contains  an attribute, its type (a bokeh property), and its docstring.
+        Each row contains an attribute, its type (a bokeh property), and its docstring.
 
         """
         obj_dict = obj.properties_with_values()
@@ -300,22 +308,22 @@ class _BokehStructureGraph:
         self._edge_source = edge_source
         return p2
 
-    def _make_prop_dict(self) -> pd.DataFrame:
+    def _make_prop_dict(self) -> dict:
         """ Returns a dataframe containing all the properties of all the submodels of the model being
         analyzed. Used as datasource to show attributes.
 
         """
-        import pandas as pd
-        df = pd.DataFrame()
+        dct = dict(id=[], model=[], values=[], types=[], props=[])
         for x in self._graph.nodes(data=True):
             M = self._model.select_one(dict(id=x[0]))
-            Z = pd.DataFrame(self._obj_props_to_df2(M))
-            Z["id"] = x[0]
-            Z["model"] = str(M)
-            Z["values"] = Z["values"].map(lambda x: str(x))
-            Z["types"] = Z["types"].map(lambda x: str(x))
-            df = pd.concat([df, Z])
-        return df
+            Z = self._obj_props_to_df2(M)
+            n_items = len(Z["values"])
+            dct["id"].extend([str(x[0])] * n_items)
+            dct["model"].extend([str(M)] * n_items)
+            dct["values"].extend(list(map(str, Z["values"])))
+            dct["types"].extend(list(map(str, Z["types"])))
+            dct["props"].extend(Z["props"])
+        return dct
 
     def _make_data_table(self) -> DataTable:
         """ Builds the datatable portion of the final plot.

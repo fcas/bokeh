@@ -2,25 +2,33 @@ import {isBoolean, isNumber, isString, isArray, isPlainObject} from "./util/type
 import {entries} from "./util/object"
 import {BBox} from "./util/bbox"
 import type {Size, Box, Extents, PlainObject} from "./types"
-import type {CSSStyles, CSSStyleSheetDecl} from "./css"
-import {compose_stylesheet, apply_styles} from "./css"
+import type {CSSStyles} from "./css"
+import {apply_styles} from "./css"
 import {logger} from "./logging"
 
-type Optional<T> = {[P in keyof T]?: T[P] | null | undefined}
+// {{{ TODO remove this
+export type {StyleSheet, StyleSheetLike} from "./stylesheets"
+export {InlineStyleSheet, ImportedStyleSheet, GlobalInlineStyleSheet, GlobalImportedStyleSheet} from "./stylesheets"
+// }}}
 
-type HTMLElementName = keyof HTMLElementTagNameMap
+export type Optional<T> = {[P in keyof T]?: T[P] | null | undefined}
 
-type CSSClass = string
+export type HTMLElementName = keyof HTMLElementTagNameMap
 
-type ElementOurAttrs =  {
-  class?: CSSClass | (CSSClass | null | undefined)[]
-  style?: CSSStyles
+export type CSSClass = string | null | undefined
+
+export type ElementOurAttrs = {
+  class?: CSSClass | CSSClass[]
+  style?: CSSStyles | string
   data?: PlainObject<string | null | undefined>
 }
 
-type ElementCommonAttrs = {
+export type ElementCommonAttrs = {
+  id: Element["id"]
   title: HTMLElement["title"]
   tabIndex: HTMLOrSVGElement["tabIndex"]
+  role: ARIARole
+  "aria-hidden": "true" | "false"
 }
 
 export type HTMLAttrs<_T extends HTMLElementName, ElementSpecificAttrs> = ElementOurAttrs & Optional<ElementCommonAttrs> & Optional<ElementSpecificAttrs>
@@ -28,7 +36,7 @@ export type HTMLAttrs<_T extends HTMLElementName, ElementSpecificAttrs> = Elemen
 export type HTMLItem = string | Node | NodeList | HTMLCollection | null | undefined
 export type HTMLChild = HTMLItem | HTMLItem[]
 
-const _element = <T extends keyof HTMLElementTagNameMap, ElementSpecificAttrs = {}>(tag: T) => {
+const _element = <T extends keyof HTMLElementTagNameMap, ElementSpecificAttrs>(tag: T) => {
   return (attrs: HTMLAttrs<T, ElementSpecificAttrs> | HTMLChild = {}, ...children: HTMLChild[]): HTMLElementTagNameMap[T] => {
     const element = document.createElement(tag)
 
@@ -58,7 +66,11 @@ const _element = <T extends keyof HTMLElementTagNameMap, ElementSpecificAttrs = 
     }
 
     if (attrs.style != null) {
-      apply_styles(element.style, attrs.style)
+      if (isString(attrs.style)) {
+        element.setAttribute("style", attrs.style)
+      } else {
+        apply_styles(element.style, attrs.style)
+      }
       delete attrs.style
     }
 
@@ -112,72 +124,72 @@ const _element = <T extends keyof HTMLElementTagNameMap, ElementSpecificAttrs = 
 }
 
 export function create_element<T extends keyof HTMLElementTagNameMap>(
-    tag: T, attrs: HTMLAttrs<T, {}> | null, ...children: HTMLChild[]): HTMLElementTagNameMap[T] {
+    tag: T, attrs: HTMLAttrs<T, object> | null, ...children: HTMLChild[]): HTMLElementTagNameMap[T] {
   return _element(tag)(attrs, ...children)
 }
 
-export const a = _element<"a", {
+export type AAttrs = {
   href: HTMLAnchorElement["href"]
   target: HTMLAnchorElement["target"]
-}>("a")
-export const abbr = _element("abbr")
-export const address = _element("address")
-export const area = _element("area")
-export const article = _element("article")
-export const aside = _element("aside")
-export const audio = _element("audio")
-export const b = _element("b")
-export const base = _element("base")
-export const bdi = _element("bdi")
-export const bdo = _element("bdo")
-export const blockquote = _element("blockquote")
-export const body = _element("body")
-export const br = _element("br")
-export const button = _element<"button", {
+}
+export type AbbrAttrs = {}
+export type AddressAttrs = {}
+export type AreaAttrs = {}
+export type ArticleAttrs = {}
+export type AsideAttrs = {}
+export type AudioAttrs = {}
+export type BAttrs = {}
+export type BaseAttrs = {}
+export type BdiAttrs = {}
+export type BdoAttrs = {}
+export type BlockQuoteAttrs = {}
+export type BodyAttrs = {}
+export type BrAttrs = {}
+export type ButtonAttrs = {
   type: "button"
   disabled: HTMLButtonElement["disabled"]
-}>("button")
-export const canvas = _element<"canvas", {
+}
+export type CanvasAttrs = {
   width: HTMLCanvasElement["width"]
   height: HTMLCanvasElement["height"]
-}>("canvas")
-export const caption = _element("caption")
-export const cite = _element("cite")
-export const code = _element("code")
-export const col = _element("col")
-export const colgroup = _element("colgroup")
-export const data = _element("data")
-export const datalist = _element("datalist")
-export const dd = _element("dd")
-export const del = _element("del")
-export const details = _element("details")
-export const dfn = _element("dfn")
-export const dialog = _element("dialog")
-export const div = _element("div")
-export const dl = _element("dl")
-export const dt = _element("dt")
-export const em = _element("em")
-export const embed = _element("embed")
-export const fieldset = _element("fieldset")
-export const figcaption = _element("figcaption")
-export const figure = _element("figure")
-export const footer = _element("footer")
-export const form = _element("form")
-export const h1 = _element("h1")
-export const h2 = _element("h2")
-export const h3 = _element("h3")
-export const h4 = _element("h4")
-export const h5 = _element("h5")
-export const h6 = _element("h6")
-export const head = _element("head")
-export const header = _element("header")
-export const hgroup = _element("hgroup")
-export const hr = _element("hr")
-export const html = _element("html")
-export const i = _element("i")
-export const iframe = _element("iframe")
-export const img = _element("img")
-export const input = _element<"input", {
+}
+export type CaptionAttrs = {}
+export type CiteAttrs = {}
+export type CodeAttrs = {}
+export type ColAttrs = {}
+export type ColGroupAttrs = {}
+export type DataAttrs = {}
+export type DataListAttrs = {}
+export type DdAttrs = {}
+export type DelAttrs = {}
+export type DetailsAttrs = {}
+export type DfnAttrs = {}
+export type DialogAttrs = {}
+export type DivAttrs = {}
+export type DlAttrs = {}
+export type DtAttrs = {}
+export type EmAttrs = {}
+export type EmbedAttrs = {}
+export type FieldSetAttrs = {}
+export type FigCaptionAttrs = {}
+export type FigureAttrs = {}
+export type FooterAttrs = {}
+export type FormAttrs = {}
+export type H1Attrs = {}
+export type H2Attrs = {}
+export type H3Attrs = {}
+export type H4Attrs = {}
+export type H5Attrs = {}
+export type H6Attrs = {}
+export type HeadAttrs = {}
+export type HeaderAttrs = {}
+export type HGroupAttrs = {}
+export type HrAttrs = {}
+export type HtmlAttrs = {}
+export type IAttrs = {}
+export type IFrameAttrs = {}
+export type ImgAttrs = {}
+export type InputAttrs = {
   type: "text" | "checkbox" | "radio" | "file" | "color"
   name:  HTMLInputElement["name"]
   multiple: HTMLInputElement["multiple"]
@@ -187,80 +199,194 @@ export const input = _element<"input", {
   accept: HTMLInputElement["accept"]
   value: HTMLInputElement["value"]
   readonly: HTMLInputElement["readOnly"]
-}>("input")
-export const ins = _element("ins")
-export const kbd = _element("kbd")
-export const label = _element<"label", {
+  webkitdirectory: HTMLInputElement["webkitdirectory"]
+}
+export type InsAttrs = {}
+export type KbdAttrs = {}
+export type LabelAttrs = {
   for: HTMLLabelElement["htmlFor"]
-}>("label")
-export const legend = _element("legend")
-export const li = _element("li")
-export const link = _element<"link", {
+}
+export type LegendAttrs = {}
+export type LiAttrs = {}
+export type LinkAttrs = {
   rel: HTMLLinkElement["rel"]
   href: HTMLLinkElement["href"]
   disabled: HTMLLinkElement["disabled"]
-}>("link")
-export const main = _element("main")
-export const map = _element("map")
-export const mark = _element("mark")
-export const menu = _element("menu")
-export const meta = _element("meta")
-export const meter = _element("meter")
-export const nav = _element("nav")
-export const noscript = _element("noscript")
-export const object = _element("object")
-export const ol = _element("ol")
-export const optgroup = _element<"optgroup", {
+}
+export type MainAttrs = {}
+export type MapAttrs = {}
+export type MarkAttrs = {}
+export type MenuAttrs = {}
+export type MetaAttrs = {}
+export type MeterAttrs = {}
+export type NavAttrs = {}
+export type NoScriptAttrs = {}
+export type ObjectAttrs = {}
+export type OlAttrs = {}
+export type OptGroupAttrs = {
   disabled: HTMLOptGroupElement["disabled"]
-  label:  HTMLOptGroupElement["label"]
-}>("optgroup")
-export const option = _element<"option", {
+  label: HTMLOptGroupElement["label"]
+}
+export type OptionAttrs = {
+  disabled: HTMLOptionElement["disabled"]
   value: HTMLOptionElement["value"]
-}>("option")
-export const output = _element("output")
-export const p = _element("p")
-export const picture = _element("picture")
-export const pre = _element("pre")
-export const progress = _element("progress")
-export const q = _element("q")
-export const rp = _element("rp")
-export const rt = _element("rt")
-export const ruby = _element("ruby")
-export const s = _element("s")
-export const samp = _element("samp")
-export const script = _element("script")
-export const search = _element("search")
-export const section = _element("section")
-export const select = _element<"select", {
+}
+export type OutputAttrs = {}
+export type PAttrs = {}
+export type PictureAttrs = {}
+export type PreAttrs = {}
+export type ProgressAttrs = {}
+export type QAttrs = {}
+export type RpAttrs = {}
+export type RtAttrs = {}
+export type RubyAttrs = {}
+export type SAttrs = {}
+export type SAmpAttrs = {}
+export type ScriptAttrs = {}
+export type SearchAttrs = {}
+export type SectionAttrs = {}
+export type SelectAttrs = {
   name:  HTMLSelectElement["name"]
   disabled: HTMLSelectElement["disabled"]
   multiple: HTMLSelectElement["multiple"]
-}>("select")
-export const slot = _element("slot")
-export const small = _element("small")
-export const source = _element("source")
-export const span = _element("span")
-export const strong = _element("strong")
-export const style = _element("style")
-export const sub = _element("sub")
-export const summary = _element("summary")
-export const sup = _element("sup")
-export const table = _element("table")
-export const tbody = _element("tbody")
-export const td = _element("td")
-export const template = _element("template")
-export const textarea = _element("textarea")
-export const tfoot = _element("tfoot")
-export const th = _element("th")
-export const thead = _element("thead")
-export const time = _element("time")
-export const title = _element("title")
-export const tr = _element("tr")
-export const track = _element("track")
-export const u = _element("u")
-export const ul = _element("ul")
-export const video = _element("video")
-export const wbr = _element("wbr")
+}
+export type SlotAttrs = {}
+export type SmallAttrs = {}
+export type SourceAttrs = {}
+export type SpanAttrs = {}
+export type StrongAttrs = {}
+export type StyleAttrs = {}
+export type SubAttrs = {}
+export type SummaryAttrs = {}
+export type SupAttrs = {}
+export type TableAttrs = {}
+export type TBodyAttrs = {}
+export type TdAttrs = {}
+export type TemplateAttrs = {}
+export type TextAreaAttrs = {}
+export type TFootAttrs = {}
+export type ThAttrs = {}
+export type THeadAttrs = {}
+export type TimeAttrs = {}
+export type TitleAttrs = {}
+export type TrAttrs = {}
+export type TrackAttrs = {}
+export type UAttrs = {}
+export type UlAttrs = {}
+export type VideoAttrs = {}
+export type WbrAttrs = {}
+
+export const a = _element<"a", AAttrs>("a")
+export const abbr = _element<"abbr", AbbrAttrs>("abbr")
+export const address = _element<"address", AddressAttrs>("address")
+export const area = _element<"area", AreaAttrs>("area")
+export const article = _element<"article", ArticleAttrs>("article")
+export const aside = _element<"aside", AsideAttrs>("aside")
+export const audio = _element<"audio", AudioAttrs>("audio")
+export const b = _element<"b", BAttrs>("b")
+export const base = _element<"base", BaseAttrs>("base")
+export const bdi = _element<"bdi", BdiAttrs>("bdi")
+export const bdo = _element<"bdo", BdoAttrs>("bdo")
+export const blockquote = _element<"blockquote", BlockQuoteAttrs>("blockquote")
+export const body = _element<"body", BodyAttrs>("body")
+export const br = _element<"br", BrAttrs>("br")
+export const button = _element<"button", ButtonAttrs>("button")
+export const canvas = _element<"canvas", CanvasAttrs>("canvas")
+export const caption = _element<"caption", CaptionAttrs>("caption")
+export const cite = _element<"cite", CiteAttrs>("cite")
+export const code = _element<"code", CodeAttrs>("code")
+export const col = _element<"col", ColAttrs>("col")
+export const colgroup = _element<"colgroup", ColGroupAttrs>("colgroup")
+export const data = _element<"data", DataAttrs>("data")
+export const datalist = _element<"datalist", DataListAttrs>("datalist")
+export const dd = _element<"dd", DdAttrs>("dd")
+export const del = _element<"del", DelAttrs>("del")
+export const details = _element<"details", DetailsAttrs>("details")
+export const dfn = _element<"dfn", DfnAttrs>("dfn")
+export const dialog = _element<"dialog", DialogAttrs>("dialog")
+export const div = _element<"div", DivAttrs>("div")
+export const dl = _element<"dl", DlAttrs>("dl")
+export const dt = _element<"dt", DtAttrs>("dt")
+export const em = _element<"em", EmAttrs>("em")
+export const embed = _element<"embed", EmbedAttrs>("embed")
+export const fieldset = _element<"fieldset", FieldSetAttrs>("fieldset")
+export const figcaption = _element<"figcaption", FigCaptionAttrs>("figcaption")
+export const figure = _element<"figure", FigureAttrs>("figure")
+export const footer = _element<"footer", FooterAttrs>("footer")
+export const form = _element<"form", FormAttrs>("form")
+export const h1 = _element<"h1", H1Attrs>("h1")
+export const h2 = _element<"h2", H2Attrs>("h2")
+export const h3 = _element<"h3", H3Attrs>("h3")
+export const h4 = _element<"h4", H4Attrs>("h4")
+export const h5 = _element<"h5", H5Attrs>("h5")
+export const h6 = _element<"h6", H6Attrs>("h6")
+export const head = _element<"head", HeadAttrs>("head")
+export const header = _element<"header", HeaderAttrs>("header")
+export const hgroup = _element<"hgroup", HGroupAttrs>("hgroup")
+export const hr = _element<"hr", HrAttrs>("hr")
+export const html = _element<"html", HtmlAttrs>("html")
+export const i = _element<"i", IAttrs>("i")
+export const iframe = _element<"iframe", IFrameAttrs>("iframe")
+export const img = _element<"img", ImgAttrs>("img")
+export const input = _element<"input", InputAttrs>("input")
+export const ins = _element<"ins", InsAttrs>("ins")
+export const kbd = _element<"kbd", KbdAttrs>("kbd")
+export const label = _element<"label", LabelAttrs>("label")
+export const legend = _element<"legend", LegendAttrs>("legend")
+export const li = _element<"li", LiAttrs>("li")
+export const link = _element<"link", LinkAttrs>("link")
+export const main = _element<"main", MainAttrs>("main")
+export const map = _element<"map", MapAttrs>("map")
+export const mark = _element<"mark", MarkAttrs>("mark")
+export const menu = _element<"menu", MenuAttrs>("menu")
+export const meta = _element<"meta", MetaAttrs>("meta")
+export const meter = _element<"meter", MeterAttrs>("meter")
+export const nav = _element<"nav", NavAttrs>("nav")
+export const noscript = _element<"noscript", NoScriptAttrs>("noscript")
+export const object = _element<"object", ObjectAttrs>("object")
+export const ol = _element<"ol", OlAttrs>("ol")
+export const optgroup = _element<"optgroup", OptGroupAttrs>("optgroup")
+export const option = _element<"option", OptionAttrs>("option")
+export const output = _element<"output", OutputAttrs>("output")
+export const p = _element<"p", PAttrs>("p")
+export const picture = _element<"picture", PictureAttrs>("picture")
+export const pre = _element<"pre", PreAttrs>("pre")
+export const progress = _element<"progress", ProgressAttrs>("progress")
+export const q = _element<"q", QAttrs>("q")
+export const rp = _element<"rp", RpAttrs>("rp")
+export const rt = _element<"rt", RtAttrs>("rt")
+export const ruby = _element<"ruby", RubyAttrs>("ruby")
+export const s = _element<"s", SAttrs>("s")
+export const samp = _element<"samp", SAmpAttrs>("samp")
+export const script = _element<"script", ScriptAttrs>("script")
+export const search = _element<"search", SearchAttrs>("search")
+export const section = _element<"section", SectionAttrs>("section")
+export const select = _element<"select", SelectAttrs>("select")
+export const slot = _element<"slot", SlotAttrs>("slot")
+export const small = _element<"small", SmallAttrs>("small")
+export const source = _element<"source", SourceAttrs>("source")
+export const span = _element<"span", SpanAttrs>("span")
+export const strong = _element<"strong", StrongAttrs>("strong")
+export const style = _element<"style", StyleAttrs>("style")
+export const sub = _element<"sub", SubAttrs>("sub")
+export const summary = _element<"summary", SummaryAttrs>("summary")
+export const sup = _element<"sup", SupAttrs>("sup")
+export const table = _element<"table", TableAttrs>("table")
+export const tbody = _element<"tbody", TBodyAttrs>("tbody")
+export const td = _element<"td", TdAttrs>("td")
+export const template = _element<"template", TemplateAttrs>("template")
+export const textarea = _element<"textarea", TextAreaAttrs>("textarea")
+export const tfoot = _element<"tfoot", TFootAttrs>("tfoot")
+export const th = _element<"th", ThAttrs>("th")
+export const thead = _element<"thead", THeadAttrs>("thead")
+export const time = _element<"time", TimeAttrs>("time")
+export const title = _element<"title", TitleAttrs>("title")
+export const tr = _element<"tr", TrAttrs>("tr")
+export const track = _element<"track", TrackAttrs>("track")
+export const u = _element<"u", UAttrs>("u")
+export const ul = _element<"ul", UlAttrs>("ul")
+export const video = _element<"video", VideoAttrs>("video")
+export const wbr = _element<"wbr", WbrAttrs>("wbr")
 
 export type SVGAttrs = {[key: string]: string | false | null | undefined}
 
@@ -357,8 +483,8 @@ export function undisplay(element: HTMLElement): void {
   element.style.display = "none"
 }
 
-export function show(element: HTMLElement): void {
-  element.style.visibility = ""
+export function show(element: HTMLElement, show: boolean = true): void {
+  element.style.visibility = show ? "" : "hidden"
 }
 
 export function hide(element: HTMLElement): void {
@@ -375,11 +501,16 @@ export function offset_bbox(element: Element): BBox {
   })
 }
 
-export function parent(el: HTMLElement, selector: string): HTMLElement | null {
-  let node: HTMLElement | null = el
+export function parent(el: Element, query: string | ((node: Element) => boolean)): Element | null {
+  let node: Element | null = el
+
+  if (isString(query)) {
+    const selector = query
+    query = (node) => node.matches(selector)
+  }
 
   while ((node = node.parentElement) != null) {
-    if (node.matches(selector)) {
+    if (query(node)) {
       return node
     }
   }
@@ -528,14 +659,8 @@ export class ClassList {
     return this
   }
 
-  toggle(cls: string, activate?: boolean): this {
-    const add = activate != null ? activate : !this.has(cls)
-    if (add) {
-      this.add(cls)
-    } else {
-      this.remove(cls)
-    }
-    return this
+  toggle(cls: string, activate?: boolean): boolean {
+    return this.class_list.toggle(cls, activate)
   }
 }
 
@@ -572,102 +697,6 @@ export enum MouseButton {
   Middle = Auxiliary,
 }
 
-export abstract class StyleSheet {
-  protected readonly el: HTMLStyleElement | HTMLLinkElement
-
-  install(el: HTMLElement | ShadowRoot): void {
-    el.append(this.el)
-  }
-
-  uninstall(): void {
-    this.el.remove()
-  }
-}
-
-export class InlineStyleSheet extends StyleSheet {
-  protected override readonly el = style()
-
-  constructor(css?: string | CSSStyleSheetDecl) {
-    super()
-    if (isString(css)) {
-      this._update(css)
-    } else if (css != null) {
-      this._update(compose_stylesheet(css))
-    }
-  }
-
-  get css(): string {
-    return this.el.textContent ?? ""
-  }
-
-  protected _update(css: string): void {
-    this.el.textContent = css
-  }
-
-  clear(): void {
-    this.replace("")
-  }
-
-  private _to_css(css: string, styles: CSSStyles | undefined): string {
-    if (styles == null) {
-      return css
-    } else {
-      return compose_stylesheet({[css]: styles})
-    }
-  }
-
-  replace(css: string, styles?: CSSStyles): void {
-    this._update(this._to_css(css, styles))
-  }
-
-  prepend(css: string, styles?: CSSStyles): void {
-    this._update(`${this._to_css(css, styles)}\n${this.css}`)
-  }
-
-  append(css: string, styles?: CSSStyles): void {
-    this._update(`${this.css}\n${this._to_css(css, styles)}`)
-  }
-
-  remove(): void {
-    this.el.remove()
-  }
-}
-
-export class GlobalInlineStyleSheet extends InlineStyleSheet {
-  override install(): void {
-    if (!this.el.isConnected) {
-      document.head.appendChild(this.el)
-    }
-  }
-}
-
-export class ImportedStyleSheet extends StyleSheet {
-  protected override readonly el: HTMLLinkElement
-
-  constructor(url: string) {
-    super()
-    this.el = link({rel: "stylesheet", href: url})
-  }
-
-  replace(url: string): void {
-    this.el.href = url
-  }
-
-  remove(): void {
-    this.el.remove()
-  }
-}
-
-export class GlobalImportedStyleSheet extends ImportedStyleSheet {
-  override install(): void {
-    if (!this.el.isConnected) {
-      document.head.appendChild(this.el)
-    }
-  }
-}
-
-export type StyleSheetLike = StyleSheet | string
-
 export async function dom_ready(): Promise<void> {
   if (document.readyState == "loading") {
     return new Promise((resolve, _reject) => {
@@ -680,4 +709,106 @@ export function px(value: number | string): string {
   return isNumber(value) ? `${value}px` : value
 }
 
-export const supports_adopted_stylesheets = "adoptedStyleSheets" in ShadowRoot.prototype
+export function has_focus(el: Element): boolean {
+  const root = el.getRootNode()
+  if (root instanceof ShadowRoot || root instanceof Document) {
+    return root.activeElement === el
+  } else {
+    return false
+  }
+}
+
+export type ARIARole =
+  // Structural roles
+  | "toolbar"
+  | "tooltip"
+  | "feed"
+  | "math"
+  | "presentation"
+  | "none"
+  | "note"
+  | "application"
+  | "article"      // use <article>
+  | "cell"         // use <td>
+  | "columnheader" // use <th scope="col">
+  | "definition"   // use <dfn>
+  | "directory"
+  | "document"
+  | "figure"       // use <figure> instead
+  | "group"
+  | "heading"      // use h1 through h6
+  | "img"          // use <img> or <picture> instead
+  | "list"         // either <ul> or <ol> instead
+  | "listitem"     // <li> instead
+  | "meter"        // <meter> instead
+  | "row"          // the <tr> with <table>
+  | "rowgroup"     // <thead>, <tfoot> and <tbody>
+  | "rowheader"    // <th scope="row">
+  | "separator"    // <hr> if it doesn't have focus
+  | "table"        // <table>
+  | "term"         // <dfn>
+  | "associationlist"
+  | "associationlistitemkey"
+  | "associationlistitemvalue"
+  | "blockquote"
+  | "caption"
+  | "code"
+  | "deletion"
+  | "emphasis"
+  | "insertion"
+  | "paragraph"
+  | "strong"
+  | "subscript"
+  | "superscript"
+  | "time"
+
+  // Widget roles
+  | "button"
+  | "checkbox"
+  | "gridcell"
+  | "link"
+  | "menuitem"
+  | "menuitemcheckbox"
+  | "menuitemradio"
+  | "option"
+  | "progressbar"
+  | "radio"
+  | "scrollbar"
+  | "searchbox"
+  | "separator"  // when focusable
+  | "slider"
+  | "spinbutton"
+  | "switch"
+  | "tab"
+  | "tabpanel"
+  | "textbox"
+  | "treeitem"
+
+  // Composite widget roles
+  | "combobox"
+  | "menu"
+  | "menubar"
+  | "tablist"
+  | "tree"
+  | "treegrid"
+
+  // Landmark roles
+  | "banner"        // document <header>
+  | "complementary" // <aside>
+  | "contentinfo"   // document <footer>
+  | "form"          // <form>
+  | "main"          // <main>
+  | "navigation"    // <nav>
+  | "region"        // <section>
+  | "search"        // <search>
+
+  // Live region roles
+  | "alert"
+  | "log"
+  | "marquee"
+  | "status"
+  | "timer"
+
+  // Window roles
+  | "alertdialog"
+  | "dialog"

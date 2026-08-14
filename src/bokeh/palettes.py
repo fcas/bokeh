@@ -420,7 +420,7 @@ log = logging.getLogger(__name__)
 # Standard library imports
 import math
 from copy import deepcopy
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING
 
 # External imports
 import numpy as np
@@ -441,9 +441,9 @@ if TYPE_CHECKING:
 # General API
 #-----------------------------------------------------------------------------
 
-Palette: TypeAlias = tuple[str, ...]
-PaletteCollection: TypeAlias = dict[int, Palette]
-PaletteMap: TypeAlias = dict[str, PaletteCollection]
+type Palette = tuple[str, ...]
+type PaletteCollection = dict[int, Palette]
+type PaletteMap = dict[str, PaletteCollection]
 
 YlGn3 = ("#31a354", "#addd8e", "#f7fcb9")
 YlGn4 = ("#238443", "#78c679", "#c2e699", "#ffffcc")
@@ -1447,18 +1447,18 @@ brewer = {
     "Set3"     : Set3,
 }
 
-bokeh = {
+bokeh: PaletteMap = {
     "Bokeh" : Bokeh,
 }
 
-d3 = {
+d3: PaletteMap = {
     "Category10"  : Category10,
     "Category20"  : Category20,
     "Category20b" : Category20b,
     "Category20c" : Category20c,
 }
 
-mpl = {
+mpl: PaletteMap = {
     "Magma"   : Magma,
     "Inferno" : Inferno,
     "Plasma"  : Plasma,
@@ -1466,7 +1466,7 @@ mpl = {
     "Cividis" : Cividis,
 }
 
-tol = {
+tol: PaletteMap = {
     "Bright": Bright,
     "HighContrast": HighContrast,
     "Vibrant": Vibrant,
@@ -1481,11 +1481,11 @@ tol = {
     "TolRainbow": TolRainbow,
 }
 
-colorblind = {
+colorblind: PaletteMap = {
     "Colorblind" : Colorblind,
 }
 
-all_palettes = deepcopy(brewer)
+all_palettes: PaletteMap = deepcopy(brewer)
 all_palettes.update(d3)
 all_palettes.update(tol)
 all_palettes["Colorblind"] = Colorblind
@@ -1526,7 +1526,7 @@ def linear_palette(palette: Palette, n: int) -> Palette:
     """
     if n > len(palette):
         raise ValueError(f"Requested {n} colors, function can only return colors up to the base palette's length ({len(palette)})")
-    return tuple( palette[int(math.floor(i))] for i in np.linspace(0, len(palette)-1, num=n) )
+    return tuple( palette[math.floor(i)] for i in np.linspace(0, len(palette)-1, num=n) )
 
 def diverging_palette(palette1: Palette, palette2: Palette, n: int, midpoint: float = 0.5) -> Palette:
     """ Generate a new palette by combining exactly two input palettes.
@@ -1564,8 +1564,8 @@ def diverging_palette(palette1: Palette, palette2: Palette, n: int, midpoint: fl
     palette2 = palette2[::-1]
 
     # determine number of colors from each palette
-    n1 = int(round(midpoint * n))
-    n2 = int(round((1 - midpoint) * n))
+    n1 = round(midpoint * n)
+    n2 = round((1 - midpoint) * n)
 
     # return piecewise linear interpolation of colors
     return linear_palette(palette1, n1) + linear_palette(palette2, n2)
@@ -1602,7 +1602,7 @@ def varying_alpha_palette(color: str, n: int | None = None, start_alpha: int = 0
         seq[str] : a sequence of hex RGBA color strings
 
     Raises:
-        ValueError if ``color`` is not recognisable as a string name or hex
+        ValueError if ``color`` is not recognizable as a string name or hex
             RGB(A) string, or if ``start_alpha`` or ``end_alpha`` are outside
             the range 0 to 255 inclusive.
 

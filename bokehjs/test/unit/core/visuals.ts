@@ -1,12 +1,15 @@
-import {expect} from "assertions"
+import * as sinon from "sinon"
+
+import {expect} from "#framework/assertions"
 import {create_glyph_renderer_view} from "../models/glyphs/_util"
 
 import type {Context2d} from "@bokehjs/core/util/canvas"
 import {CanvasLayer} from "@bokehjs/core/util/canvas"
 import {CDSView} from "@bokehjs/models/sources/cds_view"
 import {IndexFilter} from "@bokehjs/models/filters/index_filter"
-import type {CircleView} from "@bokehjs/models/glyphs/circle"
-import {Circle} from "@bokehjs/models/glyphs/circle"
+import type {ScatterView} from "@bokehjs/models/glyphs/scatter"
+import {Scatter} from "@bokehjs/models/glyphs/scatter"
+import {defer} from "@bokehjs/core/util/defer"
 
 import {Model} from "@bokehjs/model"
 import {DOMComponentView} from "@bokehjs/core/dom_view"
@@ -17,7 +20,7 @@ import type * as p from "@bokehjs/core/properties"
 
 class SomeModelView extends DOMComponentView implements visuals.Paintable {
   declare model: SomeModel
-  visuals: SomeModel.Visuals
+  declare visuals: SomeModel.Visuals
 
   override initialize(): void {
     super.initialize()
@@ -30,6 +33,9 @@ class SomeModelView extends DOMComponentView implements visuals.Paintable {
     return {
       create_layer(): CanvasLayer {
         return new CanvasLayer("canvas", true)
+      },
+      create_layer_svg(): CanvasLayer {
+        return new CanvasLayer("svg", true)
       },
     }
   }
@@ -59,6 +65,81 @@ export class SomeModel extends Model {
 }
 
 describe("core/visuals", () => {
+
+  describe("CSS caching", () => {
+
+    it("should cache CSS property lookups only within the current task", async () => {
+      const view = await build_view(new SomeModel({text_font: "helvetica"}))
+      const {text} = view.visuals
+      const get_computed_style = sinon.spy(window, "getComputedStyle")
+
+      try {
+        expect(text.get_text_font()).to.be.equal("helvetica")
+        expect(text.get_text_font()).to.be.equal("helvetica")
+        expect(get_computed_style.callCount).to.be.equal(1)
+
+        await defer()
+        expect(text.get_text_font()).to.be.equal("helvetica")
+        expect(get_computed_style.callCount).to.be.equal(2)
+
+        await defer()
+        expect(text.get_text_font()).to.be.equal("helvetica")
+        expect(get_computed_style.callCount).to.be.equal(3)
+      } finally {
+        get_computed_style.restore()
+      }
+    })
+
+    it("should schedule a single cache reset per synchronous render pass", async () => {
+      const view = await build_view(new SomeModel({text_font: "helvetica", text_font_size: "13px"}))
+      const {text} = view.visuals
+      const queue_microtask = sinon.spy(globalThis, "queueMicrotask")
+
+      try {
+        expect(text.get_text_font()).to.be.equal("helvetica")
+        expect(text.get_text_font_size()).to.be.equal("13px")
+        expect(queue_microtask.callCount).to.be.equal(1)
+
+        await Promise.resolve()
+        queue_microtask.resetHistory()
+
+        expect(text.get_text_font()).to.be.equal("helvetica")
+        expect(queue_microtask.callCount).to.be.equal(1)
+      } finally {
+        queue_microtask.restore()
+      }
+    })
+
+    it("should clear cached CSS property lookups when visuals update", async () => {
+      const view = await build_view(new SomeModel())
+      const {text} = view.visuals
+      view.render_to(document.body)
+
+      view.el.style.setProperty("--bk-text-font", "serif")
+      expect(text.get_text_font()).to.be.equal("serif")
+
+      view.el.style.setProperty("--bk-text-font", "monospace")
+      expect(text.get_text_font()).to.be.equal("serif")
+
+      text.update()
+      expect(text.get_text_font()).to.be.equal("monospace")
+    })
+
+    it("should observe CSS changes made between tasks without a visual update", async () => {
+      const view = await build_view(new SomeModel())
+      const {text} = view.visuals
+      view.render_to(document.body)
+
+      view.el.style.setProperty("--bk-text-font", "serif")
+      expect(text.get_text_font()).to.be.equal("serif")
+
+      view.el.style.setProperty("--bk-text-font", "monospace")
+      expect(text.get_text_font()).to.be.equal("serif")
+
+      await defer()
+      expect(text.get_text_font()).to.be.equal("monospace")
+    })
+  })
 
   describe("Fill", () => {
 
@@ -231,9 +312,9 @@ describe("core/visuals", () => {
     describe("interacting with GlyphViews", () => {
 
       it("should get initialized with appropriate indices", async () => {
-        const circle = new Circle({fill_color: {field: "fill_color"}, fill_alpha: {field: "fill_alpha"}})
+        const scatter = new Scatter({fill_color: {field: "fill_color"}, fill_alpha: {field: "fill_alpha"}})
         const data = {fill_color: ["red", "green", "blue"], fill_alpha: [0, 0.6, 0.8]}
-        const renderer_view = await create_glyph_renderer_view(circle, data)
+        const renderer_view = await create_glyph_renderer_view(scatter, data)
 
         const filter = new IndexFilter({indices: [1, 2]})
         renderer_view.model.view = new CDSView({filter})
@@ -243,7 +324,7 @@ describe("core/visuals", () => {
         const canvas = document.createElement("canvas")
         const ctx = canvas.getContext("2d")! as Context2d
 
-        const glyph_view = renderer_view.glyph as CircleView
+        const glyph_view = renderer_view.glyph as ScatterView
         glyph_view.visuals.fill.set_vectorize(ctx, 1)
 
         expect(ctx.fillStyle).to.be.equal("rgba(0, 0, 255, 0.8)")

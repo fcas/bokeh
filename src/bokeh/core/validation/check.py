@@ -22,9 +22,10 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 import contextlib
+from dataclasses import dataclass, field
 from typing import (
+    Generator,
     Iterable,
-    Iterator,
     Literal,
     Protocol,
 )
@@ -32,7 +33,6 @@ from typing import (
 # Bokeh imports
 from ...model import Model
 from ...settings import settings
-from ...util.dataclasses import dataclass, field
 from .issue import Warning
 
 #-----------------------------------------------------------------------------
@@ -43,6 +43,7 @@ __silencers__: set[Warning] = set()
 
 __all__ = (
     'check_integrity',
+    'is_silenced',
     'silence',
     'silenced',
 )
@@ -63,7 +64,7 @@ class ValidationIssues:
     error: list[ValidationIssue] = field(default_factory=list)
     warning: list[ValidationIssue] = field(default_factory=list)
 
-ValidatorType = Literal["error", "warning"]
+type ValidatorType = Literal["error", "warning"]
 
 class Validator(Protocol):
     def __call__(self) -> list[ValidationIssue]: ...
@@ -119,7 +120,7 @@ def is_silenced(warning: Warning) -> bool:
     return warning in __silencers__
 
 @contextlib.contextmanager
-def silenced(warning: Warning) -> Iterator[None]:
+def silenced(warning: Warning) -> Generator[None]:
     silence(warning, True)
     try:
         yield

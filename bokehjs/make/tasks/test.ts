@@ -1,20 +1,22 @@
-import type {ChildProcess} from "child_process"
-import {spawn} from "child_process"
-import {join, delimiter, basename, extname, dirname} from "path"
+import type {ChildProcess} from "node:child_process"
+import {spawn} from "node:child_process"
+import {join, delimiter, basename, extname, dirname} from "node:path"
+import fs from "node:fs"
+import os from "node:os"
+
 import chalk from "chalk"
 import which from "which"
-import fs from "fs"
-import os from "os"
+import {glob} from "glob"
 
-import {argv} from "../main"
-import {task, task2, success, passthrough, BuildError} from "../task"
-import * as paths from "../paths"
-import {platform, find_port, retry, terminate, keep_alive} from "./_util"
-import {start_server as start_js_server} from "./server"
+import {argv} from "../args.js"
+import {task, task2, success, passthrough, BuildError} from "../task.js"
+import * as paths from "../paths.js"
+import {platform, find_port, retry, terminate, keep_alive} from "./_util.js"
+import {compile_typescript} from "./_util.js"
+import {start_server as start_js_server} from "./server.js"
 
-import {Linker} from "@compiler/linker"
-import * as preludes from "@compiler/prelude"
-import {compile_typescript} from "@compiler/compiler"
+import {Linker} from "#compiler/linker.js"
+import * as preludes from "#compiler/prelude.js"
 
 function node(files: string[]): Promise<void> {
   const env = {
@@ -37,6 +39,10 @@ function node(files: string[]): Promise<void> {
     })
   })
 }
+
+task("test:framework:compile", async () => {
+  compile_typescript("./test/framework/tsconfig.json")
+})
 
 task("test:codebase:compile", async () => {
   compile_typescript("./test/codebase/tsconfig.json")
@@ -75,10 +81,18 @@ function sys_path(): string {
 // - bokehjs/test/devtools/devtools.ts
 // - .github/workflows/bokehjs-ci.yml
 // - .github/workflows/bokeh-ci.yml
-const supported_chromium_revision = "r2670" // 118.0.5993.88
+const supported_chromium_revision = "r3265" // 141.0.7390.54
 
 function chrome(): string {
-  const names = [`chromium_${supported_chromium_revision}`, "chromium", "chromium-browser", "chrome", "google-chrome", "Google Chrome"]
+  const bokeh_chrome = process.env.BOKEH_CHROME
+  if (bokeh_chrome !== undefined) {
+    if (fs.existsSync(bokeh_chrome)) {
+      return bokeh_chrome
+    } else {
+      throw new BuildError("headless", `can't find BOKEH_CHROME=${bokeh_chrome}`)
+    }
+  }
+  const names = [`chromium_${supported_chromium_revision}`, "chromium", "chromium-browser", "chrome", "google-chrome", "Google Chrome for Testing", "Google Chrome"]
   const path = sys_path()
 
   for (const name of names) {
@@ -182,7 +196,7 @@ function opt(name: string, value: unknown): string[] {
   }
 }
 
-function devtools(devtools_port: number, server_port: number, name: string, baselines_root?: string): Promise<void> {
+function devtools(devtools_port: number, server_port: number, name: string, baselines_root?: string, dev: boolean = true): Promise<void> {
   const args = [
     ...opt("keyword", argv.keyword),
     ...opt("grep", argv.grep),
@@ -192,7 +206,7 @@ function devtools(devtools_port: number, server_port: number, name: string, base
     ...opt("seed", argv.seed),
     ...opt("pedantic", argv.pedantic),
     `--screenshot=${argv.screenshot}`,
-    `http://localhost:${server_port}/${name}`,
+    `http://localhost:${server_port}/${name}${!dev ? "?dev=false" : ""}`,
   ]
   return _devtools(devtools_port, args)
 }
@@ -230,6 +244,12 @@ function _devtools(devtools_port: number, user_args: string[]): Promise<void> {
   })
 }
 
+task("test:info", async () => {
+  const proc = await headless(9222)
+  await devtools_info(9222)
+  proc.kill()
+})
+
 task("test:run:headless", async () => {
   const proc = await headless(9222)
   await devtools_info(9222)
@@ -266,37 +286,28 @@ const start = task2("test:start", [start_headless, start_server], async (devtool
   return success([devtools_port, server_port] as [number, number])
 })
 
-function compile(name: string, options?: {auto_index?: boolean}) {
-  // `files` is in TS canonical form, i.e. `/` is the separator on all platforms
-  const base_dir = `test/${name}`
+async function tsc(name: string) {
+  compile_typescript(join(paths.src_dir.test, name, "tsconfig.json"))
+}
 
-  compile_typescript(`./${base_dir}/tsconfig.json`, !(options?.auto_index ?? false) ? {} : {
-    inputs(files) {
-      const imports = ['export * from "../framework"']
+async function auto_index(name: string): Promise<void> {
+  const build_dir = join(paths.build_dir.test, name)
+  const files = await glob(join(build_dir, "/**/*.js").replace(/\\/g, "/"))
 
-      for (const file of files) {
-        if (file.startsWith(base_dir) && (file.endsWith(".ts") || file.endsWith(".tsx"))) {
-          const ext = extname(file)
-          const name = basename(file, ext)
-          if (!name.startsWith("_") && !name.endsWith(".d") && name != "index") {
-            const dir = dirname(file).replace(base_dir, "").replace(/^\//, "")
-            const module = dir == "" ? `./${name}` : [".", ...dir.split("/"), name].join("/")
-            imports.push(`import "${module}"`)
-          }
-        }
-      }
+  const imports = []
+  for (const file of files) {
+    const ext = extname(file)
+    const name = basename(file, ext)
+    if (!name.startsWith("_") && !name.endsWith(".d") && name != "index" && name != "auto_index") {
+      const dir = dirname(file).replace(build_dir, "").replace(/^\//, "").replace(/\\/g, "/")
+      const module = dir == "" ? `./${name}` : [".", ...dir.split("/"), name].join("/")
+      imports.push(`import "${module}"`)
+    }
+  }
 
-      const index = `${base_dir}/index.ts`
-
-      if (fs.existsSync(index)) {
-        const content = fs.readFileSync(index, {encoding: "utf-8"})
-        imports.unshift(content)
-      }
-
-      const source = imports.join("\n")
-      return new Map([[index, source]])
-    },
-  })
+  const index_file = join(build_dir, "auto_index.js")
+  const source = imports.join("\n")
+  fs.writeFileSync(index_file, source, {encoding: "utf-8"})
 }
 
 async function bundle(name: string): Promise<void> {
@@ -304,7 +315,11 @@ async function bundle(name: string): Promise<void> {
     entries: [join(paths.build_dir.test, name, "index.js")],
     bases: [paths.build_dir.test, "./node_modules"],
     cache: join(paths.build_dir.test, `${name}.json`),
-    target: "ES2020",
+    import_map: {
+      "#framework/*": "framework/*",
+      path: "#framework/path",
+    },
+    target: "ES2024",
     minify: false,
     externals: [/^@bokehjs\//],
     shims: ["fs", "module"],
@@ -333,16 +348,39 @@ async function bundle(name: string): Promise<void> {
   }
 }
 
-task("test:compile:unit", async () => compile("unit", {auto_index: true}))
-const build_unit = task("test:build:unit", [passthrough("test:compile:unit")], async () => await bundle("unit"))
+task("test:compile:unit", [passthrough("test:framework:compile")], async () => {
+  await tsc("unit")
+})
+task("test:auto_index:unit", async () => {
+  await auto_index("unit")
+})
+export const build_unit = task("test:build:unit", [
+  passthrough("test:compile:unit"), passthrough("test:auto_index:unit"),
+], async () => {
+  await bundle("unit")
+})
 
 task2("test:unit", [start, start_js_server, build_unit], async ([devtools_port, server_port]) => {
   await devtools(devtools_port, server_port, "unit")
   return success(undefined)
 })
 
-task("test:compile:integration", async () => compile("integration", {auto_index: true}))
-const build_integration = task("test:build:integration", [passthrough("test:compile:integration")], async () => await bundle("integration"))
+task2("test:unit:minified", [start, start_js_server, build_unit], async ([devtools_port, server_port]) => {
+  await devtools(devtools_port, server_port, "unit", undefined, false)
+  return success(undefined)
+})
+
+task("test:compile:integration", [passthrough("test:framework:compile")], async () => {
+  await tsc("integration")
+})
+task("test:auto_index:integration", async () => {
+  await auto_index("integration")
+})
+export const build_integration = task("test:build:integration", [
+  passthrough("test:compile:integration"), passthrough("test:auto_index:integration"),
+], async () => {
+  await bundle("integration")
+})
 
 task2("test:integration", [start, build_integration], async ([devtools_port, server_port]) => {
   const baselines_root = (() => {
@@ -365,8 +403,8 @@ async function copy_defaults() {
   await fs.promises.copyFile(src, dst)
 }
 
-task("test:defaults:compile", async () => compile("defaults"))
-const build_defaults = task("test:build:defaults", [passthrough("test:defaults:compile")], async () => {
+task("test:defaults:compile", ["test:framework:compile"], async () => tsc("defaults"))
+export const build_defaults = task("test:build:defaults", [passthrough("test:defaults:compile")], async () => {
   await copy_defaults()
   await bundle("defaults")
 })

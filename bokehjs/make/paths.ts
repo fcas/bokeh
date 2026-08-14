@@ -1,6 +1,6 @@
-import {resolve, join} from "path"
+import {resolve, join} from "node:path"
 
-import {argv} from "./main"
+import {argv} from "./args.js"
 
 export const base_dir = resolve("./")
 export const make_dir = join(base_dir, "make")
@@ -12,6 +12,7 @@ const CSS_BUILD_DIR = join(BUILD_DIR, "css")
 export const build_dir = {
   all: BUILD_DIR,
   js: JS_BUILD_DIR,
+  esm: join(BUILD_DIR, "esm"),
   css: CSS_BUILD_DIR,
   test: join(BUILD_DIR, "test"),
   lib: join(JS_BUILD_DIR, "lib"),
@@ -22,6 +23,7 @@ export const build_dir = {
 
 export const src_dir = {
   lib: join(base_dir, "src", "lib"),
+  grammar: join(base_dir, "src", "grammar"),
   less: join(base_dir, "src", "less"),
   compiler: join(base_dir, "src", "compiler"),
   server: join(base_dir, "src", "server"),
@@ -29,7 +31,17 @@ export const src_dir = {
   examples: join(base_dir, "examples"),
 }
 
-export const lib = {
+export const test_dir = {
+  defaults: join(base_dir, "test", "defaults"),
+  unit: join(base_dir, "test", "unit"),
+  integration: join(base_dir, "test", "integration"),
+}
+
+export const bundles = {
+  all: {
+    main: join(build_dir.lib, "all", "main.js"),
+    output: join(build_dir.esm, "bokeh.js"),
+  },
   bokehjs: {
     main: join(build_dir.lib, "main.js"),
     output: join(build_dir.js, "bokeh.js"),

@@ -17,7 +17,10 @@ import pytest ; pytest
 #-----------------------------------------------------------------------------
 
 # Standard library imports
+import gc
 from types import MethodType
+from unittest.mock import MagicMock, patch
+from weakref import ref
 
 # Bokeh imports
 from bokeh.core.properties import (
@@ -40,6 +43,8 @@ from bokeh.core.property.descriptors import (
 )
 from bokeh.core.property.singletons import Intrinsic, Undefined
 from bokeh.core.property.vectorization import field, value
+from bokeh.settings import settings
+from bokeh.util.warnings import BokehUserWarning
 
 # Module under test
 import bokeh.core.has_props as hp # isort:skip
@@ -174,6 +179,82 @@ def test_HasProps_override() -> None:
     assert ov.int1 == 20
     assert ov.ds1 == field("x")
     assert ov.lst1 == []
+
+def test_HasProps_warns_on_redeclared_property() -> None:
+    class Base(hp.HasProps, hp.Local):
+        value = Int()
+
+    with pytest.warns(RuntimeWarning, match="previously declared on a parent class"):
+        class Child(Base):
+            value = Int()
+
+def test_HasProps_warns_on_unused_override() -> None:
+    class Base(hp.HasProps, hp.Local):
+        pass
+
+    with pytest.warns(RuntimeWarning, match=r"Overrides of \['alpha', 'value'\].*do not override anything"):
+        class Child(Base):
+            value = Override(default=1)
+            alpha = Override(default=2)
+
+def test_HasProps_local_and_effective_property_metadata() -> None:
+    class Base(hp.HasProps, hp.Local):
+        x = Int()
+
+    class Child(Base):
+        x = Override(default=2)
+        y = String()
+
+    class Grandchild(Child):
+        z = Int()
+
+    assert list(Base.__properties__) == ["x"]
+    assert list(Child.__properties__) == ["y"]
+    assert list(Grandchild.__properties__) == ["z"]
+
+    assert list(Grandchild.properties(_with_props=True)) == ["x", "y", "z"]
+    assert Child.__overridden_defaults__ == {"x": 2}
+    assert Grandchild.__overridden_defaults__ == {}
+    assert Grandchild._overridden_defaults() == {"x": 2}
+
+def test_HasProps_inherited_unstable_override() -> None:
+    calls = 0
+
+    def default() -> int:
+        nonlocal calls
+        calls += 1
+        return calls
+
+    class Base(hp.HasProps, hp.Local):
+        value = Int(default=0)
+
+    class Child(Base):
+        value = Override(default=default)
+
+    class Grandchild(Child):
+        pass
+
+    obj = Grandchild()
+
+    assert obj.value == 1
+    assert obj.value == 1
+    assert calls == 1
+
+def test_HasProps_property_metadata_does_not_retain_class() -> None:
+    class Dynamic(hp.HasProps, hp.Local):
+        value = Int(default=0)
+
+    Dynamic.properties()
+    Dynamic.properties(_with_props=True)
+    Dynamic.descriptors()
+    Dynamic.properties_with_refs()
+    Dynamic.dataspecs()
+
+    dynamic_ref = ref(Dynamic)
+    del Dynamic
+    gc.collect()
+
+    assert dynamic_ref() is None
 
 def test_HasProps_intrinsic() -> None:
     obj0 = Parent(int1=Intrinsic, ds1=Intrinsic, lst1=Intrinsic)
@@ -332,6 +413,16 @@ def test_HasProps_set_error() -> None:
     with pytest.raises(AttributeError) as e:
         c.junkjunk = 10
     assert str(e.value).endswith("unexpected attribute 'junkjunk' to Child, possible attributes are ds1, ds2, int1, int2, lst1, lst2 or str2")
+
+def test_HasProps_set_error_no_diagnostics() -> None:
+    c = Child()
+    settings.perform_error_diagnostics.set_value(False)
+    try:
+        with pytest.raises(AttributeError) as e:
+            c.int3 = 10
+        assert str(e.value) == "unexpected attribute 'int3' to Child"
+    finally:
+        settings.perform_error_diagnostics.unset_value()
 
 
 def test_HasProps_lookup() -> None:
@@ -701,6 +792,20 @@ def test_HasProps_clone_with_unset_properties() -> None:
 
     assert obj1 is not obj0
     assert obj1.properties_with_values(include_defaults=False, include_undefined=True) == dict(f0=Undefined, f1=1, f2=2)
+
+@patch("warnings.warn")
+def test_HasProps_model_redefinition(mock_warn: MagicMock) -> None:
+    class Foo1(hp.HasProps):
+        __qualified_model__ = "Foo"
+
+    class Foo2(hp.HasProps):
+        __qualified_model__ = "Foo"
+
+    assert mock_warn.called
+
+    msg, cls = mock_warn.call_args[0]
+    assert msg.startswith("Duplicate qualified model definition of 'Foo'.")
+    assert cls is BokehUserWarning
 
 #-----------------------------------------------------------------------------
 # Private API

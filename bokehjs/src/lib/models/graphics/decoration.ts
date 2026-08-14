@@ -3,8 +3,8 @@ import {Marking} from "./marking"
 import type {RendererView} from "../renderers/renderer"
 import {Model} from "../../model"
 import {View} from "core/view"
-import type {IterViews} from "core/build_views"
 import {build_view} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import type * as visuals from "core/visuals"
 import type * as p from "core/properties"
 
@@ -15,9 +15,8 @@ export class DecorationView extends View {
 
   marking: MarkingView
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield this.marking
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this.marking]
   }
 
   override async lazy_initialize(): Promise<void> {

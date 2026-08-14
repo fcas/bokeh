@@ -1,4 +1,4 @@
-import {expect} from "assertions"
+import {expect} from "#framework/assertions"
 
 import * as enums from "@bokehjs/core/enums"
 
@@ -169,6 +169,10 @@ describe("enums module", () => {
     expect([...enums.PaddingUnits]).to.be.equal(["percent", "absolute"])
   })
 
+  it("should have PanDirection", () => {
+    expect([...enums.PanDirection]).to.be.equal(["left", "right", "up", "down", "west", "east", "north", "south"])
+  })
+
   it("should have Place", () => {
     expect([...enums.Place]).to.be.equal(["above", "below", "left", "right", "center"])
   })
@@ -193,8 +197,12 @@ describe("enums module", () => {
     expect([...enums.RoundingFunction]).to.be.equal(["round", "nearest", "floor", "rounddown", "ceil", "roundup"])
   })
 
+  it("should have RegionSelectionMode", () => {
+    expect([...enums.RegionSelectionMode]).to.be.equal(["replace", "append", "intersect", "subtract", "xor"])
+  })
+
   it("should have SelectionMode", () => {
-    expect([...enums.SelectionMode]).to.be.equal(["replace", "append", "intersect", "subtract", "xor"])
+    expect([...enums.SelectionMode]).to.be.equal(["replace", "append", "intersect", "subtract", "xor", "toggle"])
   })
 
   it("should have Side", () => {
@@ -279,6 +287,7 @@ describe("enums module", () => {
       "clear_selection",
       "copy",
       "crosshair",
+      "dark_theme",
       "delete",
       "freehand_draw",
       "fullscreen",
@@ -288,6 +297,7 @@ describe("enums module", () => {
       "invert_selection",
       "italic",
       "lasso_select",
+      "light_theme",
       "line_edit",
       "maximize",
       "minimize",
@@ -309,6 +319,7 @@ describe("enums module", () => {
       "square",
       "square_check",
       "subtract_mode",
+      "system_theme",
       "tap_select",
       "text_align_center",
       "text_align_left",

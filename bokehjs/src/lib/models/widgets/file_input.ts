@@ -1,28 +1,57 @@
-import {InputWidget, InputWidgetView} from "./input_widget"
+import {InputWidget, InputWidgetView, ClearInput} from "./input_widget"
 import type {StyleSheetLike} from "core/dom"
 import {input} from "core/dom"
 import {isString} from "core/util/types"
 import * as p from "core/properties"
 import * as inputs from "styles/widgets/inputs.css"
 import buttons_css from "styles/buttons.css"
+import {PropertyBundleEvent} from "core/bokeh_events"
+import {event} from "core/bokeh_events"
+
+@event("file_input_change")
+export class FileInputChange extends PropertyBundleEvent<FileInput, "value" | "filename" | "mime_type"> {
+  get value() {
+    return this.values.value
+  }
+  get filename() {
+    return this.values.filename
+  }
+  get mime_type() {
+    return this.values.mime_type
+  }
+}
 
 export class FileInputView extends InputWidgetView {
   declare model: FileInput
   declare input_el: HTMLInputElement
+
+  override connect_signals(): void {
+    super.connect_signals()
+
+    this.model.on_event(ClearInput, () => {
+      this.model.setv({
+        value:     "", // p.unset,
+        mime_type: "", // p.unset,
+        filename:  "", // p.unset,
+      })
+      this.model.trigger_event(new FileInputChange({value: "", filename: "", mime_type: ""}))
+      this.input_el.value = ""
+    })
+  }
 
   override stylesheets(): StyleSheetLike[] {
     return [...super.stylesheets(), buttons_css]
   }
 
   protected _render_input(): HTMLElement {
-    const {multiple, disabled} = this.model
+    const {multiple, disabled, directory} = this.model
 
     const accept = (() => {
       const {accept} = this.model
       return isString(accept) ? accept : accept.join(",")
     })()
 
-    return this.input_el = input({type: "file", class: inputs.input, multiple, accept, disabled})
+    return this.input_el = input({type: "file", class: inputs.input, multiple, accept, disabled, webkitdirectory: directory})
   }
 
   override render(): void {
@@ -40,18 +69,32 @@ export class FileInputView extends InputWidgetView {
     const values: string[] = []
     const filenames: string[] = []
     const mime_types: string[] = []
+    const {directory, multiple} = this.model
+    const accept = (() => {
+      const {accept} = this.model
+      return isString(accept) ? accept : accept.join(",")
+    })()
 
     for (const file of files) {
       const data_url = await this._read_file(file)
       const [, mime_type="",, value=""] = data_url.split(/[:;,]/, 4)
 
-      values.push(value)
-      filenames.push(file.name)
-      mime_types.push(mime_type)
+      if (directory) {
+        const ext = file.name.split(".").pop()
+        if ((accept.length > 0 && isString(ext)) ? accept.includes(`.${ext}`) : true) {
+          filenames.push(file.webkitRelativePath)
+          values.push(value)
+          mime_types.push(mime_type)
+        }
+      } else {
+        filenames.push(file.name)
+        values.push(value)
+        mime_types.push(mime_type)
+      }
     }
 
     const [value, filename, mime_type] = (() =>{
-      if (this.model.multiple) {
+      if (directory || multiple) {
         return [values, filenames, mime_types]
       } else if (files.length != 0) {
         return [values[0], filenames[0], mime_types[0]]
@@ -61,6 +104,7 @@ export class FileInputView extends InputWidgetView {
     })()
 
     this.model.setv({value, filename, mime_type})
+    this.model.trigger_event(new FileInputChange({value, filename, mime_type}))
   }
 
   protected _read_file(file: File): Promise<string> {
@@ -87,6 +131,7 @@ export namespace FileInput {
     filename: p.Property<string | string[]>
     accept: p.Property<string | string[]>
     multiple: p.Property<boolean>
+    directory: p.Property<boolean>
   }
 }
 
@@ -109,6 +154,7 @@ export class FileInput extends InputWidget {
       filename:  [ Or(Str, List(Str)), p.unset, {readonly: true} ],
       accept:    [ Or(Str, List(Str)), "" ],
       multiple:  [ Bool, false ],
+      directory: [ Bool, false ],
     }))
   }
 }

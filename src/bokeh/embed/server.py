@@ -24,10 +24,6 @@ log = logging.getLogger(__name__)
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote_plus, urlparse
 
-## External imports
-if TYPE_CHECKING:
-    from jinja2 import Template
-
 # Bokeh imports
 from ..core.templates import AUTOLOAD_REQUEST_TAG, FILE
 from ..resources import DEFAULT_SERVER_HTTP_URL
@@ -38,6 +34,8 @@ from .elements import html_page_for_render_items
 from .util import RenderItem
 
 if TYPE_CHECKING:
+    from jinja2 import Template
+
     from ..core.types import ID
     from ..model import Model
     from ..resources import Resources
@@ -149,7 +147,7 @@ def server_session(model: Model | None = None, session_id: ID | None = None, url
     Bokeh apps embedded using these methods will NOT set the browser window title.
 
     .. note::
-        Typically you will not want to save or re-use the output of this
+        Typically you will not want to save or reuse the output of this
         function for different or multiple page loads.
 
     Args:
@@ -203,7 +201,7 @@ def server_session(model: Model | None = None, session_id: ID | None = None, url
         A ``<script>`` tag that will embed content from a Bokeh Server.
 
         .. warning::
-            It is typically a bad idea to re-use the same ``session_id`` for
+            It is typically a bad idea to reuse the same ``session_id`` for
             every page load. This is likely to create scalability and security
             problems, and will cause "shared Google doc" behavior, which is
             probably not desired.
@@ -248,7 +246,7 @@ def server_session(model: Model | None = None, session_id: ID | None = None, url
 #-----------------------------------------------------------------------------
 
 def server_html_page_for_session(session: ServerSession, resources: Resources, title: str,
-        template: Template = FILE, template_variables: dict[str, Any] | None = None):
+        template: Template = FILE, template_variables: dict[str, Any] | None = None) -> str:
     '''
 
     Args:

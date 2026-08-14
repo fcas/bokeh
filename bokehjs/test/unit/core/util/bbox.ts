@@ -1,24 +1,69 @@
-import {expect} from "assertions"
+import {expect} from "#framework/assertions"
 
 import * as bbox from "@bokehjs/core/util/bbox"
 import {BBox} from "@bokehjs/core/util/bbox"
 
 describe("bbox module", () => {
   describe("empty", () => {
-    it("should be an unbounded box", () => {
+    it("should be an inverted unbounded box", () => {
       expect(bbox.empty()).to.be.equal({x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity})
     })
   })
 
+  describe("full", () => {
+    it("should be an unbounded box", () => {
+      expect(bbox.full()).to.be.equal({x0: -Infinity, y0: -Infinity, x1: Infinity, y1: Infinity})
+    })
+  })
+
+  describe("x_range", () => {
+    it("should be box covering the given x range", () => {
+      expect(bbox.x_range(3, 3)).to.be.equal({x0: 3, y0: -Infinity, x1: 3, y1: Infinity})
+      expect(bbox.x_range(1, 3)).to.be.equal({x0: 1, y0: -Infinity, x1: 3, y1: Infinity})
+      expect(bbox.x_range(0, 3)).to.be.equal({x0: 0, y0: -Infinity, x1: 3, y1: Infinity})
+      expect(bbox.x_range(-1, 3)).to.be.equal({x0: -1, y0: -Infinity, x1: 3, y1: Infinity})
+      expect(bbox.x_range(-3, 3)).to.be.equal({x0: -3, y0: -Infinity, x1: 3, y1: Infinity})
+      expect(bbox.x_range(-3, 1)).to.be.equal({x0: -3, y0: -Infinity, x1: 1, y1: Infinity})
+      expect(bbox.x_range(-3, 0)).to.be.equal({x0: -3, y0: -Infinity, x1: 0, y1: Infinity})
+      expect(bbox.x_range(-3, -1)).to.be.equal({x0: -3, y0: -Infinity, x1: -1, y1: Infinity})
+      expect(bbox.x_range(-3, -3)).to.be.equal({x0: -3, y0: -Infinity, x1: -3, y1: Infinity})
+    })
+  })
+
+  describe("y_range", () => {
+    it("should be box covering the given x range", () => {
+      expect(bbox.y_range(1, 3)).to.be.equal({x0: -Infinity, y0: 1, x1: Infinity, y1: 3})
+      expect(bbox.y_range(0, 3)).to.be.equal({x0: -Infinity, y0: 0, x1: Infinity, y1: 3})
+      expect(bbox.y_range(-1, 3)).to.be.equal({x0: -Infinity, y0: -1, x1: Infinity, y1: 3})
+      expect(bbox.y_range(-3, 3)).to.be.equal({x0: -Infinity, y0: -3, x1: Infinity, y1: 3})
+      expect(bbox.y_range(-3, 1)).to.be.equal({x0: -Infinity, y0: -3, x1: Infinity, y1: 1})
+      expect(bbox.y_range(-3, 0)).to.be.equal({x0: -Infinity, y0: -3, x1: Infinity, y1: 0})
+      expect(bbox.y_range(-3, -1)).to.be.equal({x0: -Infinity, y0: -3, x1: Infinity, y1: -1})
+      expect(bbox.y_range(-3, -3)).to.be.equal({x0: -Infinity, y0: -3, x1: Infinity, y1: -3})
+    })
+  })
+
   describe("positive_x", () => {
-    it("should be box covering the area where x is positive", () => {
+    it("should be box covering the half-plane where x is positive", () => {
       expect(bbox.positive_x()).to.be.equal({x0: Number.MIN_VALUE, y0: -Infinity, x1: Infinity, y1: Infinity})
     })
   })
 
+  describe("negative_x", () => {
+    it("should be box covering the half-plane where x is negative", () => {
+      expect(bbox.negative_x()).to.be.equal({x0: -Infinity, y0: -Infinity, x1: -Number.MIN_VALUE, y1: Infinity})
+    })
+  })
+
   describe("positive_y", () => {
-    it("should be box covering the area where y is positive", () => {
+    it("should be box covering the half-plane where y is positive", () => {
       expect(bbox.positive_y()).to.be.equal({x0: -Infinity, y0: Number.MIN_VALUE, x1: Infinity, y1: Infinity})
+    })
+  })
+
+  describe("negative_y", () => {
+    it("should be box covering the half-plane where y is negative", () => {
+      expect(bbox.negative_y()).to.be.equal({x0: -Infinity, y0: -Infinity, x1: Infinity, y1: -Number.MIN_VALUE})
     })
   })
 
@@ -94,6 +139,61 @@ describe("bbox module", () => {
     it("should support shrink_by() method", () => {
       const bbox = new BBox({left: -3, right: 4, top: -2, bottom: 12})
       expect(bbox.shrink_by(2)).to.be.equal(new BBox({left: -1, right: 2, top: 0, bottom: 10}))
+    })
+
+    it("should support relative_to() method", () => {
+      const bbox = new BBox({left: 10, top: 30, width: 100, height: 80})
+
+      const to0 = new BBox({left: 10, top: 30, width: 100, height: 80})
+      expect(bbox.relative_to(to0)).to.be.equal(new BBox({left: 0, top: 0, width: 100, height: 80}))
+
+      const to1 = new BBox({left: 0, top: 10, width: 120, height: 110})
+      expect(bbox.relative_to(to1)).to.be.equal(new BBox({left: 10, top: 20, width: 100, height: 80}))
+    })
+
+    it("should support percent coordinate mapping", () => {
+      const bbox = new BBox({x: 100, y: 200, width: 300, height: 400})
+
+      expect(bbox.x_percent.compute(0.0)).to.be.equal(100)
+      expect(bbox.y_percent.compute(0.0)).to.be.equal(200)
+      expect(bbox.x_percent.compute(1.0)).to.be.equal(400)
+      expect(bbox.y_percent.compute(1.0)).to.be.equal(600)
+
+      expect([...bbox.x_percent.v_compute([0.0, 1.0])]).to.be.equal([100, 400])
+      expect([...bbox.y_percent.v_compute([0.0, 1.0])]).to.be.equal([200, 600])
+
+      expect(bbox.x_percent).to.be.identical(bbox.x_percent)
+      expect(bbox.y_percent).to.be.identical(bbox.y_percent)
+    })
+
+    it("should support screen coordinate mapping", () => {
+      const bbox = new BBox({x: 100, y: 200, width: 300, height: 400})
+
+      expect(bbox.x_screen.compute(0)).to.be.equal(100)
+      expect(bbox.y_screen.compute(0)).to.be.equal(200)
+      expect(bbox.x_screen.compute(300)).to.be.equal(400)
+      expect(bbox.y_screen.compute(400)).to.be.equal(600)
+
+      expect([...bbox.x_screen.v_compute([0, 300])]).to.be.equal([100, 400])
+      expect([...bbox.y_screen.v_compute([0, 400])]).to.be.equal([200, 600])
+
+      expect(bbox.x_screen).to.be.identical(bbox.x_screen)
+      expect(bbox.y_screen).to.be.identical(bbox.y_screen)
+    })
+
+    it("should support view coordinate mapping", () => {
+      const bbox = new BBox({x: 100, y: 200, width: 300, height: 400})
+
+      expect(bbox.x_view.compute(0)).to.be.equal(100)
+      expect(bbox.y_view.compute(0)).to.be.equal(600)
+      expect(bbox.x_view.compute(300)).to.be.equal(400)
+      expect(bbox.y_view.compute(400)).to.be.equal(200)
+
+      expect([...bbox.x_view.v_compute([0, 300])]).to.be.equal([100, 400])
+      expect([...bbox.y_view.v_compute([0, 400])]).to.be.equal([600, 200])
+
+      expect(bbox.x_view).to.be.identical(bbox.x_view)
+      expect(bbox.y_view).to.be.identical(bbox.y_view)
     })
   })
 })

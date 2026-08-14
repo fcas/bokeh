@@ -1,5 +1,4 @@
-import {StyledElement, StyledElementView} from "../ui/styled_element"
-import type {PlotView} from "../plots/plot"
+import {CanvasPanel, CanvasPanelView} from "./canvas_panel"
 import {CategoricalScale} from "../scales/categorical_scale"
 import {LogScale} from "../scales/log_scale"
 import {Scale} from "../scales/scale"
@@ -8,26 +7,19 @@ import {Range} from "../ranges/range"
 import {Range1d} from "../ranges/range1d"
 import {DataRange1d} from "../ranges/data_range1d"
 import {FactorRange} from "../ranges/factor_range"
-import type {Node} from "../coordinates/node"
-import type {XY} from "core/util/bbox"
-import {BBox} from "core/util/bbox"
+import type {BBox} from "core/util/bbox"
 import {entries} from "core/util/object"
 import {assert} from "core/util/assert"
-import {isNumber} from "core/util/types"
 import type {Dict} from "core/types"
+import type {StyleSheetLike} from "core/dom"
 import type * as p from "core/properties"
+import * as css from "styles/cartesian_frame.css"
 
 type Ranges = Dict<Range>
 type Scales = Dict<Scale>
 
-export class CartesianFrameView extends StyledElementView {
+export class CartesianFrameView extends CanvasPanelView {
   declare model: CartesianFrame
-  declare parent: PlotView
-
-  private _bbox: BBox = new BBox()
-  override get bbox(): BBox {
-    return this._bbox
-  }
 
   override initialize(): void {
     super.initialize()
@@ -37,6 +29,10 @@ export class CartesianFrameView extends StyledElementView {
   override remove(): void {
     this._unregister_frame()
     super.remove()
+  }
+
+  override stylesheets(): StyleSheetLike[] {
+    return [...super.stylesheets(), css.default]
   }
 
   override connect_signals(): void {
@@ -142,8 +138,8 @@ export class CartesianFrameView extends StyledElementView {
     }
   }
 
-  set_geometry(bbox: BBox): void {
-    this._bbox = bbox
+  override set_geometry(bbox: BBox): void {
+    super.set_geometry(bbox)
     this._update_scales()
   }
 
@@ -194,25 +190,12 @@ export class CartesianFrameView extends StyledElementView {
   get y_scale(): Scale {
     return this._y_scale
   }
-
-  // TODO remove this when bbox handling is unified
-  override resolve_symbol(node: Node): XY | number {
-    const target = this
-    const value = target.bbox.resolve(node.symbol)
-    const {offset} = node
-    if (isNumber(value)) {
-      return value + offset
-    } else {
-      const {x, y} = value
-      return {x: x + offset, y: y + offset}
-    }
-  }
 }
 
 export namespace CartesianFrame {
   export type Attrs = p.AttrsOf<Props>
 
-  export type Props = StyledElement.Props & {
+  export type Props = CanvasPanel.Props & {
     x_range: p.Property<Range>
     y_range: p.Property<Range>
 
@@ -232,7 +215,7 @@ export namespace CartesianFrame {
 
 export interface CartesianFrame extends CartesianFrame.Attrs {}
 
-export class CartesianFrame extends StyledElement {
+export class CartesianFrame extends CanvasPanel {
   declare properties: CartesianFrame.Props
   declare __view_type__: CartesianFrameView
 

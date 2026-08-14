@@ -1,12 +1,12 @@
 import * as sinon from "sinon"
 
-import {expect} from "assertions"
-import {display} from "../../../_util"
+import {expect} from "#framework/assertions"
+import {display} from "#framework/layouts"
 
 import {build_view} from "@bokehjs/core/build_views"
 
-import type {CircleView} from "@bokehjs/models/glyphs/circle"
-import {Circle} from "@bokehjs/models/glyphs/circle"
+import type {ScatterView} from "@bokehjs/models/glyphs/scatter"
+import {Scatter} from "@bokehjs/models/glyphs/scatter"
 import type {PatchesView} from "@bokehjs/models/glyphs/patches"
 import {Patches} from "@bokehjs/models/glyphs/patches"
 import {Plot} from "@bokehjs/models/plots/plot"
@@ -14,7 +14,6 @@ import {Range1d} from "@bokehjs/models/ranges/range1d"
 import {Selection} from "@bokehjs/models/selections/selection"
 import {GlyphRenderer} from "@bokehjs/models/renderers/glyph_renderer"
 import {ColumnDataSource} from "@bokehjs/models/sources/column_data_source"
-import type {HasXYGlyph} from "@bokehjs/models/tools/edit/edit_tool"
 import type {PolyEditToolView} from "@bokehjs/models/tools/edit/poly_edit_tool"
 import {PolyEditTool} from "@bokehjs/models/tools/edit/poly_edit_tool"
 
@@ -25,8 +24,8 @@ export interface PolyEditTestCase {
   data_source: ColumnDataSource
   draw_tool_view: PolyEditToolView
   glyph_view: PatchesView
-  glyph_renderer: GlyphRenderer
-  vertex_glyph_view: CircleView
+  glyph_renderer: GlyphRenderer<Patches>
+  vertex_glyph_view: ScatterView
   vertex_source: ColumnDataSource
   vertex_renderer: GlyphRenderer
 }
@@ -52,7 +51,7 @@ async function make_testcase(): Promise<PolyEditTestCase> {
     xs: {field: "xs"},
     ys: {field: "ys"},
   })
-  const vertex_glyph = new Circle({
+  const vertex_glyph = new Scatter({
     x: {field: "x"},
     y: {field: "y"},
   })
@@ -67,8 +66,8 @@ async function make_testcase(): Promise<PolyEditTestCase> {
   const draw_tool = new PolyEditTool({
     active: true,
     default_overrides: {z: "Test"},
-    renderers: [glyph_renderer as any],
-    vertex_renderer: vertex_renderer as GlyphRenderer & HasXYGlyph,
+    renderers: [glyph_renderer],
+    vertex_renderer,
   })
   plot.add_tools(draw_tool)
   await plot_view.ready
@@ -83,7 +82,7 @@ async function make_testcase(): Promise<PolyEditTestCase> {
     draw_tool_view,
     glyph_view: glyph_renderer_view.glyph as PatchesView,
     glyph_renderer,
-    vertex_glyph_view: vertex_renderer_view.glyph as CircleView,
+    vertex_glyph_view: vertex_renderer_view.glyph as ScatterView,
     vertex_source,
     vertex_renderer,
   }

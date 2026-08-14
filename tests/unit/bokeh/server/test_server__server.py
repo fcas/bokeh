@@ -19,10 +19,11 @@ import pytest ; pytest
 # Standard library imports
 import asyncio
 import logging
+import os
 import re
 import ssl
 import sys
-import time
+import tempfile
 from datetime import timedelta
 from unittest import mock
 
@@ -34,7 +35,7 @@ from _util_server import (
     websocket_open,
     ws_url,
 )
-from tornado.httpclient import HTTPError
+from tornado.httpclient import AsyncHTTPClient, HTTPError, HTTPRequest
 from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop
 
@@ -45,8 +46,10 @@ from bokeh.client import pull_session
 from bokeh.core.properties import List, String
 from bokeh.core.types import ID
 from bokeh.model import Model
+from bokeh.server.auth_provider import AuthModule, NullAuth
 from bokeh.server.server import BaseServer, Server
 from bokeh.server.tornado import BokehTornado
+from bokeh.settings import settings
 from bokeh.util.token import (
     check_token_signature,
     generate_jwt_token,
@@ -355,6 +358,52 @@ async def test__exclude_cookies(ManagedServerLoop: MSL) -> None:
         assert 'cookies' in payload
         assert payload['cookies'] == {'custom2': 'test2'}
 
+def test__from_settings_uses_envvars() -> None:
+    with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as f:
+        auth_path = f.name
+    try:
+        with mock.patch('bokeh.server.server.settings') as mock_settings:
+            mock_settings.auth_module.return_value = auth_path
+            mock_settings.sign_sessions.return_value = True
+            mock_settings.secret_key_bytes.return_value = b'0' * 32
+            mock_settings.ssl_certfile.return_value = '/path/to/cert.pem'
+            mock_settings.ssl_keyfile.return_value = '/path/to/key.pem'
+            mock_settings.ssl_password.return_value = 'hunter2'
+            mock_settings.cookie_secret.return_value = 'verysecret'
+            mock_settings.xsrf_cookies.return_value = True
+            mock_settings.ico_path.return_value = None
+            with mock.patch.object(Server, '__init__', return_value=None) as init:
+                Server.from_settings(Application())
+                _, kwargs = init.call_args
+    finally:
+        os.unlink(auth_path)
+    assert isinstance(kwargs['auth_provider'], AuthModule)
+    assert kwargs['sign_sessions']
+    assert kwargs['secret_key'] is not None
+    assert kwargs['ssl_certfile'] == '/path/to/cert.pem'
+    assert kwargs['ssl_keyfile'] == '/path/to/key.pem'
+    assert kwargs['ssl_password'] == 'hunter2'
+    assert kwargs['cookie_secret'] == 'verysecret'
+    assert kwargs['xsrf_cookies']
+
+def test__from_settings_kwarg_overrides_envvar() -> None:
+    """Ensure that a kwarg to Server.from_settings overrides the equivalent envvar setting, if present."""
+    null_auth = NullAuth()
+    with mock.patch('bokeh.server.server.settings') as mock_settings:
+        mock_settings.auth_module.return_value = '/some/auth.py'
+        mock_settings.sign_sessions.return_value = False
+        mock_settings.secret_key_bytes.return_value = None
+        mock_settings.ssl_certfile.return_value = None
+        mock_settings.ssl_keyfile.return_value = None
+        mock_settings.ssl_password.return_value = None
+        mock_settings.cookie_secret.return_value = None
+        mock_settings.xsrf_cookies.return_value = False
+        mock_settings.ico_path.return_value = None
+        with mock.patch.object(Server, '__init__', return_value=None) as init:
+            Server.from_settings(Application(), auth_provider=null_auth)
+            _, kwargs = init.call_args
+    assert kwargs['auth_provider'] is null_auth
+
 #-----------------------------------------------------------------------------
 # Dev API
 #-----------------------------------------------------------------------------
@@ -491,6 +540,62 @@ async def test__autocreate_session_autoload(ManagedServerLoop: MSL) -> None:
         assert 1 == len(sessions)
         assert sessionid == sessions[0].id
 
+async def test__autoload_credentialed_cors_rejects_unlisted_origin(ManagedServerLoop: MSL) -> None:
+    application = Application()
+    with ManagedServerLoop(application, allow_websocket_origin=["trusted.example:80"]) as server:
+        response = await http_get(server.io_loop, autoload_url(server), headers={
+            "Cookie": "custom=test",
+            "Origin": "http://evil.example",
+        })
+
+        assert response.headers["Access-Control-Allow-Origin"] == "*"
+
+async def test__autoload_credentialed_cors_allows_websocket_origin(ManagedServerLoop: MSL) -> None:
+    application = Application()
+    with ManagedServerLoop(application, allow_websocket_origin=["trusted.example:80"]) as server:
+        response = await http_get(server.io_loop, autoload_url(server), headers={
+            "Cookie": "custom=test",
+            "Origin": "http://trusted.example",
+        })
+
+        assert response.headers["Access-Control-Allow-Origin"] == "http://trusted.example"
+        assert response.headers["Vary"] == "Origin"
+
+async def test__autoload_cors_allows_websocket_origin_without_cookie(ManagedServerLoop: MSL) -> None:
+    application = Application()
+    with ManagedServerLoop(application, allow_websocket_origin=["trusted.example:80"]) as server:
+        response = await http_get(server.io_loop, autoload_url(server), headers={
+            "Origin": "http://trusted.example",
+        })
+
+        assert response.headers["Access-Control-Allow-Origin"] == "http://trusted.example"
+        assert response.headers["Vary"] == "Origin"
+
+async def test__autoload_cors_uses_allowed_ws_origin_setting(ManagedServerLoop: MSL) -> None:
+    application = Application()
+    settings.allowed_ws_origin.set_value(["settings.example:80"])
+    try:
+        with ManagedServerLoop(application, allow_websocket_origin=["trusted.example:80"]) as server:
+            response = await http_get(server.io_loop, autoload_url(server), headers={
+                "Origin": "http://settings.example",
+            })
+
+            assert response.headers["Access-Control-Allow-Origin"] == "http://settings.example"
+            assert response.headers["Vary"] == "Origin"
+    finally:
+        settings.allowed_ws_origin.unset_value()
+
+async def test__autoload_cors_options_allows_websocket_origin(ManagedServerLoop: MSL) -> None:
+    application = Application()
+    with ManagedServerLoop(application, allow_websocket_origin=["trusted.example:80"]) as server:
+        request = HTTPRequest(autoload_url(server), method="OPTIONS", headers={
+            "Origin": "http://trusted.example",
+        })
+        response = await AsyncHTTPClient().fetch(request)
+
+        assert response.headers["Access-Control-Allow-Origin"] == "http://trusted.example"
+        assert response.headers["Vary"] == "Origin"
+
 async def test__no_set_title_autoload(ManagedServerLoop: MSL) -> None:
     application = Application()
     with ManagedServerLoop(application) as server:
@@ -607,7 +712,11 @@ async def test__use_provided_session_websocket(ManagedServerLoop: MSL) -> None:
 
         expected = 'foo'
         token = generate_jwt_token(expected)
-        await websocket_open(server.io_loop, ws_url(server), subprotocols=["bokeh", token])
+        ws = await websocket_open(server.io_loop, ws_url(server), subprotocols=["bokeh", token], auto_close=False)
+        msg = await ws.read_queue.get()
+        assert isinstance(msg, str)
+        assert 'ACK' in msg
+        ws.close()
 
         sessions = server.get_sessions('/')
         assert 1 == len(sessions)
@@ -668,13 +777,16 @@ async def test__reject_expired_session_websocket(ManagedServerLoop: MSL) -> None
         sessions = server.get_sessions('/')
         assert 0 == len(sessions)
 
-        response = await http_get(server.io_loop, url(server))
+        issued_at = 1_000
+        with mock.patch("bokeh.util.token.calendar.timegm", return_value=issued_at):
+            response = await http_get(server.io_loop, url(server))
         html = response.body
         token = extract_token_from_json(html)
+        expiry = get_token_payload(token)["session_expiry"]
+        assert expiry == issued_at + 1
 
-        time.sleep(1.1)
-
-        ws = await websocket_open(server.io_loop, ws_url(server), subprotocols=["bokeh", token])
+        with mock.patch("bokeh.server.views.ws.calendar.timegm", return_value=expiry):
+            ws = await websocket_open(server.io_loop, ws_url(server), subprotocols=["bokeh", token])
         assert await ws.read_queue.get() is None
 
 async def test__reject_wrong_subprotocol_websocket(ManagedServerLoop: MSL) -> None:
@@ -819,7 +931,7 @@ def test__server_multiple_processes() -> None:
             else mock.call(3),
         ]
 
-def test__existing_ioloop_with_multiple_processes_exception(ManagedServerLoop, event_loop) -> None:
+def test__existing_ioloop_with_multiple_processes_exception(ManagedServerLoop: MSL) -> None:
     application = Application()
     loop = IOLoop.current()
     with pytest.raises(RuntimeError):
@@ -830,7 +942,7 @@ async def test__actual_port_number(ManagedServerLoop: MSL) -> None:
     application = Application()
     with ManagedServerLoop(application, port=0) as server:
         port = server.port
-        assert port > 0
+        assert port is not None and port > 0
         await http_get(server.io_loop, url(server))
 
 def test__ioloop_not_forcibly_stopped() -> None:
@@ -856,6 +968,29 @@ def test__ioloop_not_forcibly_stopped() -> None:
     loop.add_callback(f)
     loop.start()
     assert result == [None]
+
+
+async def test__stop_on_running_ioloop_has_completion_barrier() -> None:
+    loop = IOLoop.current()
+    tornado_app = mock.Mock()
+    release = asyncio.Event()
+
+    async def stop_async() -> None:
+        await release.wait()
+
+    tornado_app.stop_async = mock.AsyncMock(side_effect=stop_async)
+    http_server = mock.Mock()
+    base_server = BaseServer(loop, tornado_app, http_server)
+
+    base_server.stop()
+
+    http_server.stop.assert_called_once_with()
+    assert base_server._stop_task is not None
+    assert not base_server._stop_task.done()
+
+    release.set()
+    await base_server.wait_until_stopped()
+    tornado_app.stop_async.assert_awaited_once_with()
 
 #-----------------------------------------------------------------------------
 # Code

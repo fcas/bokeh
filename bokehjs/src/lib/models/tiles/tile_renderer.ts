@@ -3,8 +3,6 @@ import type {Extent, Bounds} from "./tile_utils"
 import {TileSource} from "./tile_source"
 import {WMTSTileSource} from "./wmts_tile_source"
 import {Renderer, RendererView} from "../renderers/renderer"
-import type {Plot} from "../plots/plot"
-import type {CartesianFrameView} from "../canvas/cartesian_frame"
 import type {Range} from "../ranges/range"
 import {Range1d} from "../ranges/range1d"
 import {HTML} from "../dom/html"
@@ -13,7 +11,7 @@ import type {Image} from "core/util/image"
 import {ImageLoader} from "core/util/image"
 import {includes} from "core/util/array"
 import type {Context2d} from "core/util/canvas"
-import {assert} from "core/util/assert"
+import {logger} from "core/logging"
 
 export type TileData = Tile & ({img: Image, loaded: true} | {img: undefined, loaded: false}) & {
   normalized_coords: [number, number, number]
@@ -57,31 +55,18 @@ export class TileRendererView extends RendererView {
     const y_start = y_range.start
     const x_end = x_range.end
     const y_end = y_range.end
-    assert(isFinite(x_start))
-    assert(isFinite(y_start))
-    assert(isFinite(x_end))
-    assert(isFinite(y_end))
+    if (!(isFinite(x_start) && isFinite(y_start) && isFinite(x_end) && isFinite(y_end))) {
+      logger.warn("tile extent is not fully defined")
+    }
     return [x_start, y_start, x_end, y_end]
   }
 
-  private get map_plot(): Plot {
-    return this.plot_model
-  }
-
-  private get map_canvas(): Context2d {
-    return this.layer.ctx
-  }
-
-  private get map_frame(): CartesianFrameView {
-    return this.plot_view.frame
-  }
-
   private get x_range(): Range {
-    return this.map_plot.x_range
+    return this.plot_model.x_range
   }
 
   private get y_range(): Range {
-    return this.map_plot.y_range
+    return this.plot_model.y_range
   }
 
   protected _set_data(): void {
@@ -96,8 +81,9 @@ export class TileRendererView extends RendererView {
 
   protected _map_data(): void {
     this.initial_extent = this.get_extent()
-    const zoom_level = this.model.tile_source.get_level_by_extent(this.initial_extent, this.map_frame.bbox.height, this.map_frame.bbox.width)
-    const new_extent = this.model.tile_source.snap_to_zoom_level(this.initial_extent, this.map_frame.bbox.height, this.map_frame.bbox.width, zoom_level)
+    const {width, height} = this.plot_view.frame.bbox
+    const zoom_level = this.model.tile_source.get_level_by_extent(this.initial_extent, height, width)
+    const new_extent = this.model.tile_source.snap_to_zoom_level(this.initial_extent, height, width, zoom_level)
     this.x_range.start = new_extent[0]
     this.y_range.start = new_extent[1]
     this.x_range.end = new_extent[2]
@@ -161,15 +147,23 @@ export class TileRendererView extends RendererView {
 
   protected _enforce_aspect_ratio(): void {
     // brute force way of handling resize or sizing_mode event -------------------------------------------------------------
-    if ((this._last_height !== this.map_frame.bbox.height) || (this._last_width !== this.map_frame.bbox.width)) {
+    const {width, height} = this.plot_view.frame.bbox
+    if (this._last_width !== width || this._last_height !== height) {
       const extent = this.get_extent()
-      const zoom_level = this.model.tile_source.get_level_by_extent(extent, this.map_frame.bbox.height, this.map_frame.bbox.width)
-      const new_extent = this.model.tile_source.snap_to_zoom_level(extent, this.map_frame.bbox.height, this.map_frame.bbox.width, zoom_level)
+      const zoom_level = this.model.tile_source.get_level_by_extent(extent, height, width)
+      const {tile_source} = this.model
+      const new_extent = (() => {
+        const {_last_width, _last_height} = this
+        if (_last_width !== undefined && _last_height !== undefined) {
+          return tile_source.rescale(extent, height, width, _last_height, _last_width)
+        }
+        return tile_source.snap_to_zoom_level(extent, height, width, zoom_level)
+      })()
       this.x_range.setv({start: new_extent[0], end: new_extent[2]})
       this.y_range.setv({start: new_extent[1], end: new_extent[3]})
       this.extent = new_extent
-      this._last_height = this.map_frame.bbox.height
-      this._last_width = this.map_frame.bbox.width
+      this._last_width = width
+      this._last_height = height
     }
   }
 
@@ -191,7 +185,7 @@ export class TileRendererView extends RendererView {
     return true
   }
 
-  protected _paint(): void {
+  protected _paint(ctx: Context2d): void {
     if (!this.map_initialized) {
       this._set_data()
       this._map_data()
@@ -200,7 +194,7 @@ export class TileRendererView extends RendererView {
 
     this._enforce_aspect_ratio()
 
-    this._update()
+    this._update(ctx)
     if (this.prefetch_timer != null) {
       clearTimeout(this.prefetch_timer)
     }
@@ -212,7 +206,7 @@ export class TileRendererView extends RendererView {
     }
   }
 
-  _draw_tile(tile_key: string): void {
+  _draw_tile(ctx: Context2d, tile_key: string): void {
     const tile_data = this.model.tile_source.tiles.get(tile_key) as TileData | undefined
     if (tile_data != null && tile_data.loaded) {
       const [[sxmin], [symin]] = this.coordinates.map_to_screen([tile_data.bounds[0]], [tile_data.bounds[3]])
@@ -221,39 +215,39 @@ export class TileRendererView extends RendererView {
       const sh = symax - symin
       const sx = sxmin
       const sy = symin
-      const old_smoothing = this.map_canvas.imageSmoothingEnabled
-      this.map_canvas.imageSmoothingEnabled = this.model.smoothing
-      this.map_canvas.drawImage(tile_data.img, sx, sy, sw, sh)
-      this.map_canvas.imageSmoothingEnabled = old_smoothing
+      const old_smoothing = ctx.imageSmoothingEnabled
+      ctx.imageSmoothingEnabled = this.model.smoothing
+      ctx.drawImage(tile_data.img, sx, sy, sw, sh)
+      ctx.imageSmoothingEnabled = old_smoothing
       tile_data.finished = true
     }
   }
 
-  protected _set_rect(): void {
+  protected _set_rect(ctx: Context2d): void {
     const outline_width = this.plot_model.outline_line_width
-    const l = this.map_frame.bbox.left + (outline_width/2)
-    const t = this.map_frame.bbox.top + (outline_width/2)
-    const w = this.map_frame.bbox.width - outline_width
-    const h = this.map_frame.bbox.height - outline_width
-    this.map_canvas.rect(l, t, w, h)
-    this.map_canvas.clip()
+    const l = this.plot_view.frame.bbox.left + (outline_width/2)
+    const t = this.plot_view.frame.bbox.top + (outline_width/2)
+    const w = this.plot_view.frame.bbox.width - outline_width
+    const h = this.plot_view.frame.bbox.height - outline_width
+    ctx.rect(l, t, w, h)
+    ctx.clip()
   }
 
-  protected _render_tiles(tile_keys: string[]): void {
-    this.map_canvas.save()
-    this._set_rect()
-    this.map_canvas.globalAlpha = this.model.alpha
+  protected _render_tiles(ctx: Context2d, tile_keys: string[]): void {
+    ctx.save()
+    this._set_rect(ctx)
+    ctx.globalAlpha = this.model.alpha
     for (const tile_key of tile_keys) {
-      this._draw_tile(tile_key)
+      this._draw_tile(ctx, tile_key)
     }
-    this.map_canvas.restore()
+    ctx.restore()
   }
 
   protected _prefetch_tiles(): void {
     const {tile_source} = this.model
     const extent = this.get_extent()
-    const h = this.map_frame.bbox.height
-    const w = this.map_frame.bbox.width
+    const w = this.plot_view.frame.bbox.width
+    const h = this.plot_view.frame.bbox.height
     const zoom_level = this.model.tile_source.get_level_by_extent(extent, h, w)
     const tiles = this.model.tile_source.get_tiles_by_extent(extent, zoom_level)
     for (let t = 0, end = Math.min(10, tiles.length); t < end; t++) {
@@ -277,7 +271,7 @@ export class TileRendererView extends RendererView {
     }
   }
 
-  protected _update(): void {
+  protected _update(ctx: Context2d): void {
     const {tile_source} = this.model
 
     const {min_zoom} = tile_source
@@ -285,8 +279,8 @@ export class TileRendererView extends RendererView {
 
     let extent = this.get_extent()
     const zooming_out = (this.extent[2] - this.extent[0]) < (extent[2] - extent[0])
-    const h = this.map_frame.bbox.height
-    const w = this.map_frame.bbox.width
+    const w = this.plot_view.frame.bbox.width
+    const h = this.plot_view.frame.bbox.height
     let zoom_level = tile_source.get_level_by_extent(extent, h, w)
     let snap_back = false
 
@@ -345,11 +339,11 @@ export class TileRendererView extends RendererView {
     }
 
     // draw stand-in parents ----------
-    this._render_tiles(parents)
-    this._render_tiles(children)
+    this._render_tiles(ctx, parents)
+    this._render_tiles(ctx, children)
 
     // draw cached ----------
-    this._render_tiles(cached)
+    this._render_tiles(ctx, cached)
 
     // fetch missing -------
     if (this.render_timer != null) {

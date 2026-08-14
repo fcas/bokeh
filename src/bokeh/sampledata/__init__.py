@@ -5,6 +5,13 @@
 # The full license is in the file LICENSE.txt, distributed with this software.
 #-----------------------------------------------------------------------------
 '''
+The ``bokeh.sampledata`` module exposes datasets that are used in examples and
+documentation. Some datasets require separate installation. To install those
+using ``pip``, execute the command:
+
+.. code-block:: sh
+
+    pip install bokeh_sampledata
 
 '''
 
@@ -30,7 +37,7 @@ from packaging.version import Version
 
 __all__ = ()
 
-SAMPLEDATA_MIN_VERSION = "2024.2"
+SAMPLEDATA_MIN_VERSION = "2025.0"
 
 #-----------------------------------------------------------------------------
 # General API
@@ -66,8 +73,11 @@ except ImportError:
     )
 
 if Version(_mod.__version__) < Version(SAMPLEDATA_MIN_VERSION):
-    raise RuntimeError(
+    from ..util.warnings import BokehUserWarning, warn
+
+    warn(
         f"The installed bokeh_sampledata version ({_mod.__version__}) is too "
         f"old. At least version {SAMPLEDATA_MIN_VERSION} is needed to run all "
         "examples properly. Update with 'pip install -U bokeh_sampledata'.",
+        BokehUserWarning,
     )

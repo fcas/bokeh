@@ -29,12 +29,12 @@ from typing import (
     Any,
     Callable,
     Sequence,
-    TypeAlias,
     cast,
 )
 
 # Bokeh imports
 from ..events import Event, ModelEvent
+from ..settings import settings
 from ..util.functions import get_param_info
 
 if TYPE_CHECKING:
@@ -57,13 +57,13 @@ __all__ = (
 #-----------------------------------------------------------------------------
 
 # TODO (bev) the situation with no-argument Button callbacks is a mess. We
-# should migrate to all callbacks receving the event as the param, even if that
+# should migrate to all callbacks receiving the event as the param, even if that
 # means auto-magically wrapping user-supplied callbacks for awhile.
-EventCallbackWithEvent: TypeAlias = Callable[[Event], None]
-EventCallbackWithoutEvent: TypeAlias = Callable[[], None]
-EventCallback: TypeAlias = EventCallbackWithEvent | EventCallbackWithoutEvent
+type EventCallbackWithEvent = Callable[[Event], None]
+type EventCallbackWithoutEvent = Callable[[], None]
+type EventCallback = EventCallbackWithEvent | EventCallbackWithoutEvent
 
-PropertyCallback: TypeAlias = Callable[[str, Any, Any], None]
+type PropertyCallback = Callable[[str, Any, Any], None]
 
 class EventCallbackManager:
     ''' A mixin class to provide an interface for registering and
@@ -71,7 +71,9 @@ class EventCallbackManager:
 
     '''
 
-    document: Document | None
+    @property
+    def document(self) -> Document | None: ...
+
     id: ID
     subscribed_events: set[str]
     _event_callbacks: dict[str, list[EventCallback]]
@@ -126,7 +128,9 @@ class PropertyCallbackManager:
 
     '''
 
-    document: Document | None
+    @property
+    def document(self) -> Document | None: ...
+
     _callbacks: dict[str, list[PropertyCallback]]
 
     def __init__(self, *args: Any, **kw: Any) -> None:
@@ -138,7 +142,7 @@ class PropertyCallbackManager:
 
         Args:
             attr (str) : an attribute name on this object
-            callback (callable) : a callback function to register
+            *callbacks (callable) : one or more callback functions to register
 
         Returns:
             None
@@ -166,15 +170,6 @@ class PropertyCallbackManager:
     def trigger(self, attr: str, old: Any, new: Any,
             hint: DocumentPatchedEvent | None = None, setter: Setter | None = None) -> None:
         ''' Trigger callbacks for ``attr`` on this object.
-
-        Args:
-            attr (str) :
-            old (object) :
-            new (object) :
-
-        Returns:
-            None
-
         '''
         def invoke() -> None:
             callbacks = self._callbacks.get(attr)
@@ -202,6 +197,8 @@ def _nargs(fn: Callable[..., Any]) -> int:
 
 def _check_callback(callback: Callable[..., Any], fargs: Sequence[str], what: str ="Callback functions") -> None:
     '''Bokeh-internal function to check callback signature'''
+    if not settings.perform_error_diagnostics():
+        return
     sig = signature(callback)
     all_names, default_values = get_param_info(sig)
 

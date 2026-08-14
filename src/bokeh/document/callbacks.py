@@ -25,21 +25,25 @@ log = logging.getLogger(__name__)
 import weakref
 from collections import defaultdict
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+)
 
 # Bokeh imports
-from ..core.enums import HoldPolicy, HoldPolicyType
+from ..core.enums import HoldPolicy
 from ..events import (
     _CONCRETE_EVENT_CLASSES,
     DocumentEvent,
     Event,
     ModelEvent,
 )
-from ..model import Model
 from ..models.callbacks import Callback as JSEventCallback
 from ..util.callback_manager import _check_callback
 from .events import (
-    DocumentPatchedEvent,
+    MessageSentEvent,
     ModelChangedEvent,
     RootAddedEvent,
     RootRemovedEvent,
@@ -51,10 +55,18 @@ from .locking import UnlockedDocumentProxy
 
 if TYPE_CHECKING:
     from ..application.application import SessionDestroyedCallback
+    from ..core.enums import HoldPolicyType
     from ..core.has_props import Setter
+    from ..model import Model
     from ..server.callbacks import SessionCallback
+    from . import DocumentLike
     from .document import Document
-    from .events import DocumentChangeCallback, DocumentChangedEvent, Invoker
+    from .events import (
+        DocumentChangeCallback,
+        DocumentChangedEvent,
+        DocumentPatchedEvent,
+        Invoker,
+    )
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -73,7 +85,7 @@ __all__ = (
 )
 
 
-Callback = Callable[[], None]
+Callback = Callable[[], None | Awaitable[None]]
 Originator = Callable[..., Any]
 
 MessageCallback = Callable[[Any], None]
@@ -131,6 +143,10 @@ class DocumentCallbackManager:
         self.on_message("bokeh_event", self.trigger_event)
 
     @property
+    def js_event_callbacks(self) -> dict[str, list[JSEventCallback]]:
+        return self._js_event_callbacks
+
+    @property
     def session_callbacks(self) -> list[SessionCallback]:
         ''' A list of all the session callbacks for this document.
 
@@ -148,7 +164,7 @@ class DocumentCallbackManager:
     def session_destroyed_callbacks(self, callbacks: set[SessionDestroyedCallback]) -> None:
         self._session_destroyed_callbacks = callbacks
 
-    def add_session_callback(self, callback_obj: SessionCallback, callback: Callback, one_shot: bool) -> SessionCallback:
+    def add_session_callback[T: SessionCallback](self, callback_obj: T, callback: Callback, one_shot: bool) -> T:
         ''' Internal implementation for adding session callbacks.
 
         Args:
@@ -177,7 +193,7 @@ class DocumentCallbackManager:
         actual_callback: Callback
         if one_shot:
             @wraps(callback)
-            def remove_then_invoke() -> None:
+            def remove_then_invoke() -> None | Awaitable[None]:
                 if callback_obj in self._session_callbacks:
                     self.remove_session_callback(callback_obj)
                 return callback()
@@ -381,6 +397,14 @@ class DocumentCallbackManager:
         '''
         return tuple(self._change_callbacks.values())
 
+    def send_event(self, event: Event) -> None:
+        ''' Send a bokeh/model/UI event to the client.
+
+        '''
+        document = self._document()
+        if document is not None:
+            self.trigger_on_change(MessageSentEvent(document, "bokeh_event", event))
+
     def trigger_event(self, event: Event) -> None:
         # This is fairly gorpy, we are not being careful with model vs doc events, etc.
         if isinstance(event, ModelEvent):
@@ -435,10 +459,10 @@ class DocumentCallbackManager:
 # Dev API
 #-----------------------------------------------------------------------------
 
-def invoke_with_curdoc(doc: Document, f: Callable[[], None]) -> None:
+def invoke_with_curdoc[T](doc: Document, f: Callable[[], T]) -> T:
     from ..io.doc import patch_curdoc
 
-    curdoc: Document|UnlockedDocumentProxy = UnlockedDocumentProxy(doc) if getattr(f, "nolock", False) else doc
+    curdoc: DocumentLike = UnlockedDocumentProxy(doc) if getattr(f, "nolock", False) else doc
 
     with patch_curdoc(curdoc):
         return f()
@@ -479,7 +503,7 @@ def _combine_document_events(new_event: DocumentChangedEvent, old_events: list[D
 
 def _wrap_with_curdoc(doc: Document, f: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(f)
-    def wrapper(*args: Any, **kwargs: Any) -> None:
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         @wraps(f)
         def invoke() -> Any:
             return f(*args, **kwargs)

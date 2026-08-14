@@ -25,16 +25,13 @@ from typing import Any
 # Bokeh imports
 from ...core.enums import RenderLevel
 from ...core.has_props import abstract
-from ...core.properties import (
-    Bool,
-    Either,
-    Enum,
-    Instance,
-    List,
-    Nullable,
-    Override,
-    String,
-)
+from ...core.property.container import List
+from ...core.property.either import Either
+from ...core.property.enum import Enum
+from ...core.property.instance import Instance
+from ...core.property.nullable import Nullable
+from ...core.property.override import Override
+from ...core.property.primitive import Bool, String
 from ...model import Model
 from ..coordinates import CoordinateMapping
 from ..ui.ui_element import StyledElement
@@ -61,7 +58,7 @@ class RendererGroup(Model):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     visible = Bool(default=True, help="""
@@ -79,7 +76,7 @@ class Renderer(StyledElement):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     level = Enum(RenderLevel, help="""
@@ -160,7 +157,7 @@ class DataRenderer(Renderer):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     level = Override(default="glyph")
@@ -173,7 +170,7 @@ class GuideRenderer(Renderer):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     level = Override(default="guide")

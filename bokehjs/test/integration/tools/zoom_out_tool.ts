@@ -1,4 +1,4 @@
-import {display, fig, row} from "../_util"
+import {display, fig, row} from "#framework/layouts"
 
 import type {Plot} from "@bokehjs/models"
 import {Range1d, FactorRange, ZoomOutTool, LinearScale, CategoricalScale} from "@bokehjs/models"
@@ -39,16 +39,14 @@ describe("ZoomOutTool", () => {
     const p2 = plot("Sub-coordinate zoom level 1")
 
     function data_renderers(p: Plot): DataRenderer[] {
-      return p.renderers.filter((r): r is DataRenderer => r instanceof DataRenderer)
+      return p.renderers.filter((r) => r instanceof DataRenderer)
     }
 
     const zoom_in1 = new ZoomOutTool({renderers: data_renderers(p1), level: 0})
     p1.add_tools(zoom_in1)
-    p1.toolbar.active_scroll = zoom_in1
 
     const zoom_in2 = new ZoomOutTool({renderers: data_renderers(p2), level: 1})
     p2.add_tools(zoom_in2)
-    p2.toolbar.active_scroll = zoom_in2
 
     const {view} = await display(row([p0, p1, p2]))
 

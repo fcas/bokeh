@@ -17,6 +17,7 @@ import pytest ; pytest
 #-----------------------------------------------------------------------------
 
 # Standard library imports
+from math import inf, nan
 from typing import TYPE_CHECKING
 
 # External imports
@@ -41,8 +42,8 @@ ALL = (
     'Bool',
     'Bytes',
     'Complex',
-    'Int',
     'Float',
+    'Int',
     'Null',
     'String',
 )
@@ -152,14 +153,12 @@ class Test_Complex:
         if hasattr(np, "complex256"):
             assert prop.is_valid(np.complex256(1.0+1.0j))
 
-        # TODO (bev) should fail
-        assert prop.is_valid(False)
-        assert prop.is_valid(True)
-
     def test_invalid(self) -> None:
         prop = bcpp.Complex()
 
         assert not prop.is_valid(None)
+        assert not prop.is_valid(False)
+        assert not prop.is_valid(True)
         assert not prop.is_valid("")
         assert not prop.is_valid(())
         assert not prop.is_valid([])
@@ -182,6 +181,10 @@ class Test_Complex:
 class Test_Float:
     def test_valid(self) -> None:
         prop = bcpp.Float()
+
+        assert prop.is_valid(nan)
+        assert prop.is_valid(inf)
+        assert prop.is_valid(-inf)
 
         assert prop.is_valid(0)
         assert prop.is_valid(1)
@@ -211,14 +214,12 @@ class Test_Float:
         assert prop.is_valid(np.float64(0))
         assert prop.is_valid(np.float64(1))
 
-        # TODO (bev) should fail
-        assert prop.is_valid(False)
-        assert prop.is_valid(True)
-
     def test_invalid(self) -> None:
         prop = bcpp.Float()
 
         assert not prop.is_valid(None)
+        assert not prop.is_valid(False)
+        assert not prop.is_valid(True)
         assert not prop.is_valid(1.0+1.0j)
         assert not prop.is_valid("")
         assert not prop.is_valid(())
@@ -242,11 +243,10 @@ class Test_Float:
         prop = bcpp.Float()
         assert str(prop) == "Float"
 
-
 class Test_Int:
 
     def test_eq(self) -> None:
-        assert (bcpp.Int() == int) is False
+        assert bcpp.Int() is not int
 
         assert (bcpp.Int() == bcpp.Int()) is True
         assert (bcpp.Int(default=0) == bcpp.Int()) is True
@@ -341,14 +341,12 @@ class Test_Int:
         assert prop.is_valid(np.uint64(0))
         assert prop.is_valid(np.uint64(1))
 
-        # TODO (bev) should fail
-        assert prop.is_valid(False)
-        assert prop.is_valid(True)
-
     def test_invalid(self) -> None:
         prop = bcpp.Int()
 
         assert not prop.is_valid(None)
+        assert not prop.is_valid(False)
+        assert not prop.is_valid(True)
         assert not prop.is_valid(0.0)
         assert not prop.is_valid(1.0)
         assert not prop.is_valid(1.0+1.0j)

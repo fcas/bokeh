@@ -13,6 +13,8 @@ a Bokeh |Document|.
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportReturnType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -21,7 +23,12 @@ log = logging.getLogger(__name__)
 #-----------------------------------------------------------------------------
 
 # Standard library imports
-from typing import TYPE_CHECKING, Any, Callable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    cast,
+)
 
 # Bokeh imports
 from ..core.has_props import HasProps, Qualified
@@ -59,7 +66,7 @@ class HasDocumentRef:
     _document: Document | None
     _temp_document: Document | None
 
-    def __init__(self, *args, **kw):
+    def __init__(self, *args: Any, **kw: Any):
         super().__init__(*args, **kw)
         self._document = None
         self._temp_document = None
@@ -170,7 +177,7 @@ def get_class(view_model_name: str) -> type[Model]:
 
     known_models = Model.model_class_reverse_map
     if view_model_name in known_models:
-        return known_models[view_model_name]
+        return cast(type[Model], known_models[view_model_name])
     else:
         raise KeyError(f"View model name '{view_model_name}' not found")
 
@@ -204,7 +211,7 @@ def visit_value_and_its_immediate_references(obj: Any, visitor: Callable[[Model]
     typ = type(obj)
     if typ in {int, float, str}:  # short circuit on common scalar types
         return
-    if typ is list or issubclass(typ, list | tuple):  # check common containers
+    if typ is list or issubclass(typ, (list, tuple)):  # check common containers
         for item in obj:
             visit_value_and_its_immediate_references(item, visitor)
     elif issubclass(typ, dict):

@@ -18,10 +18,7 @@ log = logging.getLogger(__name__)
 #-----------------------------------------------------------------------------
 
 # Standard library imports
-from typing import TypeAlias, overload
-
-# Bokeh imports
-from .warnings import BokehDeprecationWarning, warn
+from typing import overload
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -31,7 +28,7 @@ __all__ = (
     'deprecated',
 )
 
-Version: TypeAlias = tuple[int, int, int]
+type Version = tuple[int, int, int]
 
 #-----------------------------------------------------------------------------
 # General API
@@ -66,6 +63,8 @@ def deprecated(since_or_msg: Version | str,
             raise ValueError("deprecated(message) signature doesn't allow extra arguments")
 
         message = since_or_msg
+
+    from .warnings import BokehDeprecationWarning, warn
 
     warn(message, BokehDeprecationWarning)
 

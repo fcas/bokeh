@@ -1,12 +1,10 @@
-import {expect} from "assertions"
-import {display} from "../../../_util"
-import {tap} from "../../../../interactive"
+import {expect} from "#framework/assertions"
+import {display} from "#framework/layouts"
 
 import type {Tool} from "@bokehjs/models/tools/tool"
 import {Range1d} from "@bokehjs/models/ranges/range1d"
 import {Plot} from "@bokehjs/models/plots/plot"
 import {BoxZoomTool, PanTool, Toolbar} from "@bokehjs/models"
-import {defer} from "@bokehjs/core/util/defer"
 
 describe("BoxZoomTool", () => {
 
@@ -14,7 +12,7 @@ describe("BoxZoomTool", () => {
 
     it("should create proper tooltip", () => {
       const tool = new BoxZoomTool()
-      expect(tool.tooltip).to.be.equal("Box Zoom")
+      expect(tool.tooltip).to.be.equal("Box Zoom (either x, y or both dimensions)")
 
       const x_tool = new BoxZoomTool({dimensions: "width"})
       expect(x_tool.tooltip).to.be.equal("Box Zoom (x-axis)")
@@ -62,8 +60,7 @@ describe("BoxZoomTool", () => {
     })
 
     it("can_be_selected_and_deselected", async () => {
-      const {buttons} = await mkplot(new BoxZoomTool(), new PanTool())
-      await defer()
+      const {buttons, plot_view} = await mkplot(new BoxZoomTool(), new PanTool())
       const [zoom, pan] = buttons
 
       // Check is not active
@@ -71,14 +68,22 @@ describe("BoxZoomTool", () => {
       expect(pan.class_list.has("bk-active")).to.be.true
 
       // Click and check is active
-      await tap(zoom.el)
-      await defer()
+      zoom.tap()
+      await plot_view.ready
+
+      expect(zoom.model.tool.active).to.be.true
+      expect(pan.model.tool.active).to.be.false
+
       expect(zoom.class_list.has("bk-active")).to.be.true
       expect(pan.class_list.has("bk-active")).to.be.false
 
       // Click again and check is not active
-      await tap(zoom.el)
-      await defer()
+      zoom.tap()
+      await plot_view.ready
+
+      expect(zoom.model.tool.active).to.be.false
+      expect(pan.model.tool.active).to.be.false
+
       expect(zoom.class_list.has("bk-active")).to.be.false
       expect(pan.class_list.has("bk-active")).to.be.false
     })
@@ -121,6 +126,54 @@ describe("BoxZoomTool", () => {
 
       const vr = plot_view.frame.y_range
       expect([vr.start, vr.end]).to.be.similar([-0.36898, 0.33898])
+    })
+
+    it("should show correct zoom overlay with both dimensions", async () => {
+      const box_zoom = new BoxZoomTool({dimensions: "both"})
+      const {plot_view} = await mkplot(box_zoom)
+
+      const box_zoom_view = plot_view.owner.get_one(box_zoom)
+
+      const zoom_event0 = {type: "pan" as const, sx: 200, sy: 100, dx: 0, dy: 0, scale: 1, modifiers: {ctrl: false, shift: false, alt: false}, native: new PointerEvent("pointermove")}
+      const zoom_event1 = {type: "pan" as const, sx: 400, sy: 500, dx: 0, dy: 0, scale: 1, modifiers: {ctrl: false, shift: false, alt: false}, native: new PointerEvent("pointermove")}
+      box_zoom_view._pan_start(zoom_event0)
+      box_zoom_view._pan(zoom_event1)
+      box_zoom_view._pan_end(zoom_event1)
+
+      const {left, right, top, bottom} = box_zoom_view.model.overlay
+      expect([left, right, top, bottom]).to.be.equal([200, 400, 100, 500])
+    })
+
+    it("should show correct zoom overlay with width dimensions", async () => {
+      const box_zoom = new BoxZoomTool({dimensions: "width"})
+      const {plot_view} = await mkplot(box_zoom)
+
+      const box_zoom_view = plot_view.owner.get_one(box_zoom)
+
+      const zoom_event_width_0 = {type: "pan" as const, sx: 200, sy: 100, dx: 0, dy: 0, scale: 1, modifiers: {ctrl: false, shift: false, alt: false}, native: new PointerEvent("pointermove")}
+      const zoom_event_width_1 = {type: "pan" as const, sx: 400, sy: 100, dx: 0, dy: 0, scale: 1, modifiers: {ctrl: false, shift: false, alt: false}, native: new PointerEvent("pointermove")}
+      box_zoom_view._pan_start(zoom_event_width_0)
+      box_zoom_view._pan(zoom_event_width_1)
+      box_zoom_view._pan_end(zoom_event_width_1)
+
+      const {left, right, top, bottom} = box_zoom_view.model.overlay
+      expect([left, right, top, bottom]).to.be.equal([200, 400, 3, 597])
+    })
+
+    it("should show correct zoom overlay with height dimensions", async () => {
+      const box_zoom = new BoxZoomTool({dimensions: "height"})
+      const {plot_view} = await mkplot(box_zoom)
+
+      const box_zoom_view = plot_view.owner.get_one(box_zoom)
+
+      const zoom_event_height_0 = {type: "pan" as const, sx: 200, sy: 100, dx: 0, dy: 0, scale: 1, modifiers: {ctrl: false, shift: false, alt: false}, native: new PointerEvent("pointermove")}
+      const zoom_event_height_1 = {type: "pan" as const, sx: 200, sy: 500, dx: 0, dy: 0, scale: 1, modifiers: {ctrl: false, shift: false, alt: false}, native: new PointerEvent("pointermove")}
+      box_zoom_view._pan_start(zoom_event_height_0)
+      box_zoom_view._pan(zoom_event_height_1)
+      box_zoom_view._pan_end(zoom_event_height_1)
+
+      const {left, right, top, bottom} = box_zoom_view.model.overlay
+      expect([left, right, top, bottom]).to.be.equal([3, 572, 100, 500])
     })
   })
 })

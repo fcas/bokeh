@@ -2,17 +2,17 @@
 # See https://pre-commit.com/hooks.html for more hooks
 
 ---
-default_stages: [push]
+default_stages: [pre-push]
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.2
+    rev: v0.15.4
     hooks:
-      - id: ruff
-        stages: [commit]
+      - id: ruff-check
+        stages: [pre-commit]
 
   - repo: https://github.com/abravalheri/validate-pyproject
-    rev: v0.10.1
+    rev: v0.24.1
     hooks:
       - id: validate-pyproject
         name: Validate pyproject.toml
@@ -84,6 +84,6 @@ repos:
 
       - id: protect-branches
         name: Protect Git branches
-        entry: python scripts/hooks/protect_branches.py
+        entry: python tools/hooks/protect_branches.py
         language: conda
         pass_filenames: false

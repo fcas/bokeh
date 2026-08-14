@@ -50,7 +50,7 @@ def test_no_subcommand(capsys: Capture) -> None:
     with pytest.raises(SystemExit):
         main(["bokeh"])
     out, err = capsys.readouterr()
-    assert err == "ERROR: Must specify subcommand, one of: build, info, init, json, secret, serve or static\n"
+    assert err == "ERROR: Must specify subcommand, one of: build, info, init, json, secret, serve, settings or static\n"
     assert out == ""
 
 def test_version(capsys: Capture) -> None:
@@ -70,7 +70,7 @@ def test_error(capsys: Capture) -> None:
     Info.invoke = err
     with pytest.raises(SystemExit):
         main(["bokeh", "info"])
-    out, err = capsys.readouterr()
+    _, err = capsys.readouterr()
     assert err == 'ERROR: foo\n'
     Info.invoke = old_invoke
 

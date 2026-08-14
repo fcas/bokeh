@@ -1,20 +1,32 @@
 import {View} from "./view"
 import type {SerializableState} from "./view"
-import type {StyleSheet, StyleSheetLike} from "./dom"
-import {create_element, empty, InlineStyleSheet, ClassList} from "./dom"
+import type {StyleSheet, StyleSheetLike} from "./stylesheets"
+import {InlineStyleSheet} from "./stylesheets"
+import type {ARIARole} from "./dom"
+import {create_element, empty, ClassList} from "./dom"
 import {isString} from "./util/types"
 import {assert} from "./util/assert"
 import type {BBox} from "./util/bbox"
-import base_css from "styles/base.css"
+import {create_root_fragment} from "./vdom"
+import vars_css from "styles/vars.css"
+import core_css from "styles/core.css"
+
+import type {VNode} from "preact"
+import {render, h} from "preact"
+
+export const bokeh_element = Symbol("bokeh_element")
+
+export type RenderingTarget = HTMLElement | ShadowRoot
 
 export interface DOMView extends View {
-  constructor: Function & {tag_name: keyof HTMLElementTagNameMap}
+  constructor: Function & {tag_name: keyof HTMLElementTagNameMap, aria_role?: ARIARole}
 }
 
 export abstract class DOMView extends View {
-  declare parent: DOMView | null
+  declare readonly parent: DOMView | null
 
   static tag_name: keyof HTMLElementTagNameMap = "div"
+  static aria_role?: ARIARole
 
   el: ChildNode
   shadow_el?: ShadowRoot
@@ -53,6 +65,11 @@ export abstract class DOMView extends View {
 
   abstract render(): void
 
+  rerender(): void {
+    this.render()
+    this.r_after_render()
+  }
+
   render_to(target: Node): void {
     this.render()
     target.appendChild(this.el)
@@ -63,7 +80,7 @@ export abstract class DOMView extends View {
   }
 
   r_after_render(): void {
-    for (const child_view of this.children()) {
+    for (const child_view of this.children_views()) {
       if (child_view instanceof DOMView) {
         child_view.r_after_render()
       }
@@ -73,7 +90,9 @@ export abstract class DOMView extends View {
   }
 
   protected _create_element(): this["el"] {
-    return create_element(this.constructor.tag_name, {})
+    const el = create_element(this.constructor.tag_name, {role: this.constructor.aria_role})
+    ;(el as any)[bokeh_element] = true
+    return el
   }
 
   reposition(_displayed?: boolean): void {}
@@ -89,6 +108,16 @@ export abstract class DOMView extends View {
     this.r_after_render()
     this.notify_finished()
   }
+
+  /**
+   * Define where to render this element or let the parent decide.
+   *
+   * This is useful when creating "floating" components or adding
+   * components to canvas' layers.
+   */
+  rendering_target(): RenderingTarget | null {
+    return null
+  }
 }
 
 export abstract class DOMElementView extends DOMView {
@@ -100,6 +129,10 @@ export abstract class DOMElementView extends DOMView {
     super.initialize()
     this.class_list = new ClassList(this.el.classList)
   }
+
+  get self_target(): RenderingTarget {
+    return this.el
+  }
 }
 
 export abstract class DOMComponentView extends DOMElementView {
@@ -108,62 +141,182 @@ export abstract class DOMComponentView extends DOMElementView {
 
   declare shadow_el: ShadowRoot
 
+  override get self_target(): RenderingTarget {
+    return this.shadow_el
+  }
+
+  /**
+   * Indicates whether this element is the first to render to DOM,
+   * which affects aspects like stylesheets/theming, etc. Note that
+   * root components are typically top-level, but also non-root
+   * components like tooltips, dialogs, etc. can be top-level too.
+   */
+  get is_top_level(): boolean {
+    return this.parent == null
+  }
+
   override initialize(): void {
     super.initialize()
     this.shadow_el = this.el.attachShadow({mode: "open"})
   }
 
+  static readonly _vars_style = new InlineStyleSheet(vars_css, "vars.css")
+  static readonly _core_style = new InlineStyleSheet(core_css, "core.css")
+
+  readonly _css_vars = new InlineStyleSheet("", "vars")
+
   override stylesheets(): StyleSheetLike[] {
-    return [...super.stylesheets(), base_css]
+    const stylesheets = [...super.stylesheets()]
+    if (this.is_top_level) {
+      stylesheets.push(DOMComponentView._vars_style)
+    }
+    return [...stylesheets, DOMComponentView._core_style]
+  }
+
+  /**
+   * Baseline stylesheets, e.g. imported CSS modules.
+   */
+  static_stylesheets(): StyleSheetLike[] {
+    return this.stylesheets()
+  }
+
+  /**
+   * Stylesheets computed by the component.
+   */
+  computed_stylesheets(): InlineStyleSheet[] {
+    return [this._css_vars]
+  }
+
+  /**
+   * Other stylesheets, e.g. provided by user.
+   */
+  user_stylesheets(): StyleSheetLike[] {
+    return []
   }
 
   empty(): void {
     empty(this.shadow_el)
     this.class_list.clear()
     this._applied_css_classes = []
-    this._applied_stylesheets = []
   }
 
+  private _rendered_to: boolean = false
+  override render_to(target: Node): void {
+    if (this.is_vdom) {
+      target.appendChild(this.el)
+    }
+    if (!this._rendered_to) {
+      this.render()
+      this._rendered_to = true
+    }
+    if (!this.is_vdom) {
+      target.appendChild(this.el)
+    }
+  }
+
+  get is_vdom(): boolean {
+    return this.component != null
+  }
+
+  component?(): VNode
+
   render(): void {
-    this.empty()
-    this._update_stylesheets()
+    if (this.component != null) {
+      const component = h(this.component.bind(this), {})
+      const parent = this.el.parentNode
+      assert(parent != null, "attempted to render vDOM into a detached DOM node")
+      const target = create_root_fragment(parent, this.el)
+      render(component, target)
+    } else {
+      this.empty()
+      this._apply_stylesheets()
+      this._apply_html_attributes()
+    }
+  }
+
+  protected _applied_html_attributes: string[] = []
+  protected _apply_html_attributes(): void {
     this._update_css_classes()
-    this._update_css_variables()
   }
 
   override reposition(_displayed?: boolean): void {
     this._update_css_variables() // TODO remove this when node invalidation is implemented
   }
 
-  protected *_stylesheets(): Iterable<StyleSheet> {
-    for (const style of this.stylesheets()) {
-      yield isString(style) ? new InlineStyleSheet(style) : style
+  protected *_stylesheets(): Iterable<StyleSheetLike> {
+    yield* this.static_stylesheets()
+    yield* this.computed_stylesheets()
+    yield* this.user_stylesheets()
+  }
+
+  get resolved_stylesheets(): StyleSheet[] {
+    return [...this._stylesheets()].map((style) => isString(style) ? new InlineStyleSheet(style) : style)
+  }
+
+  get resolved_css_classes(): string[] {
+    return [...this._css_classes()]
+  }
+
+  get resolved_style(): {[key: string]: string | null | undefined} {
+    return {}
+  }
+
+  get resolved_props() {
+    return {
+      stylesheets: this.resolved_stylesheets,
+      classes: this.resolved_css_classes,
+      style: this.resolved_style,
     }
   }
 
+  get type_class(): string {
+    return `bk-${this.model.type.replace(/\./g, "-")}`
+  }
+
+  readonly component_id: string = `bk-${this.model.id}`
+
+  readonly host_selector = ":host" // TODO `:host(.${this.component_id})`
+
   protected *_css_classes(): Iterable<string> {
-    yield `bk-${this.model.type.replace(/\./g, "-")}`
+    yield this.type_class
+    yield this.component_id
     yield* this.css_classes()
   }
 
   protected *_css_variables(): Iterable<[string, string]> {}
 
-  protected _applied_stylesheets: StyleSheet[] = []
-  protected _apply_stylesheets(stylesheets: StyleSheet[]): void {
-    this._applied_stylesheets.push(...stylesheets)
-    stylesheets.forEach((stylesheet) => stylesheet.install(this.shadow_el))
+  protected _applied_stylesheets: HTMLElement[] = []
+  protected _apply_stylesheets(): void {
+    for (const el of this._applied_stylesheets) {
+      el.remove()
+    }
+
+    const adopted: CSSStyleSheet[] = []
+    const links: HTMLElement[] = []
+    const global: HTMLElement[] = []
+    for (const stylesheet of this.resolved_stylesheets) {
+      if (!stylesheet.is_global) {
+        if (stylesheet.is_inline) {
+          adopted.push(stylesheet.to_native())
+        } else {
+          links.push(stylesheet.to_element())
+        }
+      } else {
+        global.push(stylesheet.to_element())
+      }
+    }
+
+    this.shadow_el.adoptedStyleSheets = adopted
+    this.shadow_el.append(...links)
+    document.head.append(...global)
+
+    this._applied_stylesheets = [...global, ...links]
   }
 
   protected _applied_css_classes: string[] = []
   protected _apply_css_classes(classes: string[]): void {
     this._applied_css_classes.push(...classes)
     this.class_list.add(...classes)
-  }
-
-  protected _update_stylesheets(): void {
-    this._applied_stylesheets.forEach((stylesheet) => stylesheet.uninstall())
-    this._applied_stylesheets = []
-    this._apply_stylesheets([...this._stylesheets()])
   }
 
   protected _update_css_classes(): void {
@@ -173,9 +326,15 @@ export abstract class DOMComponentView extends DOMElementView {
   }
 
   protected _update_css_variables(): void {
+    const vars = []
     for (const [name, value] of this._css_variables()) {
       const full_name = name.startsWith("--") ? name : `--${name}`
-      this.el.style.setProperty(full_name, value)
+      vars.push(`${full_name}: ${value};\n`)
+    }
+    if (vars.length == 0) {
+      this._css_vars.clear()
+    } else {
+      this._css_vars.replace(`${this.host_selector} {\n${vars}}`)
     }
   }
 }

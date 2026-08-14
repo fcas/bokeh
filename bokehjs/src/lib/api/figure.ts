@@ -35,7 +35,9 @@ import {
   MercatorAxis,
   Range,
   Range1d,
+  TimedeltaAxis,
   Tool,
+  ToolProxy,
 } from "./models"
 
 import {Legend} from "../models/annotations/legend"
@@ -44,12 +46,12 @@ import type {ToolAliases} from "../models/tools/tool"
 import {Figure as BaseFigure} from "../models/plots/figure"
 import {GestureTool} from "../models/tools/gestures/gesture_tool"
 
-import type {TypedGlyphRenderer, NamesOf, AuxGlyph} from "./glyph_api"
+import type {NamesOf, AuxGlyph} from "./glyph_api"
 import {GlyphAPI} from "./glyph_api"
 
 export type ToolName = keyof ToolAliases
 
-const _default_tools: ToolName[] = ["pan", "wheel_zoom", "box_zoom", "save", "reset", "help"]
+const _default_tools: ToolName[] = ["pan", "wheel_zoom", "auto_box_zoom", "save", "reset", "help"]
 
 // export type ExtMarkerType = MarkerType | "*" | "+" | "o" | "ox" | "o+"
 
@@ -57,7 +59,7 @@ const _default_color = "#1f77b4"
 
 const _default_alpha = 1.0
 
-export type AxisType = "auto" | "linear" | "datetime" | "log" | "mercator" | null
+export type AxisType = "auto" | "linear" | "datetime" | "timedelta" | "log" | "mercator" | null
 export type AxisLocation = Location | null
 
 export namespace Figure {
@@ -150,7 +152,7 @@ export class SubFigure extends GlyphAPI {
     super()
   }
 
-  _glyph<G extends Glyph>(cls: Class<G>, method: string, positional: NamesOf<G>, args: unknown[], overrides?: object): TypedGlyphRenderer<G> {
+  _glyph<G extends Glyph>(cls: Class<G>, method: string, positional: NamesOf<G>, args: unknown[], overrides?: object): GlyphRenderer<G> {
     const {coordinates} = this
     return this.parent._glyph(cls, method, positional, args, {coordinates, ...overrides})
   }
@@ -160,13 +162,13 @@ export interface Figure extends GlyphAPI {}
 export class Figure extends BaseFigure {
 
   get xaxes(): Axis[] {
-    return [...this.below, ...this.above].filter((r): r is Axis => r instanceof Axis)
+    return [...this.below, ...this.above].filter((r) => r instanceof Axis)
   }
   get yaxes(): Axis[] {
-    return [...this.left, ...this.right].filter((r): r is Axis => r instanceof Axis)
+    return [...this.left, ...this.right].filter((r) => r instanceof Axis)
   }
   get axes(): Axis[] {
-    return [...this.below, ...this.above, ...this.left, ...this.right].filter((r): r is Axis => r instanceof Axis)
+    return [...this.below, ...this.above, ...this.left, ...this.right].filter((r) => r instanceof Axis)
   }
 
   get xaxis(): Proxied<Axis> {
@@ -180,13 +182,13 @@ export class Figure extends BaseFigure {
   }
 
   get xgrids(): Grid[] {
-    return this.center.filter((r): r is Grid => r instanceof Grid && r.dimension == 0)
+    return this.center.filter((r) => r instanceof Grid).filter((grid) => grid.dimension == 0)
   }
   get ygrids(): Grid[] {
-    return this.center.filter((r): r is Grid => r instanceof Grid && r.dimension == 1)
+    return this.center.filter((r) => r instanceof Grid).filter((grid) => grid.dimension == 1)
   }
   get grids(): Grid[] {
-    return this.center.filter((r): r is Grid => r instanceof Grid)
+    return this.center.filter((r) => r instanceof Grid)
   }
 
   get xgrid(): Proxied<Grid> {
@@ -200,7 +202,7 @@ export class Figure extends BaseFigure {
   }
 
   get legend(): Legend {
-    const legends = this.panels.filter((r): r is Legend => r instanceof Legend)
+    const legends = this.panels.filter((r) => r instanceof Legend)
 
     if (legends.length == 0) {
       const legend = new Legend()
@@ -303,7 +305,7 @@ export class Figure extends BaseFigure {
 
     if (isString(active_drag) && active_drag != "auto") {
       const tool = tool_map.get(active_drag)
-      if (tool != null) {
+      if (tool instanceof GestureTool || tool instanceof ToolProxy) {
         this.toolbar.active_drag = tool
       }
     } else if (active_drag !== undefined) {
@@ -321,7 +323,7 @@ export class Figure extends BaseFigure {
 
     if (isString(active_scroll) && active_scroll != "auto") {
       const tool = tool_map.get(active_scroll)
-      if (tool != null) {
+      if (tool instanceof GestureTool || tool instanceof ToolProxy) {
         this.toolbar.active_scroll = tool
       }
     } else if (active_scroll !== undefined) {
@@ -330,7 +332,7 @@ export class Figure extends BaseFigure {
 
     if (isString(active_tap) && active_tap != "auto") {
       const tool = tool_map.get(active_tap)
-      if (tool != null) {
+      if (tool instanceof GestureTool || tool instanceof ToolProxy) {
         this.toolbar.active_tap = tool
       }
     } else if (active_tap !== undefined) {
@@ -339,7 +341,7 @@ export class Figure extends BaseFigure {
 
     if (isString(active_multi) && active_multi != "auto") {
       const tool = tool_map.get(active_multi)
-      if (tool instanceof GestureTool) {
+      if (tool instanceof GestureTool || tool instanceof ToolProxy) {
         this.toolbar.active_multi = tool
       }
     } else if (active_multi !== undefined) {
@@ -484,7 +486,7 @@ export class Figure extends BaseFigure {
     return `the method signature is ${method}(${positional.join(", ")}, args?)`
   }
 
-  _glyph<G extends Glyph>(cls: Class<G>, method: string, positional: NamesOf<G>, args: unknown[], overrides: object = {}): TypedGlyphRenderer<G> {
+  _glyph<G extends Glyph>(cls: Class<G>, method: string, positional: NamesOf<G>, args: unknown[], overrides: object = {}): GlyphRenderer<G> {
     let attrs: Attrs & Partial<AuxGlyph>
 
     const n_args = args.length
@@ -620,7 +622,7 @@ export class Figure extends BaseFigure {
     }
 
     this.add_renderers(glyph_renderer)
-    return glyph_renderer as TypedGlyphRenderer<G>
+    return glyph_renderer as GlyphRenderer<G>
   }
 
   static _get_range(range?: Range | [number, number] | ArrayLike<string>): Range {
@@ -650,6 +652,7 @@ export class Figure extends BaseFigure {
         case "auto":
         case "linear":
         case "datetime":
+        case "timedelta":
         case "mercator":
           return new LinearScale()
         case "log":
@@ -700,6 +703,8 @@ export class Figure extends BaseFigure {
         return new LogAxis()
       case "datetime":
         return new DatetimeAxis()
+      case "timedelta":
+        return new TimedeltaAxis()
       case "mercator": {
         const axis = new MercatorAxis()
         const dimension = dim == 0 ? "lon" : "lat"

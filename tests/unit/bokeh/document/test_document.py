@@ -38,6 +38,7 @@ from bokeh.core.serialization import (
     MapRep,
     ObjectRefRep,
     Ref,
+    Serialized,
     UnknownReferenceError,
 )
 from bokeh.core.types import ID
@@ -55,6 +56,7 @@ from bokeh.document.json import ModelChanged, PatchJson
 from bokeh.io.doc import curdoc
 from bokeh.model import DataModel
 from bokeh.models import ColumnDataSource
+from bokeh.models.ui.notifications import Notifications
 from bokeh.protocol.messages.patch_doc import patch_doc
 from bokeh.server.contexts import BokehSessionContext
 from bokeh.util.logconfig import basicConfig
@@ -136,6 +138,101 @@ class TestDocument:
         d._session_context = weakref.ref(sc)
         assert d.session_context is sc
 
+    def test_locked_callback_requires_server_session(self) -> None:
+        d = document.Document()
+
+        with pytest.raises(RuntimeError, match="require a Bokeh server session"):
+            @d.locked_callback
+            def update() -> None:
+                pass
+
+    def test_locked_callback_rejects_unknown_policy(self) -> None:
+        d = document.Document()
+
+        with pytest.raises(ValueError, match="unknown locked callback policy"):
+            @d.locked_callback(policy="unknown") # type: ignore[arg-type]
+            def update() -> None:
+                pass
+
+    def test_locked_callback_latest_coalesces_and_preserves_metadata(self) -> None:
+        d = document.Document()
+        sc = BokehSessionContext(None, None, d)
+        d._session_context = weakref.ref(sc)
+        scheduled: list[Any] = []
+        calls: list[int] = []
+
+        with patch.object(d, "add_next_tick_callback", side_effect=lambda callback: scheduled.append(callback)):
+            @d.locked_callback(policy="latest")
+            def update(value: int) -> None:
+                ''' Update the value. '''
+                calls.append(value)
+
+            assert update.__name__ == "update"
+            assert update.__doc__ == update.__wrapped__.__doc__
+            assert update.policy == "latest"
+            assert not update.pending
+            assert not update.closed
+
+            update(1)
+            update(2)
+            update(3)
+
+            assert update.pending
+            assert len(scheduled) == 1
+            scheduled.pop(0)()
+
+            assert calls == [3]
+            assert not update.pending
+
+    def test_locked_callback_every_continues_after_exception(self) -> None:
+        d = document.Document()
+        sc = BokehSessionContext(None, None, d)
+        d._session_context = weakref.ref(sc)
+        scheduled: list[Any] = []
+        calls: list[int] = []
+
+        with patch.object(d, "add_next_tick_callback", side_effect=lambda callback: scheduled.append(callback)):
+            @d.locked_callback
+            def update(value: int) -> None:
+                calls.append(value)
+                if value == 1:
+                    raise RuntimeError("transient failure")
+
+            update(1)
+            update(2)
+
+            assert len(scheduled) == 1
+            with pytest.raises(RuntimeError, match="transient failure"):
+                scheduled.pop(0)()
+
+            assert len(scheduled) == 1
+            scheduled.pop(0)()
+            assert calls == [1, 2]
+            assert not update.pending
+
+    def test_locked_callback_closes_on_session_destroyed(self) -> None:
+        d = document.Document()
+        sc = BokehSessionContext(None, None, d)
+        d._session_context = weakref.ref(sc)
+        scheduled: list[Any] = []
+        calls: list[int] = []
+
+        with patch.object(d, "add_next_tick_callback", side_effect=lambda callback: scheduled.append(callback)):
+            @d.locked_callback()
+            def update(value: int) -> None:
+                calls.append(value)
+
+            update(1)
+            for callback in d.session_destroyed_callbacks:
+                callback(sc)
+
+            assert update.closed
+            assert not update.pending
+
+            update(2)
+            scheduled.pop(0)()
+            assert calls == []
+
     def test_add_roots(self) -> None:
         d = document.Document()
         assert not d.roots
@@ -166,33 +263,107 @@ class TestDocument:
         d.title = "Foo"
         assert d.title == "Foo"
 
+    def test_config_is_part_of_model_graph(self) -> None:
+        d = document.Document()
+
+        assert d.config.document is d
+        assert d.config.notifications is not None
+        assert d.config.notifications.document is d
+        assert d.config.id in d.models
+        assert d.config.notifications.id in d.models
+
+    def test_config_change_notification(self) -> None:
+        d = document.Document()
+        events: list[ModelChangedEvent] = []
+        d.on_change(lambda event: events.append(event))
+
+        d.config.notify_connection_status = False
+
+        assert len(events) == 1
+        assert events[0].model is d.config
+        assert events[0].attr == "notify_connection_status"
+        assert events[0].new is False
+
+    def test_nested_config_change_notification(self) -> None:
+        d = document.Document()
+        events: list[ModelChangedEvent] = []
+        d.on_change(lambda event: events.append(event))
+        assert d.config.notifications is not None
+
+        d.config.notifications.visible = False
+
+        assert len(events) == 1
+        assert events[0].model is d.config.notifications
+        assert events[0].attr == "visible"
+        assert events[0].new is False
+
+    def test_replacing_config_reference_updates_model_graph(self) -> None:
+        d = document.Document()
+        old = d.config.notifications
+        new = Notifications()
+        assert old is not None
+
+        d.config.notifications = new
+
+        assert old.document is None
+        assert old.id not in d.models
+        assert new.document is d
+        assert new.id in d.models
+
+    def test_deserialized_config_is_part_of_model_graph(self) -> None:
+        d = document.Document()
+        d.config.color_scheme = "dark"
+
+        copy = document.Document.from_json(d.to_json())
+
+        assert copy.config.color_scheme == "dark"
+        assert copy.config.document is copy
+        assert copy.config.id in copy.models
+        assert copy.config.notifications is not None
+        assert copy.config.notifications.document is copy
+        assert copy.config.notifications.id in copy.models
+
+    def test_config_patch_preserves_setter(self) -> None:
+        d = document.Document()
+        events: list[ModelChangedEvent] = []
+        d.on_change(lambda event: events.append(event))
+        setter = object()
+        event = ModelChangedEvent(d, d.config, "color_scheme", "dark")
+        patch = patch_doc.create([event]).content
+
+        d.apply_json_patch(patch, setter=setter)
+
+        assert d.config.color_scheme == "dark"
+        assert len(events) == 1
+        assert events[0].setter is setter
+
     def test_all_models(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         m = SomeModelInTestDocument()
         m2 = AnotherModelInTestDocument()
         m.child = m2
         d.add_root(m)
         assert len(d.roots) == 1
-        assert len(d.models) == 2
+        assert len(d.models) == 4
         m.child = None
-        assert len(d.models) == 1
+        assert len(d.models) == 3
         m.child = m2
-        assert len(d.models) == 2
+        assert len(d.models) == 4
         d.remove_root(m)
-        assert len(d.models) == 0
+        assert len(d.models) == 2
 
     def test_get_model_by_id(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         m = SomeModelInTestDocument()
         m2 = AnotherModelInTestDocument()
         m.child = m2
         d.add_root(m)
         assert len(d.roots) == 1
-        assert len(d.models) == 2
+        assert len(d.models) == 4
         assert d.get_model_by_id(m.id) == m
         assert d.get_model_by_id(m2.id) == m2
         assert d.get_model_by_id("not a valid ID") is None
@@ -200,13 +371,13 @@ class TestDocument:
     def test_get_model_by_name(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         m = SomeModelInTestDocument(name="foo")
         m2 = AnotherModelInTestDocument(name="bar")
         m.child = m2
         d.add_root(m)
         assert len(d.roots) == 1
-        assert len(d.models) == 2
+        assert len(d.models) == 4
         assert d.get_model_by_name(m.name) == m
         assert d.get_model_by_name(m2.name) == m2
         assert d.get_model_by_name("not a valid name") is None
@@ -324,7 +495,7 @@ class TestDocument:
     def test_all_models_with_multiple_references(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         root1 = SomeModelInTestDocument()
         root2 = SomeModelInTestDocument()
         child1 = AnotherModelInTestDocument()
@@ -333,24 +504,24 @@ class TestDocument:
         d.add_root(root1)
         d.add_root(root2)
         assert len(d.roots) == 2
-        assert len(d.models) == 3
+        assert len(d.models) == 5
         root1.child = None
-        assert len(d.models) == 3
+        assert len(d.models) == 5
         root2.child = None
-        assert len(d.models) == 2
+        assert len(d.models) == 4
         root1.child = child1
-        assert len(d.models) == 3
+        assert len(d.models) == 5
         root2.child = child1
-        assert len(d.models) == 3
+        assert len(d.models) == 5
         d.remove_root(root1)
-        assert len(d.models) == 2
+        assert len(d.models) == 4
         d.remove_root(root2)
-        assert len(d.models) == 0
+        assert len(d.models) == 2
 
     def test_all_models_with_cycles(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         root1 = SomeModelInTestDocument()
         root2 = SomeModelInTestDocument()
         child1 = SomeModelInTestDocument()
@@ -362,23 +533,23 @@ class TestDocument:
         print("adding root2")
         d.add_root(root2)
         assert len(d.roots) == 2
-        assert len(d.models) == 3
+        assert len(d.models) == 5
         print("clearing child of root1")
         root1.child = None
-        assert len(d.models) == 3
+        assert len(d.models) == 5
         print("clearing child of root2")
         root2.child = None
-        assert len(d.models) == 2
+        assert len(d.models) == 4
         print("putting child1 back in root1")
         root1.child = child1
-        assert len(d.models) == 3
+        assert len(d.models) == 5
 
         print("Removing root1")
         d.remove_root(root1)
-        assert len(d.models) == 1
+        assert len(d.models) == 3
         print("Removing root2")
         d.remove_root(root2)
-        assert len(d.models) == 0
+        assert len(d.models) == 2
 
     def test_change_notification(self) -> None:
         d = document.Document()
@@ -676,13 +847,13 @@ class TestDocument:
         assert d.title == "Foo"
         d.clear()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         assert d.title == "Foo" # do not reset title
 
     def test_serialization_one_model(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         root1 = SomeModelInTestDocument()
         d.add_root(root1)
         d.title = "Foo"
@@ -696,7 +867,7 @@ class TestDocument:
     def test_serialization_more_models(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         root1 = SomeModelInTestDocument(foo=42)
         root2 = SomeModelInTestDocument(foo=43)
         child1 = SomeModelInTestDocument(foo=44)
@@ -732,7 +903,8 @@ class TestDocument:
         #doc.add_root(obj3)
 
         json = doc.to_json()
-        assert json["defs"] == [
+        assert isinstance(json, Serialized)
+        assert json.content["defs"] == [
             ModelDef(
                 type="model",
                 name="test_document.SomeDataModel",
@@ -796,13 +968,13 @@ class TestDocument:
     def test_serialization_has_version(self) -> None:
         from bokeh import __version__
         d = document.Document()
-        json = d.to_json()
-        assert json['version'] == __version__
+        json = d.to_json().content
+        assert json["version"] == __version__
 
     def test_patch_integer_property(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         root1 = SomeModelInTestDocument(foo=42)
         root2 = SomeModelInTestDocument(foo=43)
         child1 = SomeModelInTestDocument(foo=44)
@@ -827,7 +999,7 @@ class TestDocument:
     def test_patch_spec_property(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         root1 = ModelWithSpecInTestDocument(foo=42)
         d.add_root(root1)
         assert len(d.roots) == 1
@@ -877,7 +1049,7 @@ class TestDocument:
     def test_patch_reference_property(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         root1 = SomeModelInTestDocument(foo=42)
         root2 = SomeModelInTestDocument(foo=43)
         child1 = SomeModelInTestDocument(foo=44)
@@ -924,7 +1096,7 @@ class TestDocument:
     def test_patch_two_properties_at_once(self) -> None:
         d = document.Document()
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         root1 = SomeModelInTestDocument(foo=42)
         child1 = SomeModelInTestDocument(foo=43)
         root1.child = child1
@@ -990,7 +1162,7 @@ class TestDocument:
             references=[],
         )
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.DEBUG):
             assert len(caplog.records) == 0
             doc.apply_json_patch(patch)
             assert len(caplog.records) == 1
@@ -1034,7 +1206,7 @@ class TestDocument:
         d = document.Document()
         set_curdoc(d)
         assert not d.roots
-        assert len(d.models) == 0
+        assert len(d.models) == 2
         p1 = figure(tools=[])
         N = 10
         x = np.linspace(0, 4 * np.pi, N)

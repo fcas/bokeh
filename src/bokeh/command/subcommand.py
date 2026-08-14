@@ -24,21 +24,16 @@ log = logging.getLogger(__name__)
 # Standard library imports
 from abc import ABCMeta, abstractmethod
 from argparse import ArgumentParser, Namespace
+from dataclasses import dataclass
 from typing import (
     Any,
     ClassVar,
     Literal,
     Sequence,
-    TypeAlias,
 )
 
 # Bokeh imports
-from ..util.dataclasses import (
-    NotRequired,
-    Unspecified,
-    dataclass,
-    entries,
-)
+from ..util.dataclasses import NotRequired, Unspecified, entries
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -68,8 +63,8 @@ class Argument:
     help: NotRequired[str] = Unspecified
     metavar: NotRequired[str] = Unspecified
 
-Arg: TypeAlias = tuple[str | tuple[str, ...], Argument]
-Args: TypeAlias = tuple[Arg, ...]
+type Arg = tuple[str | tuple[str, ...], Argument]
+type Args = tuple[Arg, ...]
 
 class Subcommand(metaclass=ABCMeta):
     ''' Abstract base class for subcommands

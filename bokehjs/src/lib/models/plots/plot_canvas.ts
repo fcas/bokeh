@@ -1,20 +1,23 @@
 import {CartesianFrame} from "../canvas/cartesian_frame"
+import {CanvasPanel} from "../canvas/canvas_panel"
 import type {CartesianFrameView} from "../canvas/cartesian_frame"
-import type {CanvasView, FrameBox} from "../canvas/canvas"
+import type {CanvasView} from "../canvas/canvas"
 import {Canvas} from "../canvas/canvas"
 import type {Renderer} from "../renderers/renderer"
 import {RendererView} from "../renderers/renderer"
+import {CompositeRendererView} from "../renderers/composite_renderer"
 import type {DataRenderer} from "../renderers/data_renderer"
 import type {Range} from "../ranges/range"
 import type {Tool} from "../tools/tool"
 import {ToolProxy} from "../tools/tool_proxy"
+import {ToolMenu} from "../tools/tool_menu"
 import type {Selection} from "../selections/selection"
-import type {LayoutDOM, DOMBoxSizing, FullDisplay} from "../layouts/layout_dom"
-import {LayoutDOMView} from "../layouts/layout_dom"
+import type {DOMBoxSizing} from "../layouts/layout_dom"
+import {LayoutDOM, LayoutDOMView} from "../layouts/layout_dom"
 import type {Plot} from "./plot"
 import {Annotation, AnnotationView} from "../annotations/annotation"
 import {Title} from "../annotations/title"
-import type {Axis} from "../axes/axis"
+import {Axis} from "../axes/axis"
 import {AxisView} from "../axes/axis"
 import type {ToolbarPanelView} from "../annotations/toolbar_panel"
 import {ToolbarPanel} from "../annotations/toolbar_panel"
@@ -26,22 +29,22 @@ import {Panel} from "../ui/panel"
 import {Div} from "../dom/elements"
 
 import {Reset} from "core/bokeh_events"
-import type {ViewStorage, IterViews, ViewOf, BuildResult} from "core/build_views"
-import {build_views, remove_views} from "core/build_views"
+import type {ViewStorage, ChildView, View, ViewOf, BuildResult} from "core/build_views"
+import {build_views} from "core/build_views"
 import type {Paintable} from "core/visuals"
 import {Visuals} from "core/visuals"
 import {logger} from "core/logging"
 import {RangesUpdate} from "core/bokeh_events"
 import type {Side, RenderLevel} from "core/enums"
-import type {View} from "core/view"
 import {Signal0} from "core/signaling"
 import {throttle} from "core/util/throttle"
-import {isBoolean, isArray, isString, isNotNull} from "core/util/types"
+import {isBoolean, isArray, isString} from "core/util/types"
 import {copy, reversed} from "core/util/array"
 import {flat_map} from "core/util/iterator"
 import type {Context2d} from "core/util/canvas"
-import {CanvasLayer} from "core/util/canvas"
+import {CanvasLayer, is_Exportable} from "core/util/canvas"
 import type {Layoutable} from "core/layout"
+import {ElementLayout} from "core/layout"
 import {HStack, VStack, NodeLayout} from "core/layout/alignments"
 import {BorderLayout} from "core/layout/border"
 import {Row, Column} from "core/layout/grid"
@@ -55,21 +58,55 @@ import type {StateInfo} from "./state_manager"
 import {StateManager} from "./state_manager"
 import {settings} from "core/settings"
 import type {StyleSheetLike} from "core/dom"
-import {InlineStyleSheet, px} from "core/dom"
+import {InlineStyleSheet, px, div} from "core/dom"
 import type {XY as XY_} from "../coordinates/xy"
 import type {Indexed} from "../coordinates/indexed"
 import {Node} from "../coordinates/node"
+import type {StyledElement} from "../ui/styled_element"
 
-import plots_css from "styles/plots.css"
-import attribution_css from "styles/attribution.css"
+import * as plots_css from "styles/plots.css"
+import * as canvas_css from "styles/canvas.css"
+import * as attribution_css from "styles/attribution.css"
 
 const {max} = Math
+
+type Panels = (Axis | Annotation | Annotation[] | StyledElement)[]
+type LayoutPanels = {
+  outer_above: Panels
+  outer_below: Panels
+  outer_left: Panels
+  outer_right: Panels
+  inner_above: Panels
+  inner_below: Panels
+  inner_left: Panels
+  inner_right: Panels
+}
 
 export class PlotView extends LayoutDOMView implements Paintable {
   declare model: Plot
   visuals: Plot.Visuals
 
   declare layout: BorderLayout
+
+  private _top_panel: CanvasPanel
+  private _bottom_panel: CanvasPanel
+  private _left_panel: CanvasPanel
+  private _right_panel: CanvasPanel
+
+  top_panel: ViewOf<CanvasPanel>
+  bottom_panel: ViewOf<CanvasPanel>
+  left_panel: ViewOf<CanvasPanel>
+  right_panel: ViewOf<CanvasPanel>
+
+  private _inner_top_panel: CanvasPanel
+  private _inner_bottom_panel: CanvasPanel
+  private _inner_left_panel: CanvasPanel
+  private _inner_right_panel: CanvasPanel
+
+  inner_top_panel: ViewOf<CanvasPanel>
+  inner_bottom_panel: ViewOf<CanvasPanel>
+  inner_left_panel: ViewOf<CanvasPanel>
+  inner_right_panel: ViewOf<CanvasPanel>
 
   private _frame: CartesianFrame
   frame_view: CartesianFrameView
@@ -87,10 +124,10 @@ export class PlotView extends LayoutDOMView implements Paintable {
 
   readonly repainted = new Signal0(this, "repainted")
 
-  protected _computed_style = new InlineStyleSheet()
+  protected readonly _computed_style = new InlineStyleSheet("", "computed")
 
   override stylesheets(): StyleSheetLike[] {
-    return [...super.stylesheets(), plots_css, this._computed_style]
+    return [...super.stylesheets(), plots_css.default, this._computed_style]
   }
 
   protected _title?: Title
@@ -102,7 +139,6 @@ export class PlotView extends LayoutDOMView implements Paintable {
     return this._toolbar != null ? this.views.find_one(this._toolbar) : null
   }
 
-  protected _outer_bbox: BBox = new BBox()
   protected _inner_bbox: BBox = new BBox()
   protected _needs_paint: boolean = true
   protected _invalidated_painters: Set<RendererView> = new Set()
@@ -123,12 +159,24 @@ export class PlotView extends LayoutDOMView implements Paintable {
 
   protected _initial_state: StateInfo
 
-  protected throttled_paint: () => void
+  protected throttled_paint: () => Promise<void>
 
   computed_renderers: Renderer[] = []
+  protected _computed_renderer_views: RendererView[] = []
 
   get computed_renderer_views(): RendererView[] {
-    return this.computed_renderers.map((r) => this.renderer_views.get(r)).filter(isNotNull) // TODO race condition again
+    return this._computed_renderer_views
+  }
+
+  get all_renderer_views(): RendererView[] {
+    const collected: RendererView[] = []
+    for (const rv of this.computed_renderer_views) {
+      collected.push(rv)
+      if (rv instanceof CompositeRendererView) {
+        collected.push(...rv.computed_renderer_views)
+      }
+    }
+    return collected
   }
 
   get auto_ranged_renderers(): (RendererView & AutoRanged)[] {
@@ -152,10 +200,8 @@ export class PlotView extends LayoutDOMView implements Paintable {
   /*protected*/ readonly renderer_views: ViewStorage<Renderer> = new Map()
   /*protected*/ readonly tool_views: ViewStorage<Tool> = new Map()
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield* this.renderer_views.values()
-    yield* this.tool_views.values()
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), ...this.renderer_views.values(), ...this.tool_views.values()]
   }
 
   get child_models(): LayoutDOM[] {
@@ -212,12 +258,14 @@ export class PlotView extends LayoutDOMView implements Paintable {
 
   schedule_paint(): void {
     if (!this.is_paused) {
-      const promise = this.throttled_paint()
-      this._ready = this._ready.then(() => promise)
+      this._await_ready(this.throttled_paint())
     }
   }
 
-  request_layout(): void {
+  request_layout(force: boolean = false): void {
+    if (force) {
+      this._needs_layout = true
+    }
     this.request_repaint()
   }
 
@@ -230,10 +278,8 @@ export class PlotView extends LayoutDOMView implements Paintable {
     this.model.trigger_event(new Reset())
   }
 
-  override remove(): void {
-    remove_views(this.renderer_views)
-    remove_views(this.tool_views)
-    super.remove()
+  protected override _provide_context_menu(): Menu | null {
+    return new ToolMenu({toolbar: this.model.toolbar})
   }
 
   override get_context_menu(xy: XY): ViewOf<Menu> | null {
@@ -256,10 +302,21 @@ export class PlotView extends LayoutDOMView implements Paintable {
     this.visuals = new Visuals(this) as Plot.Visuals
 
     this._initial_state = {
-      selection: new Map(),               // XXX: initial selection?
+      selection: new Map(), // XXX: initial selection?
     }
 
+    this._top_panel = new CanvasPanel({place: "above"})
+    this._bottom_panel = new CanvasPanel({place: "below"})
+    this._left_panel = new CanvasPanel({place: "left"})
+    this._right_panel = new CanvasPanel({place: "right"})
+
+    this._inner_top_panel = new CanvasPanel({place: "above", inner: true})
+    this._inner_bottom_panel = new CanvasPanel({place: "below", inner: true})
+    this._inner_left_panel = new CanvasPanel({place: "left", inner: true})
+    this._inner_right_panel = new CanvasPanel({place: "right", inner: true})
+
     this._frame = new CartesianFrame({
+      place: "center",
       x_scale: this.model.x_scale,
       y_scale: this.model.y_scale,
       x_range: this.model.x_range,
@@ -303,7 +360,7 @@ export class PlotView extends LayoutDOMView implements Paintable {
       css_variables: {
         "--max-width": new Node({target: "frame", symbol: "width"}),
       },
-      stylesheets: [attribution_css],
+      stylesheets: [attribution_css.default],
     })
 
     this._notifications = new Panel({
@@ -334,7 +391,21 @@ export class PlotView extends LayoutDOMView implements Paintable {
   }
 
   override get elements(): ElementLike[] {
-    return [this._canvas, this._frame, this._attribution, this._notifications, ...super.elements]
+    return [
+      this._canvas,
+      this._frame,
+      this._top_panel,
+      this._bottom_panel,
+      this._left_panel,
+      this._right_panel,
+      this._inner_top_panel,
+      this._inner_bottom_panel,
+      this._inner_left_panel,
+      this._inner_right_panel,
+      this._attribution,
+      this._notifications,
+      ...super.elements,
+    ]
   }
 
   override async lazy_initialize(): Promise<void> {
@@ -345,10 +416,21 @@ export class PlotView extends LayoutDOMView implements Paintable {
 
     this.frame_view = this._element_views.get(this._frame)! as CartesianFrameView
 
+    this.top_panel = this._element_views.get(this._top_panel)! as ViewOf<CanvasPanel>
+    this.bottom_panel = this._element_views.get(this._bottom_panel)! as ViewOf<CanvasPanel>
+    this.left_panel = this._element_views.get(this._left_panel)! as ViewOf<CanvasPanel>
+    this.right_panel = this._element_views.get(this._right_panel)! as ViewOf<CanvasPanel>
+
+    this.inner_top_panel = this._element_views.get(this._inner_top_panel)! as ViewOf<CanvasPanel>
+    this.inner_bottom_panel = this._element_views.get(this._inner_bottom_panel)! as ViewOf<CanvasPanel>
+    this.inner_left_panel = this._element_views.get(this._inner_left_panel)! as ViewOf<CanvasPanel>
+    this.inner_right_panel = this._element_views.get(this._inner_right_panel)! as ViewOf<CanvasPanel>
+
     await this.build_tool_views()
     await this.build_renderer_views()
 
     this._range_manager.update_dataranges()
+    this._update_touch_action() // active_changed emits too early, so update manually the first time
   }
 
   override box_sizing(): DOMBoxSizing {
@@ -362,38 +444,7 @@ export class PlotView extends LayoutDOMView implements Paintable {
     }
   }
 
-  protected override _intrinsic_display(): FullDisplay {
-    return {inner: this.model.flow_mode, outer: "grid"}
-  }
-
-  override _update_layout(): void {
-    super._update_layout()
-
-    // TODO: invalidating all should imply "needs paint"
-    this._invalidate_all = true
-    this._needs_paint = true
-
-    const layout = new BorderLayout()
-
-    const {frame_align} = this.model
-    layout.aligns = (() => {
-      if (isBoolean(frame_align)) {
-        return {left: frame_align, right: frame_align, top: frame_align, bottom: frame_align}
-      } else {
-        const {left=true, right=true, top=true, bottom=true} = frame_align
-        return {left, right, top, bottom}
-      }
-    })()
-
-    layout.set_sizing({width_policy: "max", height_policy: "max"})
-
-    if (this.visuals.outline_line.doit) {
-      const width = this.visuals.outline_line.line_width.get_value()
-      layout.center_border_width = width
-    }
-
-    type Panels = (Axis | Annotation | Annotation[])[]
-
+  private _compute_layout_panels(): LayoutPanels {
     const outer_above: Panels = copy(this.model.above)
     const outer_below: Panels = copy(this.model.below)
     const outer_left:  Panels = copy(this.model.left)
@@ -449,11 +500,60 @@ export class PlotView extends LayoutDOMView implements Paintable {
       }
     }
 
-    const set_layout = (side: Side, model: Annotation | Axis): Layoutable | undefined => {
-      const view = this.views.get_one(model)
-      view.panel = new SidePanel(side)
-      view.update_layout?.()
-      return view.layout
+    return {
+      outer_above,
+      outer_below,
+      outer_left,
+      outer_right,
+      inner_above,
+      inner_below,
+      inner_left,
+      inner_right,
+    }
+  }
+
+  protected _make_layout(): BorderLayout {
+    return new BorderLayout()
+  }
+
+  override _update_layout(): void {
+    super._update_layout()
+
+    // TODO: invalidating all should imply "needs paint"
+    this._invalidate_all = true
+    this._needs_paint = true
+
+    const layout = this._make_layout()
+
+    const {frame_align} = this.model
+    layout.aligns = (() => {
+      if (isBoolean(frame_align)) {
+        return {left: frame_align, right: frame_align, top: frame_align, bottom: frame_align}
+      } else {
+        const {left=true, right=true, top=true, bottom=true} = frame_align
+        return {left, right, top, bottom}
+      }
+    })()
+
+    layout.set_sizing({width_policy: "max", height_policy: "max"})
+
+    if (this.visuals.outline_line.doit) {
+      const width = this.visuals.outline_line.line_width.get_value()
+      layout.center_border_width = width
+    }
+
+    const set_layout = (side: Side, model: Annotation | Axis | StyledElement): Layoutable | undefined => {
+      if (model instanceof Annotation || model instanceof Axis) {
+        const view = this.views.get_one(model)
+        view.panel = new SidePanel(side)
+        view.update_layout?.()
+        return view.layout
+      } else {
+        const view = this.views.get_one(model)
+        const layout = new ElementLayout(view.el)
+        layout.set_sizing({width_policy: "fixed", height_policy: "fixed"})
+        return layout
+      }
     }
 
     const set_layouts = (side: Side, panels: Panels) => {
@@ -472,7 +572,7 @@ export class PlotView extends LayoutDOMView implements Paintable {
               item.set_sizing({...item.sizing, [dim]: "min"})
             }
             return item
-          }).filter((item): item is Layoutable => item != null)
+          }).filter((item) => item != null)
 
           let layout: Row | Column
           if (horizontal) {
@@ -529,15 +629,13 @@ export class PlotView extends LayoutDOMView implements Paintable {
     inner_right_panel.absolute = true
 
     center_panel.children =
-      this.model.center.filter((obj): obj is Annotation => {
+      this.model.center.filter((obj) => {
         return obj instanceof Annotation
       }).map((model) => {
         const view = this.views.get_one(model)
         view.update_layout?.()
         return view.layout
-      }).filter((layout): layout is Layoutable => {
-        return layout != null
-      })
+      }).filter((layout) => layout != null)
 
     const {frame_width, frame_height} = this.model
 
@@ -548,10 +646,31 @@ export class PlotView extends LayoutDOMView implements Paintable {
     })
     center_panel.on_resize((bbox) => this.frame.set_geometry(bbox))
 
+    top_panel.on_resize((bbox) => this.top_panel.set_geometry(bbox))
+    bottom_panel.on_resize((bbox) => this.bottom_panel.set_geometry(bbox))
+    left_panel.on_resize((bbox) => this.left_panel.set_geometry(bbox))
+    right_panel.on_resize((bbox) => this.right_panel.set_geometry(bbox))
+
+    const {
+      outer_above,
+      outer_below,
+      outer_left,
+      outer_right,
+      inner_above,
+      inner_below,
+      inner_left,
+      inner_right,
+    } = this._compute_layout_panels()
+
     top_panel.children    = reversed(set_layouts("above", outer_above))
     bottom_panel.children =          set_layouts("below", outer_below)
     left_panel.children   = reversed(set_layouts("left",  outer_left))
     right_panel.children  =          set_layouts("right", outer_right)
+
+    inner_top_panel.on_resize((bbox) => this.inner_top_panel.set_geometry(bbox))
+    inner_bottom_panel.on_resize((bbox) => this.inner_bottom_panel.set_geometry(bbox))
+    inner_left_panel.on_resize((bbox) => this.inner_left_panel.set_geometry(bbox))
+    inner_right_panel.on_resize((bbox) => this.inner_right_panel.set_geometry(bbox))
 
     inner_top_panel.children    = set_layouts("above", inner_above)
     inner_bottom_panel.children = set_layouts("below", inner_below)
@@ -575,20 +694,67 @@ export class PlotView extends LayoutDOMView implements Paintable {
     layout.left_panel = left_panel
     layout.right_panel = right_panel
 
-    if (inner_top_panel.children.length != 0) {
-      layout.inner_top_panel = inner_top_panel
-    }
-    if (inner_bottom_panel.children.length != 0) {
-      layout.inner_bottom_panel = inner_bottom_panel
-    }
-    if (inner_left_panel.children.length != 0) {
-      layout.inner_left_panel = inner_left_panel
-    }
-    if (inner_right_panel.children.length != 0) {
-      layout.inner_right_panel = inner_right_panel
-    }
+    layout.inner_top_panel = inner_top_panel
+    layout.inner_bottom_panel = inner_bottom_panel
+    layout.inner_left_panel = inner_left_panel
+    layout.inner_right_panel = inner_right_panel
 
     this.layout = layout
+
+    const wrapper = (flex_direction: "row" | "column", children: Element[]) => {
+      return div({
+        style: {
+          display: "flex",
+          flex_direction,
+          width: "100%",
+          height: "100%",
+        },
+      }, children)
+    }
+
+    const process = (panels: Panels, dim: "x" | "y") => {
+      return panels.map((obj) => {
+        if (isArray(obj)) {
+          const els = this.views.select(obj).map((view) => {
+            const {el} = view
+            // allow to shrink toolbars, but keep everything else content sized
+            el.style.flex = view.model instanceof ToolbarPanel ? "1" : "none"
+            return el
+          })
+          switch (dim) {
+            case "x": return wrapper("row", els)
+            case "y": return wrapper("column", els)
+          }
+        } else {
+          return this.views.get_one(obj).el
+        }
+      })
+    }
+
+    const above_els = process(outer_above, "x")
+    const below_els = process(outer_below, "x")
+    const left_els = process(outer_left, "y")
+    const right_els = process(outer_right, "y")
+
+    this.top_panel.shadow_el.append(...reversed(above_els))
+    this.bottom_panel.shadow_el.append(...below_els)
+    this.left_panel.shadow_el.append(...reversed(left_els))
+    this.right_panel.shadow_el.append(...right_els)
+
+    const inner_above_els = process(inner_above, "x")
+    const inner_below_els = process(inner_below, "x")
+    const inner_left_els = process(inner_left, "y")
+    const inner_right_els = process(inner_right, "y")
+
+    this.inner_top_panel.shadow_el.append(...reversed(inner_above_els))
+    this.inner_bottom_panel.shadow_el.append(...inner_below_els)
+    this.inner_left_panel.shadow_el.append(...reversed(inner_left_els))
+    this.inner_right_panel.shadow_el.append(...inner_right_els)
+
+    const center_els = this.views.select(this.model.center).map((view) => view.el)
+    const renderer_els = this.views.select(this.model.renderers).map((view) => view.el)
+
+    this.frame.shadow_el.append(...renderer_els, ...center_els)
   }
 
   protected override _measure_layout(): void {
@@ -612,7 +778,7 @@ export class PlotView extends LayoutDOMView implements Paintable {
     const right_width = max(right.width, layout.min_border.right)
 
     this._computed_style.replace(`
-      :host {
+      ${this.host_selector} {
         grid-template-rows: ${top_height}px ${frame.height} ${bottom_height}px;
         grid-template-columns: ${left_width}px ${frame.width} ${right_width}px;
       }
@@ -629,7 +795,7 @@ export class PlotView extends LayoutDOMView implements Paintable {
     return views
   }
 
-  update_range(range_info: RangeInfo, options?: RangeOptions): void {
+  update_range(range_info: RangeInfo, options?: Partial<RangeOptions>): void {
     this.pause()
     this._range_manager.update(range_info, options)
     this.unpause()
@@ -687,19 +853,29 @@ export class PlotView extends LayoutDOMView implements Paintable {
     this.update_selection(null)
   }
 
+  private _needs_layout: boolean = false
+
   protected _invalidate_layout_if_needed(): void {
     const needs_layout = (() => {
-      for (const panel of this.model.side_panels) {
-        const view = this.renderer_views.get(panel)! as AnnotationView | AxisView
-        if (view.layout?.has_size_changed() ?? false) {
-          this.invalidate_painters(view)
-          return true
+      if (this._needs_layout) {
+        this.invalidate_painters()
+        return true
+      } else {
+        for (const panel of this.model.side_panels) {
+          const view = this.renderer_views.get(panel as any) // TODO
+          if (view != null) {
+            if (view.layout?.has_size_changed() ?? false) {
+              this.invalidate_painters(view)
+              return true
+            }
+          }
         }
+        return false
       }
-      return false
     })()
 
     if (needs_layout) {
+      this._needs_layout = false
       this.compute_layout()
     }
   }
@@ -708,11 +884,7 @@ export class PlotView extends LayoutDOMView implements Paintable {
     const {above, below, left, right, center, renderers} = this.model
 
     yield* renderers
-    yield* above
-    yield* below
-    yield* left
-    yield* right
-    yield* center
+    yield* [...above, ...below, ...left, ...right, ...center] as any // TODO
 
     if (this._title != null) {
       yield this._title
@@ -730,8 +902,8 @@ export class PlotView extends LayoutDOMView implements Paintable {
   protected _update_attribution(): void {
     const attribution = [
       ...this.model.attribution,
-      ...this.computed_renderer_views.map((rv) => rv.attribution),
-    ].filter(isNotNull)
+      ...this.computed_renderer_views.filter((rv) => rv.displayed).map((rv) => rv.attribution),
+    ].filter((rv) => rv != null)
     const elements = attribution.map((attrib) => isString(attrib) ? new Div({children: [attrib]}) : attrib)
     this._attribution.elements = elements
     // TODO this._attribution.title = contents_el.textContent!.replace(/\s*\n\s*/g, " ")
@@ -739,32 +911,32 @@ export class PlotView extends LayoutDOMView implements Paintable {
 
   protected async _build_renderers(): Promise<BuildResult<Renderer>> {
     this.computed_renderers = [...this._compute_renderers()]
-    const result = await build_views(this.renderer_views, this.computed_renderers, {parent: this})
+    const result = await build_views(this.renderer_views, this.computed_renderers, {parent: (model) => model instanceof LayoutDOM ? null : this})
+    this._computed_renderer_views = this.computed_renderers.map((r) => this.renderer_views.get(r)).filter((rv) => rv != null) // TODO race condition again
+    for (const renderer_view of result.created) {
+      this.on_change(renderer_view.model.properties.visible, () => this._update_attribution())
+    }
     this._update_attribution()
     return result
   }
 
   protected async _update_renderers(): Promise<void> {
     const {created} = await this._build_renderers()
-    const created_renderers = new Set(created)
+    const created_views = new Set(created)
 
-    // First remove and then either reattach existing renderers or render and
-    // attach new renderers, so that the order of children is consistent, while
-    // avoiding expensive re-rendering of existing views.
-    for (const renderer_view of this.renderer_views.values()) {
-      renderer_view.el.remove()
-    }
-
-    for (const renderer_view of this.renderer_views.values()) {
-      const is_new = created_renderers.has(renderer_view)
-
-      const target = renderer_view.rendering_target()
+    // Since appending to a DOM node will move the node to the end if it has
+    // already been added appending all the children in order will result in
+    // correct ordering.
+    for (const view of this.renderer_views.values()) {
+      const is_new = created_views.has(view)
+      const target = view.rendering_target() ?? this.self_target
       if (is_new) {
-        renderer_view.render_to(target)
+        view.render_to(target)
       } else {
-        target.append(renderer_view.el)
+        target.append(view.el)
       }
     }
+
     this.r_after_render()
   }
 
@@ -814,11 +986,7 @@ export class PlotView extends LayoutDOMView implements Paintable {
     })
 
     const {above, below, left, right, center, renderers} = this.model.properties
-    const panels = [above, below, left, right, center]
-    this.on_change(renderers, async () => {
-      await this._update_renderers()
-    })
-    this.on_change(panels, async () => {
+    this.on_change([above, below, left, right, center, renderers], async () => {
       await this._update_renderers()
       this.invalidate_layout()
     })
@@ -828,16 +996,30 @@ export class PlotView extends LayoutDOMView implements Paintable {
       await this._update_renderers()
     })
 
-    const {x_ranges, y_ranges} = this.frame
-    for (const [, range] of x_ranges) {
+    const {frame_width, frame_height, frame_align} = this.model.properties
+    this.on_change([frame_width, frame_height, frame_align], () => this.invalidate_layout())
+
+    const {min_border, min_border_top, min_border_bottom, min_border_left, min_border_right} = this.model.properties
+    this.on_change([min_border, min_border_top, min_border_bottom, min_border_left, min_border_right], () => this.invalidate_layout())
+
+    const connect_range = (range: Range) => {
       this.connect(range.change, () => {
         this.request_repaint()
+      })
+      this.connect(range.properties.min_interval.change, () => {
+        this._constrain_range_interval(range)
+      })
+      this.connect(range.properties.max_interval.change, () => {
+        this._constrain_range_interval(range)
       })
     }
+
+    const {x_ranges, y_ranges} = this.frame
+    for (const [, range] of x_ranges) {
+      connect_range(range)
+    }
     for (const [, range] of y_ranges) {
-      this.connect(range.change, () => {
-        this.request_repaint()
-      })
+      connect_range(range)
     }
 
     this.connect(this.model.change, () => this.request_repaint())
@@ -871,6 +1053,59 @@ export class PlotView extends LayoutDOMView implements Paintable {
         this.request_repaint()
       }
     })
+
+    this.model.toolbar.active_changed.connect(() => this._update_touch_action())
+
+    if (visualViewport != null) {
+      visualViewport.addEventListener("resize", () => {
+        if (this.canvas.resize()) {
+          this.request_repaint()
+        }
+      }, {signal: this.abort_signal})
+    }
+  }
+
+  protected _constrain_range_interval(range: Range): void {
+    const range_info = this._range_manager.constrain_interval(range)
+    if (range_info != null) {
+      this.update_range(range_info)
+    }
+  }
+
+  protected _update_touch_action(): void {
+    const {toolbar} = this.model
+    let has_pan = false
+    let has_scroll = false
+    for (const tool of toolbar.tools) {
+      if (tool.active) {
+        const {event_types} = tool
+        if (event_types.includes("pan")) {
+          has_pan = true
+        }
+        if (event_types.includes("scroll")) {
+          has_scroll = true
+        }
+        if (has_pan && has_scroll) {
+          break
+        }
+      }
+    }
+    const touch_action = (() => {
+      if (!has_pan && !has_scroll) {
+        return "auto"
+      } else if (!has_pan) {
+        return "pan-x pan-y"
+      } else if (!has_scroll) {
+        return "pinch-zoom" // scroll implies pinch where applicable
+      } else {
+        return "none"
+      }
+    })()
+    this.canvas.touch_action.replace(`
+      .${canvas_css.events} {
+        touch-action: ${touch_action};
+      }
+    `)
   }
 
   override has_finished(): boolean {
@@ -906,13 +1141,8 @@ export class PlotView extends LayoutDOMView implements Paintable {
     const right_width = bbox.width - right.left
 
     // TODO: don't replace here; inject stylesheet?
-    this.canvas.style.replace(`
-      .bk-layer.bk-events {
-        display: grid;
-        grid-template-areas:
-          ".    above  .    "
-          "left center right"
-          ".    below  .    ";
+    this.canvas.parent_style.replace(`
+      .bk-events {
         grid-template-rows: ${px(top_height)} ${px(center.height)} ${px(bottom_height)};
         grid-template-columns: ${px(left_width)} ${px(center.width)} ${px(right_width)};
       }
@@ -937,9 +1167,7 @@ export class PlotView extends LayoutDOMView implements Paintable {
       this.unpause(true)
     }
 
-    if (!this._outer_bbox.equals(this.bbox)) {
-      this.canvas_view.resize() // XXX temporary hack
-      this._outer_bbox = this.bbox
+    if (this.canvas_view.update_bbox()) {
       this._invalidate_all = true
       this._needs_paint = true
     }
@@ -962,8 +1190,9 @@ export class PlotView extends LayoutDOMView implements Paintable {
   override render(): void {
     super.render()
 
-    for (const rv of this.computed_renderer_views) {
-      rv.render_to(rv.rendering_target())
+    for (const renderer_view of this.computed_renderer_views) {
+      const target = renderer_view.rendering_target() ?? this.self_target
+      renderer_view.render_to(target)
     }
   }
 
@@ -1013,7 +1242,7 @@ export class PlotView extends LayoutDOMView implements Paintable {
       }
     }
 
-    if (this._range_manager.invalidate_dataranges) {
+    if (this._range_manager.invalidate_dataranges || this.model.window_axis != "none") {
       this._range_manager.update_dataranges()
       this._invalidate_layout_if_needed()
     }
@@ -1040,36 +1269,17 @@ export class PlotView extends LayoutDOMView implements Paintable {
     this._invalidated_painters.clear()
     this._invalidate_all = false
 
-    const frame_box: FrameBox = [
-      this.frame.bbox.left,
-      this.frame.bbox.top,
-      this.frame.bbox.width,
-      this.frame.bbox.height,
-    ]
-
-    const {primary, overlays} = this.canvas_view
-
     if (do_primary) {
-      primary.prepare()
-      this.canvas_view.prepare_webgl(frame_box)
-
-      this._paint_empty(primary.ctx, frame_box)
-      this._paint_outline(primary.ctx, frame_box)
-
-      this._paint_levels(primary.ctx, "image", frame_box, true)
-      this._paint_levels(primary.ctx, "underlay", frame_box, true)
-      this._paint_levels(primary.ctx, "glyph", frame_box, true)
-      this._paint_levels(primary.ctx, "guide", frame_box, false)
-      this._paint_levels(primary.ctx, "annotation", frame_box, false)
+      const {primary} = this.canvas_view
+      const ctx = primary.prepare()
+      this._paint_primary(ctx)
       primary.finish()
     }
 
     if (do_overlays || settings.wireframe) {
-      overlays.prepare()
-      this._paint_levels(overlays.ctx, "overlay", frame_box, false)
-      if (settings.wireframe) {
-        this.paint_layout(overlays.ctx, this.layout)
-      }
+      const {overlays} = this.canvas_view
+      const ctx = overlays.prepare()
+      this._paint_overlays(ctx)
       overlays.finish()
     }
 
@@ -1088,7 +1298,29 @@ export class PlotView extends LayoutDOMView implements Paintable {
     this._render_count++
   }
 
-  protected _paint_levels(ctx: Context2d, level: RenderLevel, clip_region: FrameBox, global_clip: boolean): void {
+  protected _paint_primary(ctx: Context2d): void {
+    const frame_box = this.frame.bbox
+    this.canvas_view.prepare_webgl(frame_box)
+
+    this._paint_empty(ctx, frame_box)
+    this._paint_outline(ctx, frame_box)
+
+    this._paint_levels(ctx, "image", frame_box, true)
+    this._paint_levels(ctx, "underlay", frame_box, true)
+    this._paint_levels(ctx, "glyph", frame_box, true)
+    this._paint_levels(ctx, "guide", frame_box, false)
+    this._paint_levels(ctx, "annotation", frame_box, false)
+  }
+
+  protected _paint_overlays(ctx: Context2d): void {
+    const frame_box = this.frame.bbox
+    this._paint_levels(ctx, "overlay", frame_box, false)
+    if (settings.wireframe) {
+      this.paint_layout(ctx, this.layout)
+    }
+  }
+
+  protected _paint_levels(ctx: Context2d, level: RenderLevel, clip_box: BBox, global_clip: boolean): void {
     for (const renderer_view of this.computed_renderer_views) {
       if (renderer_view.model.level != level) {
         continue
@@ -1097,11 +1329,11 @@ export class PlotView extends LayoutDOMView implements Paintable {
       ctx.save()
       if (global_clip || renderer_view.needs_clip) {
         ctx.beginPath()
-        ctx.rect(...clip_region)
+        ctx.rect(...clip_box.args)
         ctx.clip()
       }
 
-      renderer_view.paint()
+      renderer_view.paint(ctx)
       ctx.restore()
 
       if (renderer_view.has_webgl) {
@@ -1124,44 +1356,73 @@ export class PlotView extends LayoutDOMView implements Paintable {
     }
   }
 
-  protected _paint_empty(ctx: Context2d, frame_box: FrameBox): void {
-    const [cx, cy, cw, ch] = [0, 0, this.bbox.width, this.bbox.height]
-    const [fx, fy, fw, fh] = frame_box
+  /**
+   * Shrink bbox by 1px to make right and bottom lines visible if they are on the edge of the canvas.
+   */
+  private _shrink_to_canvas(bbox: BBox): BBox {
+    let {x, y, width, height} = bbox
+    if (width > 0 && x + width == this.bbox.width) {
+      width -= 1
+    }
+    if (height > 0 && y + height == this.bbox.height) {
+      height -= 1
+    }
+    return new BBox({x, y, width, height})
+  }
 
-    if (this.visuals.border_fill.doit) {
+  protected _paint_empty(ctx: Context2d, frame_box: BBox): void {
+    const canvas_box = this.bbox.relative()
+
+    const {border_fill, border_hatch} = this.visuals
+    if (border_fill.doit || border_hatch.doit) {
       ctx.save()
       ctx.beginPath()
-      ctx.rect(cx, cy, cw, ch)
-      ctx.rect(fx, fy, fw, fh)
+      ctx.rect_bbox(canvas_box)
+      ctx.rect_bbox(frame_box)
       ctx.clip("evenodd")
 
       ctx.beginPath()
-      ctx.rect(cx, cy, cw, ch)
-      this.visuals.border_fill.apply(ctx)
+      ctx.rect_bbox(canvas_box)
+      border_fill.apply(ctx)
+      border_hatch.apply(ctx)
       ctx.restore()
     }
 
-    if (this.visuals.background_fill.doit) {
-      this.visuals.background_fill.set_value(ctx)
-      ctx.fillRect(fx, fy, fw, fh)
+    const {border_line} = this.visuals
+    if (border_line.doit) {
+      ctx.beginPath()
+      ctx.rect_bbox(this._shrink_to_canvas(canvas_box))
+      border_line.apply(ctx)
+    }
+
+    const {background_fill, background_hatch} = this.visuals
+    if (background_fill.doit || background_hatch.doit) {
+      ctx.beginPath()
+      ctx.rect_bbox(frame_box)
+      background_fill.apply(ctx)
+      background_hatch.apply(ctx)
     }
   }
 
-  protected _paint_outline(ctx: Context2d, frame_box: FrameBox): void {
-    if (this.visuals.outline_line.doit) {
-      ctx.save()
-      this.visuals.outline_line.set_value(ctx)
-      let [x0, y0, w, h] = frame_box
-      // XXX: shrink outline region by 1px to make right and bottom lines visible
-      // if they are on the edge of the canvas.
-      if (x0 + w == this.bbox.width) {
-        w -= 1
-      }
-      if (y0 + h == this.bbox.height) {
-        h -= 1
-      }
-      ctx.strokeRect(x0, y0, w, h)
-      ctx.restore()
+  protected _paint_outline(ctx: Context2d, frame_box: BBox): void {
+    const {outline_line} = this.visuals
+    if (outline_line.doit) {
+      ctx.rect_bbox(this._shrink_to_canvas(frame_box))
+      outline_line.apply(ctx)
+    }
+  }
+
+  private _force_paint: boolean = false
+  get is_forcing_paint(): boolean {
+    return this._force_paint
+  }
+
+  force_paint(fn: () => void): void {
+    try {
+      this._force_paint = true
+      fn()
+    } finally {
+      this._force_paint = false
     }
   }
 
@@ -1180,15 +1441,27 @@ export class PlotView extends LayoutDOMView implements Paintable {
     composite.resize(width, height)
 
     if (width != 0 && height != 0) {
-      const {canvas} = this.canvas_view.compose()
-      composite.ctx.drawImage(canvas, 0, 0)
+      this.force_paint(() => {
+        const ctx = composite.prepare()
+        this._paint_primary(ctx)
+        this._paint_overlays(ctx)
+        composite.finish()
+      })
+
+      for (const view of this.renderer_views.values()) {
+        if (is_Exportable(view)) {
+          const region = view.export(type, hidpi)
+          const {x, y} = view.bbox.scale(composite.pixel_ratio)
+          composite.ctx.drawImage(region.canvas, x, y)
+        }
+      }
     }
 
     return composite
   }
 
   override resolve_frame(): View | null {
-    return this.frame as any // TODO CartesianFrameView (PR #13286)
+    return this.frame
   }
 
   override resolve_canvas(): View | null {
@@ -1236,5 +1509,10 @@ export class PlotView extends LayoutDOMView implements Paintable {
     this._messages.set(message, timer)
     this._notifications.elements = [...this._notifications.elements, el]
     logger.info(message)
+  }
+
+  override serializable_children(): View[] {
+    // TODO temporarily remove CanvasPanel views to reduce baseline noise
+    return super.serializable_children().filter((view) => view.model instanceof CartesianFrame || !(view.model instanceof CanvasPanel))
   }
 }

@@ -10,12 +10,16 @@ import {equals} from "core/util/eq"
 import {logger} from "./core/logging"
 import type {CallbackLike0} from "./core/util/callbacks"
 import {execute} from "./core/util/callbacks"
+import {Mapping, Str, List, Func} from "core/kinds"
 
 export type ModelSelector<T> = Class<T> | string | {type: string}
 
 export type ChangeCallback = CallbackLike0<Model>
 
 export type EventCallback<T extends ModelEvent = ModelEvent> = CallbackLike0<T>
+
+const JSCallbacks = Mapping(Str, List(Func<[], void>()))
+type JSCallbacks = typeof JSCallbacks["__type__"]
 
 export namespace Model {
   export type Attrs = p.AttrsOf<Props>
@@ -27,15 +31,17 @@ export namespace Model {
     js_event_callbacks: p.Property<Dict<EventCallback[]>>
     subscribed_events: p.Property<Set<string>>
     syncable: p.Property<boolean>
+  } & Internal
+
+  export type Internal = {
+    _js_callbacks: p.Property<JSCallbacks>
   }
 }
 
 export interface Model extends Model.Attrs {}
 
-export class Model extends HasProps {
+export abstract class Model extends HasProps {
   declare properties: Model.Props
-
-  private /*readonly*/ _js_callbacks: Map<string, (() => void)[]>
 
   override get is_syncable(): boolean {
     return this.syncable
@@ -58,11 +64,10 @@ export class Model extends HasProps {
       subscribed_events:     [ Set(Str), new globalThis.Set() ],
       syncable:              [ Bool, true ],
     }))
-  }
 
-  override initialize(): void {
-    super.initialize()
-    this._js_callbacks = new Map()
+    this.internal<Model.Internal>({
+      _js_callbacks: [ JSCallbacks, new Map(), {readonly: true} ],
+    })
   }
 
   override connect_signals(): void {
@@ -124,13 +129,16 @@ export class Model extends HasProps {
   }
 
   protected override _doc_attached(): void {
+    super._doc_attached()
+
     if (this.js_event_callbacks.size != 0 || this.subscribed_events.size != 0) {
       this._update_event_callbacks()
     }
   }
 
   protected override _doc_detached(): void {
-    this.document!.event_manager.subscribed_models.delete(this)
+    super._doc_detached()
+    this.document?.event_manager.subscribed_models.delete(this)
   }
 
   select<T extends HasProps>(selector: ModelSelector<T>): T[] {

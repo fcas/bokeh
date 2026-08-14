@@ -23,6 +23,9 @@ export type AngleUnits = typeof AngleUnits["__type__"]
 export const AlternationPolicy = Enum("none", "even", "odd", "every")
 export type AlternationPolicy = typeof AlternationPolicy["__type__"]
 
+export const AxisLabelStandoffMode = Enum("tick_labels", "axis")
+export type AxisLabelStandoffMode = typeof AxisLabelStandoffMode["__type__"]
+
 export const BoxOrigin = Enum("corner", "center")
 export type BoxOrigin = typeof BoxOrigin["__type__"]
 
@@ -37,6 +40,9 @@ export type Clock = typeof Clock["__type__"]
 
 export const CoordinateUnits = Enum("canvas", "screen", "data")
 export type CoordinateUnits = typeof CoordinateUnits["__type__"]
+
+export const ColorScheme = Enum("auto", "light", "dark")
+export type ColorScheme = typeof ColorScheme["__type__"]
 
 export const ContextWhich = Enum("start", "center", "end", "all")
 export type ContextWhich = typeof ContextWhich["__type__"]
@@ -69,6 +75,9 @@ export const HatchPatternType = Enum(
   " ", ".", "o", "-", "|", "+", '"', ":", "@", "/", "\\", "x", ",", "`", "v", ">", "*",
 )
 export type HatchPatternType = typeof HatchPatternType["__type__"]
+
+export const BuiltinFormatter = Enum("raw", "basic", "numeral", "printf", "datetime")
+export type BuiltinFormatter = typeof BuiltinFormatter["__type__"]
 
 export const HTTPMethod = Enum("POST", "GET")
 export type HTTPMethod = typeof HTTPMethod["__type__"]
@@ -136,6 +145,12 @@ export type OutputBackend = typeof OutputBackend["__type__"]
 export const PaddingUnits = Enum("percent", "absolute")
 export type PaddingUnits = typeof PaddingUnits["__type__"]
 
+export const PanDirection = Enum(
+  "left", "right", "up", "down",
+  "west", "east", "north", "south",
+)
+export type PanDirection = typeof PanDirection["__type__"]
+
 export const Place = Enum("above", "below", "left", "right", "center")
 export type Place = typeof Place["__type__"]
 
@@ -160,7 +175,10 @@ export type RoundingFunction = typeof RoundingFunction["__type__"]
 export const ScrollbarPolicy = Enum("auto", "visible", "hidden")
 export type ScrollbarPolicy = typeof ScrollbarPolicy["__type__"]
 
-export const SelectionMode = Enum("replace", "append", "intersect", "subtract", "xor")
+export const RegionSelectionMode = Enum("replace", "append", "intersect", "subtract", "xor")
+export type RegionSelectionMode = typeof RegionSelectionMode["__type__"]
+
+export const SelectionMode = Enum(...RegionSelectionMode, "toggle")
 export type SelectionMode = typeof SelectionMode["__type__"]
 
 export const Side = Enum("above", "below", "left", "right")
@@ -196,6 +214,9 @@ export type TextBaseline = typeof TextBaseline["__type__"]
 export const TextureRepetition = Enum("repeat", "repeat_x", "repeat_y", "no_repeat")
 export type TextureRepetition = typeof TextureRepetition["__type__"]
 
+export const TimedeltaResolutionType = Enum("nanoseconds", "microseconds", "milliseconds", "seconds", "minsec", "minutes", "hourmin", "hours", "days")
+export type TimedeltaResolutionType = typeof TimedeltaResolutionType["__type__"]
+
 export const LabelOrientation = Enum("vertical", "horizontal", "parallel", "normal")
 export type LabelOrientation = typeof LabelOrientation["__type__"]
 
@@ -207,6 +228,9 @@ export type UpdateMode = typeof UpdateMode["__type__"]
 
 export const VerticalAlign = Enum("top", "middle", "bottom")
 export type VerticalAlign = typeof VerticalAlign["__type__"]
+
+export const WindowAxis = Enum("none", "x", "y")
+export type WindowAxis = typeof WindowAxis["__type__"]
 
 // Keep this in sync with bokehjs/src/less/icons.less
 export const ToolIcon = Enum(
@@ -230,6 +254,7 @@ export const ToolIcon = Enum(
   "clear_selection",
   "copy",
   "crosshair",
+  "dark_theme",
   "delete",
   "freehand_draw",
   "fullscreen",
@@ -239,6 +264,7 @@ export const ToolIcon = Enum(
   "invert_selection",
   "italic",
   "lasso_select",
+  "light_theme",
   "line_edit",
   "maximize",
   "minimize",
@@ -260,6 +286,7 @@ export const ToolIcon = Enum(
   "square",
   "square_check",
   "subtract_mode",
+  "system_theme",
   "tap_select",
   "text_align_center",
   "text_align_left",
@@ -282,3 +309,54 @@ export const ToolIcon = Enum(
   "zoom_out",
 )
 export type ToolIcon = typeof ToolIcon["__type__"]
+
+export const ToolName = Enum(
+  "auto_box_zoom",
+  "box_select",
+  "box_zoom",
+  "click",
+  "copy",
+  "crosshair",
+  "doubletap",
+  "examine",
+  "freehand_draw",
+  "fullscreen",
+  "help",
+  "hover",
+  "lasso_select",
+  "pan",
+  "pan_down",
+  "pan_east",
+  "pan_left",
+  "pan_north",
+  "pan_right",
+  "pan_south",
+  "pan_up",
+  "pan_west",
+  "poly_select",
+  "redo",
+  "reset",
+  "save",
+  "tap",
+  "undo",
+  "wheel_zoom",
+  "xbox_select",
+  "xbox_zoom",
+  "xcrosshair",
+  "xpan",
+  "xwheel_pan",
+  "xwheel_zoom",
+  "xzoom_in",
+  "xzoom_out",
+  "ybox_select",
+  "ybox_zoom",
+  "ycrosshair",
+  "ypan",
+  "ywheel_pan",
+  "ywheel_zoom",
+  "yzoom_in",
+  "yzoom_out",
+  "zoom_in",
+  "zoom_out",
+)
+export type ToolName = typeof ToolName["__type__"]

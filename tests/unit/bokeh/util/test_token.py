@@ -187,9 +187,9 @@ class TestSessionId:
         token = generate_jwt_token("foo", expiration=0)
         with patch.object(dt, "datetime", Mock(wraps=dt.datetime)) as patched_dt:
             # mock bokeh server localtime to be UTC + 10
-            patched_dt.now.return_value = dt.datetime.now(tz=dt.timezone.utc) + dt.timedelta(hours=10)
+            patched_dt.now.return_value = dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=10)
             payload = get_token_payload(token)
-        utcnow = calendar.timegm(dt.datetime.now(tz=dt.timezone.utc).timetuple())
+        utcnow = calendar.timegm(dt.datetime.now(tz=dt.UTC).timetuple())
         assert utcnow -1 <= payload['session_expiry'] <= utcnow + 1
 
 #-----------------------------------------------------------------------------
@@ -209,13 +209,13 @@ class Test__get_sysrandom:
             expected = True
         except NotImplementedError:
             expected = False
-        _random, using_sysrandom = _get_sysrandom()
+        _, using_sysrandom = _get_sysrandom()
         assert using_sysrandom == expected
 
     @patch('random.SystemRandom', new_callable=_nie)
     def test_missing_sysrandom_no_secret_key(self, _mock_sysrandom: MagicMock) -> None:
         with pytest.warns(UserWarning) as warns:
-            random, using_sysrandom = _get_sysrandom()
+            _, using_sysrandom = _get_sysrandom()
             assert not using_sysrandom
             assert len(warns) == 2
             assert warns[0].message.args[0] == _MERSENNE_MSG
@@ -230,7 +230,7 @@ class Test__get_sysrandom:
     def test_missing_sysrandom_with_secret_key(self, _mock_sysrandom: MagicMock) -> None:
         with envset(BOKEH_SECRET_KEY="foo"):
             with pytest.warns(UserWarning) as warns:
-                random, using_sysrandom = _get_sysrandom()
+                _, using_sysrandom = _get_sysrandom()
                 assert not using_sysrandom
                 assert len(warns) == 1
                 assert warns[0].message.args[0] == _MERSENNE_MSG

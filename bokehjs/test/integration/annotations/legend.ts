@@ -1,12 +1,37 @@
-import {display, fig} from "../_util"
+import {display, fig, row} from "#framework/layouts"
+import {tap} from "#framework/interactive"
+import {expect} from "#framework/assertions"
 
 import {Legend, LegendItem, LinearAxis} from "@bokehjs/models"
 import {Random} from "@bokehjs/core/util/random"
 import {range} from "@bokehjs/core/util/array"
 import type {CircleArgs, LineArgs} from "@bokehjs/api/glyph_api"
-import type {Orientation} from "@bokehjs/core/enums"
+import type {HatchPatternType, LineDash, Orientation} from "@bokehjs/core/enums"
 import {Location} from "@bokehjs/core/enums"
 import {linspace} from "@bokehjs/core/util/array"
+import {LegendItemClick} from "@bokehjs/core/bokeh_events"
+import type {Scatter} from "@bokehjs/models/glyphs"
+import {HTML} from "@bokehjs/models/dom"
+import {Pane} from "@bokehjs/models"
+import {type Plot} from "@bokehjs/models"
+import {canvas} from "@bokehjs/core/dom"
+
+async function show_with_exported(plot: Plot) {
+  const width = plot.width!
+  const height = plot.height!
+
+  const canvas_el = canvas({width, height})
+  const ctx = canvas_el.getContext("2d")!
+
+  const html = new HTML({html: canvas_el, style: {width: `${width}`, height: `${height}px`}}) // remove ~5px; where is this coming from?
+  const layout = row([plot, new Pane({elements: [html]})])
+  const result = await display(layout, [2*width + 50, height + 50])
+
+  const plot_view = result.view.views.get_one(plot)
+  ctx.drawImage(plot_view.export().canvas, 0, 0)
+
+  return result
+}
 
 describe("Legend annotation", () => {
   it("should support various combinations of locations and orientations", async () => {
@@ -54,7 +79,7 @@ describe("Legend annotation", () => {
     p.add_layout(legend({location: "center", orientation: "vertical", item_background_policy: "even", title: "even"}), "left")
     p.add_layout(legend({location: "center", orientation: "vertical", item_background_policy: "odd", title: "odd"}), "right")
 
-    await display(p)
+    await show_with_exported(p)
   })
 
   type PlotFn = ({
@@ -81,7 +106,8 @@ describe("Legend annotation", () => {
       figure_dimensions,
       legends,
     }) => {
-      const p = fig(figure_dimensions ?? (orientation == "horizontal" ? [300, 200] : [200, 300]))
+      const [width, height] = figure_dimensions ?? (orientation == "horizontal" ? [300, 200] : [200, 300])
+      const p = fig([width, height])
 
       p.add_layout(new LinearAxis(), "above")
       p.add_layout(new LinearAxis(), "right")
@@ -135,7 +161,7 @@ describe("Legend annotation", () => {
         }))
       })
 
-      await display(p)
+      await show_with_exported(p)
     }
   }
 
@@ -238,7 +264,7 @@ describe("Legend annotation", () => {
       const legend_items = [
         {label: "A label with one line", renderers: [0]},
         {label: "A label with\ntwo lines", renderers: [1, 2]},
-        {label: "A label with\nthree lines\n(thrid line)", renderers: [3]},
+        {label: "A label with\nthree lines\n(third line)", renderers: [3]},
       ]
       await plot({
         legend_items,
@@ -322,22 +348,22 @@ describe("Legend annotation", () => {
     describe("should support grid layout", () => {
       it("with nrows=2 and ncols=auto", async () => {
         const p = plot({nrows: 2, ncols: "auto"})
-        await display(p)
+        await show_with_exported(p)
       })
 
       it("with nrows=3 and ncols=auto", async () => {
         const p = plot({nrows: 3, ncols: "auto"})
-        await display(p)
+        await show_with_exported(p)
       })
 
       it("with nrows=auto and ncols=2", async () => {
         const p = plot({nrows: "auto", ncols: 2})
-        await display(p)
+        await show_with_exported(p)
       })
 
       it("with nrows=auto and ncols=3", async () => {
         const p = plot({nrows: "auto", ncols: 3})
-        await display(p)
+        await show_with_exported(p)
       })
     })
   }
@@ -350,5 +376,237 @@ describe("Legend annotation", () => {
   describe("in vertical orientation", () => {
     test(plot({orientation: "vertical"}), "vertical")
     test_grid("vertical")
+  })
+
+  it("should support LegendItemClick events", async () => {
+    const p = fig([200, 200], {y_axis_location: "right", min_border: 0})
+
+    const r0 = p.scatter({x: [1, 2, 3], y: [3, 4, 5], size: 10, marker: "circle", color: "red"})
+    const r1 = p.scatter({x: [1, 2, 3], y: [2, 3, 4], size: 15, marker: "circle", color: "blue"})
+    const r2 = p.scatter({x: [1, 2, 3], y: [1, 2, 3], size: 20, marker: "circle", color: "green"})
+
+    const items = [
+      new LegendItem({label: "Item #0", renderers: [r0]}),
+      new LegendItem({label: "Item #1", renderers: [r1]}),
+      new LegendItem({label: "Item #2", renderers: [r2]}),
+    ]
+
+    const legend = new Legend({items, location: "top_left", margin: 0})
+    p.add_layout(legend)
+
+    const clicked: LegendItem[] = []
+    legend.on_event(LegendItemClick, ({item}) => {
+      clicked.push(item)
+      item.renderers.forEach((r) => (r.glyph as Scatter).marker = {value: "triangle"})
+    })
+
+    const {view: pv} = await display(p)
+
+    const lv = pv.views.get_one(legend)
+    for (const item_el of lv.shadow_el.querySelectorAll(".bk-item")) {
+      await tap(item_el)
+      await pv.ready
+    }
+
+    expect(clicked).to.be.equal(items)
+  })
+
+  it("should support title and label outline_color and outline_width", async () => {
+    const p = fig([200, 200])
+
+    const r0 = p.scatter({x: [1, 2, 3], y: [3, 4, 5], size: 10, marker: "circle", color: "red"})
+    const r1 = p.scatter({x: [1, 2, 3], y: [2, 3, 4], size: 15, marker: "circle", color: "blue"})
+    const r2 = p.scatter({x: [1, 2, 3], y: [1, 2, 3], size: 20, marker: "circle", color: "green"})
+
+    const items = [
+      new LegendItem({label: "Item #0", renderers: [r0]}),
+      new LegendItem({label: "Item #1", renderers: [r1]}),
+      new LegendItem({label: "Item #2", renderers: [r2]}),
+    ]
+
+    const legend = new Legend({
+      items,
+      title: "Outline color/width",
+      title_text_outline_color: "yellow",
+      title_text_outline_width: 0.5,
+      title_text_font_style: "bold",
+      label_text_outline_color: "red",
+      label_text_outline_width: 1.0,
+      label_text_font_style: "bold",
+    })
+    p.add_layout(legend)
+
+    await display(p)
+  })
+
+  describe("should support as border_line_dash pattern value", () => {
+    function plot(dash_pattern: LineDash | number[], border_width: number = 1) {
+      const p = fig([200, 200])
+      const x = [1, 2, 3, 4, 5]
+      const y1 = [2, 3, 4, 5, 6]
+      const y2 = [3, 4, 5, 6, 7]
+
+      p.line(x, y1, {legend_label: "Temp.", line_color: "blue"})
+      p.line(x, y2, {legend_label: "Objects", line_color: "red"})
+
+      p.legend.location = "top_left"
+      p.legend.border_line_color = "black"
+      p.legend.border_line_dash = dash_pattern
+      p.legend.border_line_width = border_width
+
+      return p
+    }
+
+    it("solid", async () => {
+      const p = plot("solid")
+      await show_with_exported(p)
+    })
+
+    it("dotdash", async () => {
+      const p = plot("dotdash")
+      await show_with_exported(p)
+    })
+
+    it("dashdot", async () => {
+      const p = plot("dashdot")
+      await show_with_exported(p)
+    })
+
+    it("dashed", async () => {
+      const p = plot("dashed")
+      await show_with_exported(p)
+    })
+
+    it("dotted", async () => {
+      const p = plot("dotted")
+      await show_with_exported(p)
+    })
+
+    it("Custom pattern 2, 4, 3, 4 (even number of items)", async () => {
+      const p = plot([2, 4, 3, 4])
+      await show_with_exported(p)
+    })
+
+    it("Custom pattern 2, 4, 3, 4 (even number of items) with border_line_width 2", async () => {
+      const p = plot([2, 4, 3, 4], 2)
+      await show_with_exported(p)
+    })
+
+    it("Custom pattern 2, 4, 9, 4, 10 (odd number of items)", async () => {
+      const p = plot([2, 4, 9, 4, 10])
+      await show_with_exported(p)
+    })
+
+    it("Custom pattern 2, 4, 9, 4, 10 (odd number of items) with border_line_width 3", async () => {
+      const p = plot([2, 4, 9, 4, 10], 3)
+      await show_with_exported(p)
+    })
+  })
+
+  describe("should support as item_background_hatch and inactive_hatch and background_hatch patterns values like", () => {
+    function plot(hash_pattern: HatchPatternType) {
+      const p = fig([200, 200])
+      const x = [1, 2, 3, 4, 5]
+      const y1 = [2, 3, 4, 5, 6]
+      const y2 = [3, 4, 5, 6, 7]
+
+      p.line(x, y1, {legend_label: "Temp.", line_color: "blue", visible: false})
+      p.line(x, y2, {legend_label: "Objects", line_color: "red"})
+
+      p.legend.location = "top_left"
+      p.legend.border_line_color = "black"
+      p.legend.click_policy = "hide"
+      p.legend.item_background_policy = "odd"
+      p.legend.item_background_hatch_color = "green"
+      p.legend.item_background_hatch_scale = 5
+      p.legend.item_background_hatch_pattern = hash_pattern
+      p.legend.inactive_hatch_scale = 5
+      p.legend.inactive_hatch_pattern = hash_pattern
+      p.legend.background_hatch_color = "yellow"
+      p.legend.background_hatch_pattern = hash_pattern
+
+      return p
+    }
+
+    it("dot", async () => {
+      const p = plot("dot")
+      await show_with_exported(p)
+    })
+
+    it("ring", async () => {
+      const p = plot("ring")
+      await show_with_exported(p)
+    })
+
+    it("horizontal_line", async () => {
+      const p = plot("horizontal_line")
+      await show_with_exported(p)
+    })
+
+    it("vertical_line", async () => {
+      const p = plot("vertical_line")
+      await show_with_exported(p)
+    })
+
+    it("cross", async () => {
+      const p = plot("cross")
+      await show_with_exported(p)
+    })
+
+    it("horizontal_dash", async () => {
+      const p = plot("horizontal_dash")
+      await show_with_exported(p)
+    })
+
+    it("vertical_dash", async () => {
+      const p = plot("vertical_dash")
+      await show_with_exported(p)
+    })
+
+    it("spiral", async () => {
+      const p = plot("spiral")
+      await show_with_exported(p)
+    })
+
+    it("right_diagonal_line", async () => {
+      const p = plot("right_diagonal_line")
+      await show_with_exported(p)
+    })
+
+    it("left_diagonal_line", async () => {
+      const p = plot("left_diagonal_line")
+      await show_with_exported(p)
+    })
+
+    it("diagonal_cross", async () => {
+      const p = plot("diagonal_cross")
+      await show_with_exported(p)
+    })
+
+    it("right_diagonal_dash", async () => {
+      const p = plot("right_diagonal_dash")
+      await show_with_exported(p)
+    })
+
+    it("left_diagonal_dash", async () => {
+      const p = plot("left_diagonal_dash")
+      await show_with_exported(p)
+    })
+
+    it("horizontal_wave", async () => {
+      const p = plot("horizontal_wave")
+      await show_with_exported(p)
+    })
+
+    it("vertical_wave", async () => {
+      const p = plot("vertical_wave")
+      await show_with_exported(p)
+    })
+
+    it("criss_cross", async () => {
+      const p = plot("criss_cross")
+      await show_with_exported(p)
+    })
+
   })
 })

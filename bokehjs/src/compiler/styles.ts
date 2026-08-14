@@ -1,9 +1,10 @@
-import {basename, relative, join} from "path"
+import {basename, relative, join} from "node:path"
+
 import lesscss from "less"
 import chalk from "chalk"
 import CSS from "css"
 
-import {scan, read, write, rename} from "./sys"
+import {scan, read, write, rename} from "./sys.js"
 
 export function collect_styles(styles_dir: string): string[] {
   const paths = []
@@ -84,8 +85,10 @@ export function wrap_css_modules(css_dir: string, js_dir: string, dts_dir: strin
 
     const css_out = CSS.stringify(ast, {compress: true})
     js.push(`export default \`${css_out}\``)
-    dts.push("export default \"\"")
-    dts_internal.push("  export default \"\"")
+    dts.push("const __css__: string")
+    dts.push("export default __css__")
+    dts_internal.push("  const __css__: string")
+    dts_internal.push("  export default __css__")
     dts_internal.push("}")
 
     const js_file = `${join(js_dir, "styles", sub_path)}.js`

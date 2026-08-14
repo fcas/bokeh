@@ -13,6 +13,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAssignmentType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -20,23 +22,25 @@ log = logging.getLogger(__name__)
 # Imports
 #-----------------------------------------------------------------------------
 
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
 from ..core.enums import MapType
 from ..core.has_props import abstract
-from ..core.properties import (
-    JSON,
+from ..core.property.enum import Enum
+from ..core.property.instance import Instance, InstanceDefault
+from ..core.property.json import JSON
+from ..core.property.nullable import Nullable
+from ..core.property.override import Override
+from ..core.property.primitive import (
     Bool,
     Bytes,
-    Enum,
     Float,
-    Instance,
-    InstanceDefault,
     Int,
-    Nullable,
-    Override,
-    Required,
     String,
 )
+from ..core.property.required import Required
 from ..core.validation import error, warning
 from ..core.validation.errors import (
     INCOMPATIBLE_MAP_RANGE_TYPE,
@@ -70,7 +74,7 @@ class MapOptions(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     lat = Required(Float, help="""
@@ -112,7 +116,7 @@ class GMapOptions(MapOptions):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     map_type = Enum(MapType, default="roadmap", help="""
@@ -170,7 +174,7 @@ class GMapPlot(MapPlot):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     # TODO (bev) map plot might not have these

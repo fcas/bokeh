@@ -1,4 +1,4 @@
-import {expect} from "assertions"
+import {expect} from "#framework/assertions"
 
 import {DataAnnotation, DataAnnotationView} from "@bokehjs/models/annotations/data_annotation"
 import type {PlotView} from "@bokehjs/models/plots/plot"
@@ -12,7 +12,7 @@ class SubclassWithNumberSpecView extends DataAnnotationView {
   declare model: SubclassWithNumberSpec
   map_data(): void {}
   _paint_data(): void {}
-  foo: p.Uniform<number>
+  foo!: p.Uniform<number>
 }
 namespace SubclassWithNumberSpec {
   export type Attrs = p.AttrsOf<Props>
@@ -44,7 +44,7 @@ class SubclassWithDistanceSpecView extends DataAnnotationView {
   declare model: SubclassWithDistanceSpec
   map_data(): void {}
   _paint_data(): void {}
-  foo: p.Uniform<number>
+  foo!: p.Uniform<number>
 }
 namespace SubclassWithDistanceSpec {
   export type Attrs = p.AttrsOf<Props>

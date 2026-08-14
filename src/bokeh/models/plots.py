@@ -13,6 +13,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false, reportArgumentType=false, reportAssignmentType=false, reportAttributeAccessIssue=false, reportGeneralTypeIssues=false, reportInconsistentOverload=false, reportOperatorIssue=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -23,14 +25,12 @@ log = logging.getLogger(__name__)
 # Standard library imports
 from contextlib import contextmanager
 from typing import (
+    TYPE_CHECKING,
     Any,
     Generator,
     Literal,
     overload,
 )
-
-# External imports
-import xyzservices
 
 # Bokeh imports
 from ..core.enums import (
@@ -39,28 +39,25 @@ from ..core.enums import (
     Place,
     PlaceType,
     ResetPolicy,
+    WindowAxis,
 )
-from ..core.properties import (
+from ..core.property.container import Dict, List, Tuple
+from ..core.property.either import Either
+from ..core.property.enum import Enum
+from ..core.property.include import Include
+from ..core.property.instance import Instance, InstanceDefault
+from ..core.property.nullable import Nullable
+from ..core.property.override import Override
+from ..core.property.primitive import (
     Bool,
-    Dict,
-    Either,
-    Enum,
     Float,
-    Include,
-    Instance,
-    InstanceDefault,
     Int,
-    List,
     Null,
-    Nullable,
-    Override,
-    Readonly,
     String,
-    Struct,
-    Tuple,
 )
-from ..core.property.struct import Optional
-from ..core.property_mixins import ScalarFillProps, ScalarLineProps
+from ..core.property.readonly import Readonly
+from ..core.property.struct import Optional, Struct
+from ..core.property_mixins import ScalarFillProps, ScalarHatchProps, ScalarLineProps
 from ..core.query import find
 from ..core.validation import error, warning
 from ..core.validation.errors import (
@@ -72,12 +69,10 @@ from ..core.validation.errors import (
 )
 from ..core.validation.warnings import MISSING_RENDERERS
 from ..model import Model
-from ..util.strings import nice_join
-from ..util.warnings import warn
 from .annotations import Annotation, Legend, Title
 from .axes import Axis
 from .dom import HTML
-from .glyphs import Glyph
+from .glyph import Glyph
 from .grids import Grid
 from .layouts import GridCommon, LayoutDOM
 from .ranges import (
@@ -96,6 +91,10 @@ from .scales import (
 from .sources import ColumnarDataSource, ColumnDataSource, DataSource
 from .tiles import TileSource, WMTSTileSource
 from .tools import HoverTool, Tool, Toolbar
+from .ui import StyledElement
+
+if TYPE_CHECKING:
+    import xyzservices
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -119,7 +118,7 @@ class Plot(LayoutDOM):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     def select(self, *args, **kwargs):
@@ -205,10 +204,10 @@ class Plot(LayoutDOM):
         '''
         return self in gridplot.column(col)
 
-    def _axis(self, *sides):
-        objs = []
-        for s in sides:
-            objs.extend(getattr(self, s, []))
+    def _axis(self, *sides: PlaceType):
+        objs: list[Model] = []
+        for side in sides:
+            objs.extend(getattr(self, side, []))
         axis = [obj for obj in objs if isinstance(obj, Axis)]
         return _list_attr_splat(axis)
 
@@ -283,8 +282,13 @@ class Plot(LayoutDOM):
     def tools(self, tools: list[Tool]):
         self.toolbar.tools = tools
 
-    def add_layout(self, obj: Renderer, place: PlaceType = "center") -> None:
-        ''' Adds an object to the plot in a specified place.
+    def add_layout(self, obj: Renderer | StyledElement, place: PlaceType = "center") -> None:
+        ''' Adds an object to the plot in the specified place.
+
+        If the renderer is already a part of a plot, this operation will move
+        it to the new location. If you need finer control than this, you can
+        manipulate ``left``, ``right``, ``above``, ``below`` or ``center``
+        Plot's properties manually.
 
         Args:
             obj (Renderer) : the object to add to the Plot
@@ -296,9 +300,16 @@ class Plot(LayoutDOM):
 
         '''
         if place not in Place:
+            from ..util.strings import nice_join
+
             raise ValueError(
                 f"Invalid place '{place}' specified. Valid place values are: {nice_join(Place)}",
             )
+
+        for name in Place:
+            panel = getattr(self, name)
+            while obj in panel:
+                panel.remove(obj)
 
         getattr(self, place).append(obj)
 
@@ -336,6 +347,8 @@ class Plot(LayoutDOM):
             if not isinstance(tool, Tool):
                 raise ValueError("All arguments to remove_tool must be Tool subclasses.")
             elif tool not in self.toolbar.tools:
+                from ..util.strings import nice_join
+
                 raise ValueError(f"Invalid tool {tool} specified. Available tools are {nice_join(self.toolbar.tools)}")
             self.toolbar.tools.remove(tool)
 
@@ -396,6 +409,7 @@ class Plot(LayoutDOM):
 
         '''
         if not isinstance(tile_source, TileSource):
+            import xyzservices
 
             if isinstance(tile_source, xyzservices.TileProvider):
                 selected_provider = tile_source
@@ -416,6 +430,8 @@ class Plot(LayoutDOM):
                     retina = True
 
                 selected_provider = xyzservices.providers.query_name(tile_source)
+            else:
+                raise ValueError(f"expected a TileSource, xyzservices.TileProvider, or str, got {tile_source!r}")
 
             scale_factor = "@2x" if retina else None
 
@@ -440,8 +456,10 @@ class Plot(LayoutDOM):
         '''
         if render:
             self.hold_render = True
-            yield
-            self.hold_render = False
+            try:
+                yield
+            finally:
+                self.hold_render = False
 
     @error(REQUIRED_RANGE)
     def _check_required_range(self) -> str | None:
@@ -469,14 +487,14 @@ class Plot(LayoutDOM):
 
         if self.x_scale is not None:
             for rng in x_ranges:
-                if isinstance(rng, DataRange1d | Range1d) and not isinstance(self.x_scale, LinearScale | LogScale):
+                if isinstance(rng, (DataRange1d, Range1d)) and not isinstance(self.x_scale, (LinearScale, LogScale)):
                     incompatible.append(f"incompatibility on x-dimension: {rng}, {self.x_scale}")
                 elif isinstance(rng, FactorRange) and not isinstance(self.x_scale, CategoricalScale):
                     incompatible.append(f"incompatibility on x-dimension: {rng}, {self.x_scale}")
 
         if self.y_scale is not None:
             for rng in y_ranges:
-                if isinstance(rng, DataRange1d | Range1d) and not isinstance(self.y_scale, LinearScale | LogScale):
+                if isinstance(rng, (DataRange1d, Range1d)) and not isinstance(self.y_scale, (LinearScale, LogScale)):
                     incompatible.append(f"incompatibility on y-dimension: {rng}, {self.y_scale}")
                 elif isinstance(rng, FactorRange) and not isinstance(self.y_scale, CategoricalScale):
                     incompatible.append(f"incompatibility on y-dimension: {rng}, {self.y_scale}")
@@ -554,6 +572,17 @@ class Plot(LayoutDOM):
     .. note:: This feature is experimental and may change in the short term.
     """)
 
+    window_axis = Enum(WindowAxis, default="none", help="""
+    An axis to use for windowed auto-ranging when there are data ranges
+    present on the plot. For example, if ``window_axis`` is set to the
+    value ``"x"`` then any data ranges in the y-dimension will compute their
+    auto-ranged extents using only data inside the range bounds for the
+    x-axis as configured in the current viewport.
+
+    If set to "none" (the default) then auto-ranging will use all available
+    data, regardless of viewport.
+    """)
+
     hidpi = Bool(default=True, help="""
     Whether to use HiDPI mode when available.
     """)
@@ -600,23 +629,23 @@ class Plot(LayoutDOM):
     makes most sense with auto-hidden toolbars.
     """)
 
-    left = List(Instance(Renderer), help="""
+    left = List(Either(Instance(Renderer), Instance(StyledElement)), help="""
     A list of renderers to occupy the area to the left of the plot.
     """)
 
-    right = List(Instance(Renderer), help="""
+    right = List(Either(Instance(Renderer), Instance(StyledElement)), help="""
     A list of renderers to occupy the area to the right of the plot.
     """)
 
-    above = List(Instance(Renderer), help="""
+    above = List(Either(Instance(Renderer), Instance(StyledElement)), help="""
     A list of renderers to occupy the area above of the plot.
     """)
 
-    below = List(Instance(Renderer), help="""
+    below = List(Either(Instance(Renderer), Instance(StyledElement)), help="""
     A list of renderers to occupy the area below of the plot.
     """)
 
-    center = List(Instance(Renderer), help="""
+    center = List(Either(Instance(Renderer), Instance(StyledElement)), help="""
     A list of renderers to occupy the center area (frame) of the plot.
     """)
 
@@ -687,15 +716,29 @@ class Plot(LayoutDOM):
 
     """)
 
-    background_props = Include(ScalarFillProps, prefix="background", help="""
+    background_fill_props = Include(ScalarFillProps, prefix="background", help="""
+    The {prop} for the plot background style.
+    """)
+
+    background_hatch_props = Include(ScalarHatchProps, prefix="background", help="""
     The {prop} for the plot background style.
     """)
 
     background_fill_color = Override(default='#ffffff')
 
-    border_props = Include(ScalarFillProps, prefix="border", help="""
+    border_line_props = Include(ScalarLineProps, prefix="border", help="""
     The {prop} for the plot border style.
     """)
+
+    border_fill_props = Include(ScalarFillProps, prefix="border", help="""
+    The {prop} for the plot border style.
+    """)
+
+    border_hatch_props = Include(ScalarHatchProps, prefix="border", help="""
+    The {prop} for the plot border style.
+    """)
+
+    border_line_color = Override(default=None)
 
     border_fill_color = Override(default='#ffffff')
 
@@ -746,25 +789,46 @@ class Plot(LayoutDOM):
     """)
 
     lod_factor = Int(10, help="""
-    Decimation factor to use when applying level-of-detail decimation.
+    Decimation factor to use when applying level-of-detail mode.
+
+    A ``lod_factor`` of N means that only every Nth point in the data source
+    will be drawn while interactive events are active. For example, if
+    ``lod_factor=200`` then only every 200th point will be drawn.
+
+    The level-of-detail mode is intended to preserve interactive response
+    times on HTML canvas plots when there are a large number of data points.
+
+    Note that a possible alternative to level-of-detail mode is using the
+    WebGL ``output_backend``. WebGL rendering may allow very large data sets
+    to remain interactive without any level-of-detail downsampling. When
+    WebGL output is enabled, level-of-detail mode is not used.
     """)
 
     lod_threshold = Nullable(Int, default=2000, help="""
     A number of data points, above which level-of-detail downsampling may
-    be performed by glyph renderers. Set to ``None`` to disable any
-    level-of-detail downsampling.
+    be performed by glyph renderers. For example, if ``lod_threshold=10000``
+    then level-of-detail mode will not be activated if there are fewer than
+    10000 points in the data source.
+
+    Set to ``None`` to disable any level-of-detail downsampling at all.
     """)
 
     lod_interval = Int(300, help="""
     Interval (in ms) during which an interactive tool event will enable
     level-of-detail downsampling.
+
+    If a plot needs to be re-drawn within ``lod_interval`` milliseconds
+    of the last interactive event starting, then level-of-detail mode will
+    be activated. Larger values mean the level-of-detail mode will be
+    "easier" to turn on.
     """)
 
     lod_timeout = Int(500, help="""
     Timeout (in ms) for checking whether interactive tool events are still
     occurring. Once level-of-detail mode is enabled, a check is made every
     ``lod_timeout`` ms. If no interactive tool events have happened,
-    level-of-detail mode is disabled.
+    level-of-detail mode is disabled. Larger values mean the level-of-detail
+    mode will be "slower" to turn off.
     """)
 
     output_backend = Enum(OutputBackend, default="canvas", help="""
@@ -857,13 +921,15 @@ class Plot(LayoutDOM):
         This feature is experimental and may change in the short term.
     """)
 
+    context_menu = Override(default="auto")
+
 class GridPlot(LayoutDOM, GridCommon):
     """ Collection of plots and other layoutables on arranged on a rectangular grid.
 
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     toolbar = Instance(Toolbar, default=InstanceDefault(Toolbar), help="""
@@ -932,6 +998,8 @@ Before legend properties can be set, you must add a Legend explicitly, or call a
 class _legend_attr_splat(_list_attr_splat):
     def __setattr__(self, attr, value):
         if not len(self):
+            from ..util.warnings import warn
+
             warn(_LEGEND_EMPTY_WARNING % attr)
         return super().__setattr__(attr, value)
 

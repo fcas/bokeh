@@ -20,7 +20,7 @@ import pytest ; pytest
 import re
 
 # External imports
-import pandas as pd
+import numpy as np
 
 # Bokeh imports
 from bokeh.core.enums import MarkerType
@@ -33,6 +33,7 @@ from bokeh.models import (
     Legend,
     LinearAxis,
     LogScale,
+    Menu,
     PanTool,
     ResetTool,
     Scatter,
@@ -233,9 +234,80 @@ class Test_figure:
         p.scatter(x='x', y='y', source=dct)
 
     def test_columnsource_auto_conversion_from_pandas(self) -> None:
+        pd = pytest.importorskip("pandas")
         p = bpf.figure()
         df = pd.DataFrame({'x': [1, 2, 3], 'y': [2, 3, 4]})
         p.scatter(x='x', y='y', source=df)
+
+    @pytest.mark.parametrize(("method_name", "coordinate_name", "stacked_name"), [
+        ("harea_stack", "y", "x2"),
+        ("varea_stack", "x", "y2"),
+        ("hbar_stack", "y", "right"),
+        ("vbar_stack", "x", "top"),
+        ("hline_stack", "y", "x"),
+        ("vline_stack", "x", "y"),
+    ])
+    def test_stack_methods_accept_numpy_stackers(
+        self,
+        method_name: str,
+        coordinate_name: str,
+        stacked_name: str,
+    ) -> None:
+        p = bpf.figure()
+        source = ColumnDataSource({coordinate_name: [1, 2], "a": [1, 2], "b": [3, 4]})
+
+        method = getattr(p, method_name)
+        renderers = method(np.array(["a", "b"]), source=source, **{coordinate_name: coordinate_name})
+
+        assert len(renderers) == 2
+        assert [renderer.name for renderer in renderers] == ["a", "b"]
+        assert [list(getattr(renderer.glyph, stacked_name).expr.fields) for renderer in renderers] == [["a"], ["a", "b"]]
+
+    @pytest.mark.parametrize(("method_name", "coordinate_name", "stacked_name"), [
+        ("harea_stack", "y", "x2"),
+        ("varea_stack", "x", "y2"),
+        ("hbar_stack", "y", "right"),
+        ("vbar_stack", "x", "top"),
+        ("hline_stack", "y", "x"),
+        ("vline_stack", "x", "y"),
+    ])
+    def test_stack_methods_accept_pandas_index_stackers(
+        self,
+        method_name: str,
+        coordinate_name: str,
+        stacked_name: str,
+    ) -> None:
+        pd = pytest.importorskip("pandas")
+        p = bpf.figure()
+        source = ColumnDataSource({coordinate_name: [1, 2], "a": [1, 2], "b": [3, 4]})
+
+        method = getattr(p, method_name)
+        renderers = method(pd.Index(["a", "b"]), source=source, **{coordinate_name: coordinate_name})
+
+        assert len(renderers) == 2
+        assert [renderer.name for renderer in renderers] == ["a", "b"]
+        assert [list(getattr(renderer.glyph, stacked_name).expr.fields) for renderer in renderers] == [["a"], ["a", "b"]]
+
+    @pytest.mark.parametrize(("method_name", "coordinate_name"), [
+        ("harea_stack", "y"),
+        ("varea_stack", "x"),
+        ("hbar_stack", "y"),
+        ("vbar_stack", "x"),
+        ("hline_stack", "y"),
+        ("vline_stack", "x"),
+    ])
+    def test_stack_methods_accept_numpy_coordinates(self, method_name: str, coordinate_name: str) -> None:
+        p = bpf.figure()
+        coordinate = np.array([1, 2])
+
+        method = getattr(p, method_name)
+        renderers = method(["a", "b"], **{coordinate_name: coordinate})
+
+        assert len(renderers) == 2
+        assert [renderer.name for renderer in renderers] == ["a", "b"]
+        for renderer in renderers:
+            assert isinstance(renderer.data_source, ColumnDataSource)
+            assert np.array_equal(renderer.data_source.data[coordinate_name], coordinate)
 
     def test_glyph_method_errors_on_sequence_literals_with_source(self) -> None:
         p = bpf.figure()
@@ -251,7 +323,23 @@ class Test_figure:
         assert m is not None
         assert set(m.groups()) == {"fill_color", "hatch_color", "line_color"}
 
-NONCIRCLE_MARKERS = set(MarkerType) - {"circle"}
+    def test_context_menu(self) -> None:
+        plot = bpf.figure()
+        assert plot.context_menu == "auto"
+
+        plot = bpf.figure(context_menu=None)
+        assert plot.context_menu is None
+
+        menu = Menu()
+        plot = bpf.figure()
+        plot.context_menu = menu
+        assert plot.context_menu == menu
+
+        menu = Menu()
+        plot = bpf.figure(context_menu=menu)
+        assert plot.context_menu == menu
+
+NONCIRCLE_MARKERS = sorted(set(MarkerType) - {"circle"})
 
 class TestMarkers:
     @pytest.mark.parametrize('marker', NONCIRCLE_MARKERS)
@@ -394,7 +482,7 @@ class Test_vbar_stack:
         assert renderers[1].name == "2016"
         assert renderers[2].name == "2017"
 
-def Test_figure_legends_DEPRECATED(obejct):
+def Test_figure_legends_DEPRECATED(object):
 
     def test_glyph_label_is_legend_if_column_in_datasource_is_added_as_legend(self, p, source) -> None:
         p.scatter(x='x', y='y', legend='label', source=source)
@@ -409,6 +497,7 @@ def Test_figure_legends_DEPRECATED(obejct):
         assert legends[0].items[0].label == {'value': 'milk'}
 
     def test_glyph_label_is_legend_if_column_in_df_datasource_is_added_as_legend(self, p) -> None:
+        pd = pytest.importorskip("pandas")
         source = pd.DataFrame(data=dict(x=[1, 2, 3], y=[1, 2, 3], label=['a', 'b', 'c']))
         p.scatter(x='x', y='y', legend='label', source=source)
         legends = p.select(Legend)
@@ -417,6 +506,7 @@ def Test_figure_legends_DEPRECATED(obejct):
 
 
     def test_glyph_label_is_value_if_column_not_in_df_datasource_is_added_as_legend(self, p) -> None:
+        pd = pytest.importorskip("pandas")
         source = pd.DataFrame(data=dict(x=[1, 2, 3], y=[1, 2, 3], label=['a', 'b', 'c']))
         p.scatter(x='x', y='y', legend='milk', source=source)
         legends = p.select(Legend)
@@ -480,7 +570,7 @@ def Test_figure_legends_DEPRECATED(obejct):
         assert legends[0].items[0].label == {'field': 'label'}
 
 
-def Test_figure_legends(obejct):
+def Test_figure_legends(object):
 
     def test_glyph_legend_field(self, p, source) -> None:
         p.scatter(x='x', y='y', legend_field='label', source=source)

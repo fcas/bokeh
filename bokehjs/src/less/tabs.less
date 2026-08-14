@@ -1,7 +1,28 @@
 @import "./_mixins.less";
 
 :host {
+  --active-border-width: 3px;
+  --active-border-color: var(--border-color);
+
+  --close-icon-hover-background-color: var(--error);
+  --close-icon-width: 14px;
+  --close-icon-height: 14px;
+  --close-icon-color: var(--icon-color);
+  --close-icon-space-away-from-tab-text: 10px;
+
+  --margin: 4px;
+
+  --tab-padding-vertical: 4px;
+  --tab-padding-horizontal: 8px;
+
+  --outline-offset: -5px;
+
+  --disabled-opacity: 0.65;
+}
+
+:host {
   display: grid;
+  background-color: var(--inherit-background-color);
 }
 
 :host(.bk-above) {
@@ -27,18 +48,37 @@
 }
 
 .bk-header {
-  grid-area: "header";
+  grid-area: header;
+  display: flex;
+  overflow: hidden;
 
+  .no-user-select();
+}
+
+.bk-panel {
+  grid-area: stack;
+  width: max-content;
+  height: max-content;
+}
+.bk-panel:not(.bk-active) {
+  visibility: hidden;
+}
+
+.bk-headers-wrapper {
   display: flex;
   flex-wrap: nowrap;
   align-items: stretch;
-
-  .no-user-select();
 }
 
 :host(.bk-above), :host(.bk-below) {
   .bk-header {
     flex-direction: row;
+  }
+
+  .bk-headers-wrapper {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 }
 
@@ -46,76 +86,115 @@
   .bk-header {
     flex-direction: column;
   }
+
+  .bk-headers-wrapper {
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
 }
 
-@border: 1px solid lighten(black, 90%);
-
-:host(.bk-above) .bk-header { border-bottom: @border; }
-:host(.bk-right) .bk-header { border-left:   @border; }
-:host(.bk-below) .bk-header { border-top:    @border; }
-:host(.bk-left)  .bk-header { border-right:  @border; }
+:host(.bk-above) .bk-header { border-bottom: var(--divider); }
+:host(.bk-right) .bk-header { border-left:   var(--divider); }
+:host(.bk-below) .bk-header { border-top:    var(--divider); }
+:host(.bk-left)  .bk-header { border-right:  var(--divider); }
 
 .bk-tab {
-  padding: 4px 8px; // var(--padding-vertical) var(--padding-horizontal);
-  border: solid transparent;
+  padding: var(--tab-padding-vertical) var(--tab-padding-horizontal);
+  border: var(--border-style) var(--border-color);
   outline: 0;
-  outline-offset: -5px;
+  outline-offset: var(--outline-offset);
   white-space: nowrap;
   cursor: pointer;
   text-align: center;
+  color: var(--inherit-color);
 
   &:hover {
-    background-color: lighten(black, 95%);
+    background-color: var(--hover-color);
   }
 
   &:focus, &:active {
-    outline: 1px dotted #ccc;
+    outline: var(--outline);
   }
 
   &.bk-active {
-    color: lighten(black, 30%);
-    background-color: white;
-    border-color: lighten(black, 90%);
+    --active-border-color: var(--highlight-color);
+    color: var(--color);
+    background-color: var(--background-color);
+    border-color: var(--border-color);
+    font-weight: bold;
+  }
+
+  & > span {
+    display: inline-grid;
+    text-align: center;
+    pointer-events: none;
+
+    & > span, &::after {
+      grid-area: 1 / 1;
+    }
+
+    &::after {
+      content: attr(data-title) / "";
+      visibility: hidden;
+      font-weight: bold;
+    }
   }
 
   .bk-close {
-    margin-left: 10px;
+    margin-left: var(--close-icon-space-away-from-tab-text);
   }
 
-  &.bk-disabled { // TODO: same as elsewhere, so use a mixin
-    cursor: not-allowed;
-    pointer-events: none;
-    opacity: 0.65;
-  }
+  .bk-disabled(var(--disabled-opacity), var(--disabled-background-color), var(--disabled-color), inherit);
 }
 
 :host(.bk-above) .bk-tab {
-  border-width: 3px 1px 0px 1px;
+  border-width: var(--active-border-width) var(--border-width) 0 var(--border-width);
   border-radius: var(--border-radius) var(--border-radius) 0 0;
+  border-color: var(--active-border-color) var(--border-color) transparent var(--border-color);
+
+  &:not(:last-child) {
+    margin: 0 var(--margin) 0 0;
+  }
 }
 :host(.bk-right) .bk-tab {
-  border-width: 1px 3px 1px 0px;
+  border-width: var(--border-width) var(--active-border-width) var(--border-width) 0;
   border-radius: 0 var(--border-radius) var(--border-radius) 0;
+  border-color: var(--border-color) var(--active-border-color) var(--border-color) transparent;
+
+  &:not(:last-child) {
+    margin: 0 0 var(--margin) 0;
+  }
 }
 :host(.bk-below) .bk-tab {
-  border-width: 0px 1px 3px 1px;
+  border-width: 0 var(--border-width) var(--active-border-width) var(--border-width);
   border-radius: 0 0 var(--border-radius) var(--border-radius);
+  border-color: transparent var(--border-color) var(--active-border-color) var(--border-color);
+
+  &:not(:last-child) {
+    margin: 0 var(--margin) 0 0;
+  }
 }
 :host(.bk-left) .bk-tab {
-  border-width: 1px 0px 1px 3px;
+  border-width: var(--border-width) 0 var(--border-width) var(--active-border-width);
   border-radius: var(--border-radius) 0 0 var(--border-radius);
+  border-color: var(--border-color) transparent var(--border-color) var(--active-border-color);
+
+  &:not(:last-child) {
+    margin: 0 0 var(--margin) 0;
+  }
 }
 
 .bk-close {
   display: inline-block;
   vertical-align: middle;
-  width: 14px;
-  height: 14px;
+  width: var(--close-icon-width);
+  height: var(--close-icon-height);
   cursor: pointer;
 
-  .icon-mask(var(--bokeh-icon-x), gray);
+  .icon-mask(var(--bokeh-icon-x), var(--close-icon-color));
 
   &:hover {
-    background-color: red;
+    background-color: var(--close-icon-hover-background-color);
   }
 }

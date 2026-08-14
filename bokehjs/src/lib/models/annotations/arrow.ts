@@ -8,7 +8,7 @@ import type * as visuals from "core/visuals"
 import {CoordinateUnits} from "core/enums"
 import type {FloatArray} from "core/types"
 import {ScreenArray} from "core/types"
-import type {IterViews} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import {build_view} from "core/build_views"
 import {Indices} from "core/types"
 import * as p from "core/properties"
@@ -33,16 +33,8 @@ export class ArrowView extends DataAnnotationView {
 
   protected _angles: ScreenArray
 
-  override *children(): IterViews {
-    yield* super.children()
-
-    const {start, end} = this
-    if (start != null) {
-      yield start
-    }
-    if (end != null) {
-      yield end
-    }
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this.start, this.end]
   }
 
   override async lazy_initialize(): Promise<void> {
@@ -64,10 +56,16 @@ export class ArrowView extends DataAnnotationView {
     this.end?.set_data(source, indices)
   }
 
-  override remove(): void {
-    this.start?.remove()
-    this.end?.remove()
-    super.remove()
+  override connect_signals(): void {
+    super.connect_signals()
+
+    const update = () => {
+      this.set_data(this.model.source)
+      this.request_paint()
+    }
+
+    this.on_transitive_change(this.model.properties.start, update)
+    this.on_transitive_change(this.model.properties.end, update)
   }
 
   map_data(): void {

@@ -76,6 +76,8 @@ from _util_models import (
 #-----------------------------------------------------------------------------
 
 STYLED_ELEMENT = [
+    "html_attributes",
+    "html_id",
     "css_classes",
     "css_variables",
     "styles",
@@ -118,10 +120,10 @@ def test_Legend() -> None:
     assert legend.title_location == "above"
     assert legend.title_standoff == 5
     assert legend.label_standoff == 5
-    assert legend.label_height == 20
     assert legend.label_width == 20
-    assert legend.glyph_height == 20
+    assert legend.label_height == "auto"
     assert legend.glyph_width == 20
+    assert legend.glyph_height == 20
     assert legend.padding == 10
     assert legend.spacing == 3
     assert legend.margin == 10
@@ -131,7 +133,11 @@ def test_Legend() -> None:
     check_line_properties(legend, "border_", "#e5e5e5", 1.0, 0.5)
     check_text_properties(legend, "label_", "13px", "middle", scalar=True)
     check_fill_properties(legend, "background_", "#ffffff", 0.95)
+    check_hatch_properties(legend, "background_")
     check_fill_properties(legend, "item_background_", "#f1f1f1", 0.8)
+    check_hatch_properties(legend, "item_background_")
+    check_fill_properties(legend, "inactive_", "white", 0.7)
+    check_hatch_properties(legend, "inactive_")
     check_properties_existence(legend, [
         *ANNOTATION,
         "location",
@@ -149,6 +155,7 @@ def test_Legend() -> None:
         "margin",
         "padding",
         "spacing",
+        "border_radius",
         "items",
         "click_policy",
         "item_background_policy",
@@ -157,8 +164,11 @@ def test_Legend() -> None:
         prefix('title_', TEXT),
         prefix('border_', LINE),
         prefix('background_', FILL),
+        prefix('background_', HATCH),
         prefix('item_background_', FILL),
+        prefix('item_background_', HATCH),
         prefix('inactive_', FILL),
+        prefix('inactive_', HATCH),
     )
 
 def test_LegendItem() -> None:
@@ -198,6 +208,7 @@ def test_ColorBar() -> None:
     check_line_properties(color_bar, "bar_", None)
     check_line_properties(color_bar, "border_", None)
     check_fill_properties(color_bar, "background_", "#ffffff", 0.95)
+    check_hatch_properties(color_bar, "background_")
     check_properties_existence(color_bar, [
         *ANNOTATION,
         "location",
@@ -229,6 +240,7 @@ def test_ColorBar() -> None:
         prefix('bar_', LINE),
         prefix('border_', LINE),
         prefix('background_', FILL),
+        prefix('background_', HATCH),
     )
 
 
@@ -239,8 +251,10 @@ def test_ScaleBar() -> None:
     assert isinstance(scale_bar.dimensional, MetricLength)
     assert scale_bar.orientation == "horizontal"
     assert scale_bar.location == "top_right"
+    assert scale_bar.anchor == "auto"
     assert scale_bar.length_sizing == "adaptive"
     assert scale_bar.bar_length == 0.2
+    assert scale_bar.bar_length_units == "screen"
     assert scale_bar.margin == 10
     assert scale_bar.padding == 10
     assert scale_bar.label == "@{value} @{unit}"
@@ -259,8 +273,12 @@ def test_ScaleBar() -> None:
         "dimensional",
         "orientation",
         "location",
+        "x_units",
+        "y_units",
+        "anchor",
         "length_sizing",
         "bar_length",
+        "bar_length_units",
         "margin",
         "padding",
         "label",
@@ -380,6 +398,8 @@ def test_BoxAnnotation() -> None:
         "resizable",
         "movable",
         "symmetric",
+        "use_handles",
+        "handles",
         "inverted",
     ], LINE, FILL, HATCH, HOVER_LINE, HOVER_FILL, HOVER_HATCH)
 
@@ -413,6 +433,7 @@ def test_Band() -> None:
     assert band.y_range_name == 'default'
     check_line_properties(band, "", "#cccccc", 1.0, 0.3)
     check_fill_properties(band, "", "#fff9ba", 0.4)
+    check_hatch_properties(band)
     check_properties_existence(band, [
         *ANNOTATION,
         "lower",
@@ -423,7 +444,7 @@ def test_Band() -> None:
         "base_units",
         "dimension",
         "source",
-    ], LINE, FILL)
+    ], LINE, FILL, HATCH)
 
 
 def test_Label() -> None:
@@ -442,6 +463,7 @@ def test_Label() -> None:
     assert label.y_range_name == 'default'
     check_text_properties(label, scalar=True)
     check_fill_properties(label, "background_", None, 1.0)
+    check_hatch_properties(label, "background_")
     check_line_properties(label, "border_", None, 1.0, 1.0)
     check_properties_existence(label, [
         *ANNOTATION,
@@ -494,6 +516,7 @@ def test_LabelSet() -> None:
     assert label_set.source.data == {}
     check_text_properties(label_set)
     check_fill_properties(label_set, "background_", None, 1.0)
+    check_hatch_properties(label_set, "background_")
     check_line_properties(label_set, "border_", None, 1.0, 1.0)
     check_properties_existence(label_set, [
         *ANNOTATION,
@@ -512,6 +535,7 @@ def test_LabelSet() -> None:
         ANGLE,
         prefix('border_', LINE),
         prefix('background_', FILL),
+        prefix('background_', HATCH),
     )
 
 def test_PolyAnnotation() -> None:

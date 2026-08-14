@@ -29,10 +29,13 @@ from os.path import normpath
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     Iterator,
+    NotRequired,
     Sequence,
     TypedDict,
+    cast,
 )
 from urllib.parse import urljoin
 
@@ -46,8 +49,6 @@ from ..util.compiler import bundle_models
 from .util import contains_tex_string
 
 if TYPE_CHECKING:
-    from typing_extensions import NotRequired
-
     from ..resources import Hashes
 
 #-----------------------------------------------------------------------------
@@ -71,13 +72,13 @@ class Artifact:
     pass
 
 class ScriptRef(Artifact):
-    def __init__(self, url: str, type: str = "text/javascript") -> None:
+    def __init__(self, url: str, type: str | None = None) -> None:
         self.url = URL(url)
         self.type = type
 
 
 class Script(Artifact):
-    def __init__(self, content: str, type: str = "text/javascript") -> None:
+    def __init__(self, content: str, type: str | None = None) -> None:
         self.content = content
         self.type = type
 
@@ -141,6 +142,9 @@ class Bundle:
             self.css_files.append(artifact.url)
         elif isinstance(artifact, Style):
             self.css_raw.append(artifact.content)
+
+    def clone(self) -> Bundle:
+        return Bundle(self.js_files, self.js_raw, self.css_files, self.css_raw, self.hashes)
 
 def bundle_for_objs_and_resources(objs: Sequence[HasProps | Document] | None, resources: Resources | None) -> Bundle:
     ''' Generate rendered CSS and JS resources suitable for the given
@@ -282,6 +286,8 @@ def _bundle_extensions(objs: set[HasProps] | None, resources: Resources) -> list
             continue
         names.add(name)
         module = __import__(name)
+        if module.__file__ is None:
+            continue
         this_file = Path(module.__file__).absolute()
         base_dir = this_file.parent
         dist_dir = base_dir / "dist"
@@ -312,11 +318,11 @@ def _bundle_extensions(objs: set[HasProps] | None, resources: Resources) -> list
             pkg_version = pkg.get("version", "latest")
             pkg_main = pkg.get("module", pkg.get("main", None))
             if pkg_main is not None:
-                pkg_main = Path(normpath(pkg_main))
-                cdn_url = _default_cdn_host / f"{pkg_name}@{pkg_version}" / f"{pkg_main}"
+                pkg_main_path = Path(normpath(pkg_main))
+                cdn_url = _default_cdn_host / f"{pkg_name}@{pkg_version}" / f"{pkg_main_path}"
             else:
-                pkg_main = dist_dir / f"{name}.js"
-            artifact_path = base_dir / pkg_main
+                pkg_main_path = dist_dir / f"{name}.js"
+            artifact_path = base_dir / pkg_main_path
             artifacts_dir = artifact_path.parent
             artifact_name = artifact_path.name
             server_path = f"{name}/{artifact_name}"
@@ -350,7 +356,7 @@ def _all_objs(objs: Sequence[HasProps | Document]) -> set[HasProps]:
             for root in obj.roots:
                 all_objs |= root.references()
         else:
-            all_objs |= obj.references()
+            all_objs |= cast(Any, obj).references()
 
     return all_objs
 
@@ -372,7 +378,7 @@ def _use_tables(all_objs: set[HasProps]) -> bool:
     ''' Whether a collection of Bokeh objects contains a TableWidget
 
     Args:
-        objs (seq[HasProps or Document]) :
+        all_objs (seq[HasProps or Document]) :
 
     Returns:
         bool
@@ -385,7 +391,7 @@ def _use_widgets(all_objs: set[HasProps]) -> bool:
     ''' Whether a collection of Bokeh objects contains a any Widget
 
     Args:
-        objs (seq[HasProps or Document]) :
+        all_objs (seq[HasProps or Document]) :
 
     Returns:
         bool
@@ -438,20 +444,20 @@ def _model_requires_mathjax(model: HasProps) -> bool:
 def _use_mathjax(all_objs: set[HasProps]) -> bool:
     ''' Whether a collection of Bokeh objects contains a model requesting MathJax
     Args:
-        objs (seq[HasProps or Document]) :
+        all_objs (seq[HasProps or Document]) :
     Returns:
         bool
     '''
     from ..models.glyphs import MathTextGlyph
     from ..models.text import MathText
 
-    return _any(all_objs, lambda obj: isinstance(obj, MathTextGlyph | MathText) or _model_requires_mathjax(obj)) or _ext_use_mathjax(all_objs)
+    return _any(all_objs, lambda obj: isinstance(obj, (MathTextGlyph, MathText)) or _model_requires_mathjax(obj)) or _ext_use_mathjax(all_objs)
 
 def _use_gl(all_objs: set[HasProps]) -> bool:
     ''' Whether a collection of Bokeh objects contains a plot requesting WebGL
 
     Args:
-        objs (seq[HasProps or Document]) :
+        all_objs (seq[HasProps or Document]) :
 
     Returns:
         bool

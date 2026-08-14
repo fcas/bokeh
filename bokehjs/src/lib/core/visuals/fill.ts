@@ -15,16 +15,25 @@ export class Fill extends VisualProperties {
     return !(color == null || alpha == 0)
   }
 
-  apply(ctx: Context2d, rule?: CanvasFillRule): boolean {
+  apply(ctx: Context2d, path_or_rule?: Path2D | CanvasFillRule, rule: CanvasFillRule = "nonzero"): boolean {
     const {doit} = this
     if (doit) {
       this.set_value(ctx)
-      ctx.fill(rule)
+      if (path_or_rule instanceof Path2D) {
+        const path = path_or_rule
+        ctx.fill(path, rule)
+      } else {
+        ctx.fill(path_or_rule ?? rule)
+      }
     }
     return doit
   }
 
-  Values: ValuesOf<mixins.Fill>
+  declare Values: ValuesOf<mixins.Fill>
+  declare ComputedValues: {
+    color: string
+  }
+
   values(): this["Values"] {
     return {
       color: this.get_fill_color(),
@@ -32,11 +41,17 @@ export class Fill extends VisualProperties {
     }
   }
 
-  set_value(ctx: Context2d): void {
+  computed_values(): this["ComputedValues"] {
     const color = this.get_fill_color()
     const alpha = this.get_fill_alpha()
+    return {
+      color: color2css(color, alpha),
+    }
+  }
 
-    ctx.fillStyle = color2css(color, alpha)
+  set_value(ctx: Context2d): void {
+    const {color} = this.computed_values()
+    ctx.fillStyle = color
   }
 
   get_fill_color(): Color | null {
@@ -70,11 +85,16 @@ export class FillScalar extends VisualUniforms {
     return !(color == 0 || alpha == 0)
   }
 
-  apply(ctx: Context2d, rule?: CanvasFillRule): boolean {
+  apply(ctx: Context2d, path_or_rule?: Path2D | CanvasFillRule, rule: CanvasFillRule = "nonzero"): boolean {
     const {doit} = this
     if (doit) {
       this.set_value(ctx)
-      ctx.fill(rule)
+      if (path_or_rule instanceof Path2D) {
+        const path = path_or_rule
+        ctx.fill(path, rule)
+      } else {
+        ctx.fill(path_or_rule ?? rule)
+      }
     }
     return doit
   }
@@ -121,11 +141,16 @@ export class FillVector extends VisualUniforms {
     return true
   }
 
-  apply(ctx: Context2d, i: number, rule?: CanvasFillRule): boolean {
+  apply(ctx: Context2d, i: number, path_or_rule?: Path2D | CanvasFillRule, rule: CanvasFillRule = "nonzero"): boolean {
     const doit = this.v_doit(i)
     if (doit) {
       this.set_vectorize(ctx, i)
-      ctx.fill(rule)
+      if (path_or_rule instanceof Path2D) {
+        const path = path_or_rule
+        ctx.fill(path, rule)
+      } else {
+        ctx.fill(path_or_rule ?? rule)
+      }
     }
     return doit
   }

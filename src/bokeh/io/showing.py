@@ -21,12 +21,18 @@ log = logging.getLogger(__name__)
 #-----------------------------------------------------------------------------
 
 # Standard library imports
-from typing import TYPE_CHECKING, Any, TypeGuard
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Sequence,
+    TypeGuard,
+)
 
 # Bokeh imports
+from ..models.dom import DOMNode
 from ..models.ui import UIElement
 from ..util.browser import NEW_PARAM, get_browser_controller
-from .notebook import DEFAULT_JUPYTER_URL, ProxyUrlFunc, run_notebook_hook
+from .notebook import DEFAULT_JUPYTER_URL, run_notebook_hook
 from .saving import save
 from .state import curstate
 
@@ -34,7 +40,7 @@ if TYPE_CHECKING:
     from ..application.application import Application
     from ..application.handlers.function import ModifyDoc
     from ..util.browser import BrowserLike, BrowserTarget
-    from .notebook import CommsHandle
+    from .notebook import CommsHandle, ProxyUrlFunc
     from .state import State
 
 #-----------------------------------------------------------------------------
@@ -43,22 +49,31 @@ if TYPE_CHECKING:
 
 __all__ = (
     'show',
+    "Showable",
 )
 
 #-----------------------------------------------------------------------------
 # General API
 #-----------------------------------------------------------------------------
 
-def show(obj: UIElement | Application | ModifyDoc, browser: str | None = None, new: BrowserTarget = "tab",
-         notebook_handle: bool = False, notebook_url: str | ProxyUrlFunc = DEFAULT_JUPYTER_URL,
-         **kwargs: Any) -> CommsHandle | None:
+type OneOrMore[T] = T | Sequence[T]
+type Showable = OneOrMore[UIElement | DOMNode]
+
+def show(
+    obj: Showable | Application | ModifyDoc,
+    browser: str | None = None,
+    new: BrowserTarget = "tab",
+    notebook_handle: bool = False,
+    notebook_url: str | ProxyUrlFunc = DEFAULT_JUPYTER_URL,
+    **kwargs: Any,
+) -> CommsHandle | None:
     '''Immediately display a Bokeh object or application.
 
     :func:`show` may be called multiple times in a single Jupyter notebook
     cell to display multiple objects. The objects are displayed in order.
 
     Args:
-        obj (UIElement or Application or callable) :
+        obj (UIElement or UIElement[] or DOMNode or DOMNode[] or Application or callable) :
             A Bokeh object to display.
 
             Bokeh plots, widgets, layouts (i.e. rows and columns) may be
@@ -141,9 +156,12 @@ def show(obj: UIElement | Application | ModifyDoc, browser: str | None = None, n
         ``push_notebook``, None otherwise.
 
     '''
+    from ..models.dom import DOMNode
+    from ..models.ui import UIElement
+
     state = curstate()
 
-    if isinstance(obj, UIElement):
+    if isinstance(obj, UIElement) or isinstance(obj, DOMNode) or isinstance(obj, Sequence):
         return _show_with_state(obj, state, browser, new, notebook_handle=notebook_handle)
 
     def is_application(obj: Any) -> TypeGuard[Application]:
@@ -168,18 +186,19 @@ def show(obj: UIElement | Application | ModifyDoc, browser: str | None = None, n
 _BAD_SHOW_MSG = """Invalid object to show. The object to passed to show must be one of:
 
 * a UIElement (e.g. a plot, figure, widget or layout)
+* a DOMNode (e.g. a Div)
 * a Bokeh Application
 * a callable suitable to an application FunctionHandler
 """
 
-def _show_file_with_state(obj: UIElement, state: State, new: BrowserTarget, controller: BrowserLike) -> None:
+def _show_file_with_state(obj: Showable, state: State, new: BrowserTarget, controller: BrowserLike) -> None:
     '''
 
     '''
     filename = save(obj, state=state)
     controller.open("file://" + filename, new=NEW_PARAM[new])
 
-def _show_with_state(obj: UIElement, state: State, browser: str | None,
+def _show_with_state(obj: Showable, state: State, browser: str | None,
         new: BrowserTarget, notebook_handle: bool = False) -> CommsHandle | None:
     '''
 

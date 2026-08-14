@@ -13,12 +13,17 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportArgumentType=false, reportGeneralTypeIssues=false, reportOperatorIssue=false, reportReturnType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
 #-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
+
+# Standard library imports
+from typing import Any
 
 # Bokeh imports
 from ..colors import RGB, Color, ColorLike
@@ -32,23 +37,21 @@ from ..core.enums import (
     SizingPolicy,
 )
 from ..core.has_props import HasProps, abstract
-from ..core.properties import (
-    Auto,
+from ..core.property.auto import Auto
+from ..core.property.container import List, Tuple
+from ..core.property.either import Either
+from ..core.property.enum import Enum
+from ..core.property.instance import Instance
+from ..core.property.nullable import Nullable
+from ..core.property.numeric import NonNegative
+from ..core.property.primitive import (
     Bool,
-    Either,
-    Enum,
     Float,
-    Instance,
     Int,
-    List,
-    NonNegative,
     Null,
-    Nullable,
     String,
-    Struct,
-    Tuple,
 )
-from ..core.property.struct import Optional
+from ..core.property.struct import Optional, Struct
 from ..core.property_aliases import GridSpacing, Pixels, TracksSizing
 from ..core.validation import error, warning
 from ..core.validation.errors import (
@@ -64,6 +67,7 @@ from ..core.validation.warnings import (
     FIXED_WIDTH_POLICY,
 )
 from ..model import Model
+from .dom import HTML
 from .ui.panes import Pane
 from .ui.tooltips import Tooltip
 from .ui.ui_element import UIElement
@@ -98,7 +102,7 @@ class LayoutDOM(Pane):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     disabled = Bool(False, help="""
@@ -107,13 +111,13 @@ class LayoutDOM(Pane):
     If ``True``, the widget will be greyed-out and not responsive to UI events.
     """)
 
-    width: int | None = Nullable(NonNegative(Int), help="""
+    width = Nullable(NonNegative(Int), help="""
     The width of the component (in pixels).
 
     This can be either fixed or preferred width, depending on width sizing policy.
     """)
 
-    height: int | None = Nullable(NonNegative(Int), help="""
+    height = Nullable(NonNegative(Int), help="""
     The height of the component (in pixels).
 
     This can be either fixed or preferred height, depending on height sizing policy.
@@ -337,7 +341,7 @@ class Spacer(LayoutDOM):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 @abstract
@@ -394,7 +398,7 @@ class GridBox(LayoutDOM, GridCommon):
     """ A CSS grid-based grid container. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     children = List(Either(
@@ -413,7 +417,7 @@ class HBox(LayoutDOM):
     """ A CSS grid-based horizontal box. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     children = List(Struct(child=Instance(UIElement), col=Optional(Int), span=Optional(Int)), default=[], help="""
@@ -438,7 +442,7 @@ class VBox(LayoutDOM):
     """ A CSS grid-based vertical box. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     children = List(Struct(child=Instance(UIElement), row=Optional(Int), span=Optional(Int)), default=[], help="""
@@ -513,7 +517,7 @@ class Row(FlexBox):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     def _sphinx_height_hint(self) -> int|None:
@@ -529,7 +533,7 @@ class Column(FlexBox):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     def _sphinx_height_hint(self) -> int|None:
@@ -543,14 +547,14 @@ class TabPanel(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     title = String(default="", help="""
     The text title of the panel.
     """)
 
-    tooltip = Nullable(Instance(Tooltip), default=None, help="""
+    tooltip = Nullable(Either(String, Instance(HTML), Instance(Tooltip)), default=None, help="""
     A tooltip with plain text or rich HTML contents, providing general help or
     description of a widget's or component's function.
     """)
@@ -575,7 +579,7 @@ class Tabs(LayoutDOM):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     __example__ = "examples/interaction/widgets/tab_panes.py"
@@ -591,6 +595,18 @@ class Tabs(LayoutDOM):
 
     active = Int(0, help="""
     The index of the active tab.
+
+    Negative indices are supported and allow indexing from the end, i.e. -1
+    activates the last tab. Out of bounds indices are truncated to the size
+    of ``tabs``.
+    """)
+
+    link_layouts = Bool(default=False, help="""
+    Configures whether layouts across panels are linked together.
+
+    Linking layouts allows for example to align plot axes between different
+    tabs. Note that this can negatively impact UI performance if many
+    complex layouts are involved.
     """)
 
 class GroupBox(LayoutDOM):
@@ -599,7 +615,7 @@ class GroupBox(LayoutDOM):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     title = Nullable(String, help="""
@@ -623,7 +639,7 @@ class ScrollBox(LayoutDOM):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     child = Instance(UIElement, help="""

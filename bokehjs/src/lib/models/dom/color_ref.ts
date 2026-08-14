@@ -1,16 +1,25 @@
 import {ValueRef, ValueRefView} from "./value_ref"
+import type {Formatters} from "./placeholder"
 import type {ColumnarDataSource} from "../sources/columnar_data_source"
-import type {Index as DataIndex} from "core/util/templating"
+import type {Index} from "core/util/templating"
 import {_get_column_value} from "core/util/templating"
 import {span} from "core/dom"
+import type {PlainObject} from "core/types"
 import type * as p from "core/properties"
-import * as styles from "styles/tooltips.css"
+import * as styles from "styles/hover_tool.css"
 
 export class ColorRefView extends ValueRefView {
   declare model: ColorRef
 
-  value_el?: HTMLElement
-  swatch_el?: HTMLElement
+  value_el: HTMLElement
+  swatch_el: HTMLElement
+
+  override connect_signals(): void {
+    super.connect_signals()
+
+    const {hex, swatch} = this.model.properties
+    this.on_change([hex, swatch], () => this.render())
+  }
 
   override render(): void {
     super.render()
@@ -18,13 +27,12 @@ export class ColorRefView extends ValueRefView {
     this.value_el = span()
     this.swatch_el = span({class: styles.tooltip_color_block}, " ")
 
-    this.el.appendChild(this.value_el)
-    this.el.appendChild(this.swatch_el)
+    this.el.append(this.value_el, this.swatch_el)
   }
 
-  override update(source: ColumnarDataSource, i: DataIndex | null, _vars: object/*, formatters?: Formatters*/): void {
+  override update(source: ColumnarDataSource, i: Index | null, _vars: PlainObject, _formatters?: Formatters): void {
     const value = _get_column_value(this.model.field, source, i)
-    const text = value == null ? "???" : `${value}` //.toString()
+    const text = value == null ? "???" : `${value}`
     this.el.textContent = text
   }
 }

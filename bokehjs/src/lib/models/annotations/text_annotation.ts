@@ -4,7 +4,7 @@ import type * as p from "core/properties"
 import {SideLayout} from "core/layout/side_panel"
 import type {BaseTextView} from "models/text/base_text"
 import {BaseText} from "models/text/base_text"
-import type {IterViews} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import {build_view} from "core/build_views"
 import type {GraphicsBox} from "core/graphics"
 import {isString} from "core/util/types"
@@ -13,6 +13,7 @@ import {Padding, BorderRadius} from "../common/kinds"
 import * as resolve from "../common/resolve"
 import {BBox} from "core/util/bbox"
 import type {LRTB, XY, SXY, Corners} from "core/util/bbox"
+import type {Context2d} from "core/util/canvas"
 import type {Size} from "core/layout"
 import {round_rect} from "../common/painting"
 import * as mixins from "core/property_mixins"
@@ -23,9 +24,8 @@ export abstract class TextAnnotationView extends AnnotationView {
 
   protected _text_view: BaseTextView
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield this._text_view
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this._text_view]
   }
 
   override async lazy_initialize(): Promise<void> {
@@ -58,11 +58,6 @@ export abstract class TextAnnotationView extends AnnotationView {
     })
 
     this.connect(this.model.change, () => this.request_paint())
-  }
-
-  override remove(): void {
-    this._text_view.remove()
-    super.remove()
   }
 
   override has_finished(): boolean {
@@ -146,9 +141,7 @@ export abstract class TextAnnotationView extends AnnotationView {
     this._rect = {sx, sy, width, height, angle, anchor, padding, border_radius}
   }
 
-  protected _paint(): void {
-    const {ctx} = this.layer
-
+  protected _paint(ctx: Context2d): void {
     const {sx, sy, width, height, angle, anchor, padding, border_radius} = this._rect
     const label = this._text_box
 
@@ -232,7 +225,6 @@ export abstract class TextAnnotation extends Annotation {
     this.override<TextAnnotation.Props>({
       border_line_color: null,
       background_fill_color: null,
-      background_hatch_color: null,
     })
   }
 }

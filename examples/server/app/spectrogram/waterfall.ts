@@ -1,12 +1,12 @@
-import {Renderer, RendererView} from "models/renderers/renderer"
-import {LinearColorMapper} from "models/mappers/linear_color_mapper"
-import {Scale} from "models/scales/scale"
-import {Color} from "core/types"
-import {canvas} from "core/dom"
-import * as p from "core/properties"
+import {Renderer, RendererView} from "@bokehjs/models/renderers/renderer"
+import {LinearColorMapper} from "@bokehjs/models/mappers/linear_color_mapper"
+import {Scale} from "@bokehjs/models/scales/scale"
+import {Color} from "@bokehjs/core/types"
+import {canvas} from "@bokehjs/core/dom"
+import * as p from "@bokehjs/core/properties"
 
 export class WaterfallRendererView extends RendererView {
-  model: WaterfallRenderer
+  declare model: WaterfallRenderer
 
   private canvases: HTMLCanvasElement[]
   private images: Uint32Array[]
@@ -18,7 +18,7 @@ export class WaterfallRendererView extends RendererView {
   private yscale: Scale
   private max_freq: number
 
-  initialize(): void {
+  override initialize(): void {
     super.initialize()
 
     const N = Math.ceil(this.model.num_grams/this.model.tile_width) + 1
@@ -43,12 +43,12 @@ export class WaterfallRendererView extends RendererView {
     this.max_freq = this.plot_view.frame.y_range.end
   }
 
-  connect_signals(): void {
+  override connect_signals(): void {
     super.connect_signals()
-    this.connect(this.model.change, this.request_render)
+    this.connect(this.model.change, () => this.request_paint())
   }
 
-  protected _render(): void {
+  protected _paint(): void {
     const {ctx} = this.layer
     ctx.save()
     ctx.imageSmoothingEnabled = false
@@ -91,7 +91,7 @@ export class WaterfallRendererView extends RendererView {
       this.x[this.tile] = -this.model.tile_width
     }
 
-    // apply the lastest column to the current tile image
+    // apply the latest column to the current tile image
     const buf32 = new Uint32Array(this.cmap.rgba_mapper.v_compute(this.model.latest).buffer)
     for (let i = 0; i < this.model.gram_length; i++)
       this.images[this.tile][i*this.model.tile_width+this.col] = buf32[i]
@@ -119,8 +119,8 @@ export namespace WaterfallRenderer {
 export interface WaterfallRenderer extends WaterfallRenderer.Attrs {}
 
 export class WaterfallRenderer extends Renderer {
-  properties: WaterfallRenderer.Props
-  __view_type__: WaterfallRendererView
+  declare properties: WaterfallRenderer.Props
+  declare __view_type__: WaterfallRendererView
 
   constructor(attrs?: Partial<WaterfallRenderer.Attrs>) {
     super(attrs)

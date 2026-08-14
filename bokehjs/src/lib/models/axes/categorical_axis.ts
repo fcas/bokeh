@@ -24,19 +24,36 @@ export class CategoricalAxisView extends AxisView {
   declare model: CategoricalAxis
   declare visuals: CategoricalAxis.Visuals
 
-  protected override _paint(): void {
-    const {tick_coords, extents} = this
-    const ctx = this.layer.ctx
+  declare readonly RangeType: FactorRange
 
-    super._paint()
+  protected _hit_value(sx: number, sy: number): Factor | null {
+    const [range] = this.ranges
+    const {start, end, span} = range
+    switch (this.dimension) {
+      case 0: {
+        const {x0, width} = this.bbox
+        return range.factor(span * (sx - x0) / width + start)
+      }
+      case 1: {
+        const {y0, height} = this.bbox
+        return range.factor(end - span * (sy - y0) / height)
+      }
+    }
+  }
+
+  protected override _paint(ctx: Context2d): void {
+    const {tick_coords, extents} = this
+    super._paint(ctx)
     this._draw_group_separators(ctx, extents, tick_coords)
   }
 
   protected _draw_group_separators(ctx: Context2d, _extents: Extents, _tick_coords: TickCoords): void {
-    const [range] = this.ranges as [FactorRange, FactorRange]
+    const [range] = this.ranges
     const [start, end] = this.computed_bounds
 
-    if (range.tops == null || range.tops.length < 2 || !this.visuals.separator_line.doit) {
+    const {factors} = range
+    const {tops} = range.mapper
+    if (tops == null || tops.length < 2 || !this.visuals.separator_line.doit) {
       return
     }
 
@@ -46,12 +63,12 @@ export class CategoricalAxisView extends AxisView {
     const coords: Coords = [[], []]
 
     let ind = 0
-    for (let i = 0; i < range.tops.length - 1; i++) {
+    for (let i = 0; i < tops.length - 1; i++) {
       let first: Factor, last: Factor
 
-      for (let j = ind; j < range.factors.length; j++) {
-        if (range.factors[j][0] == range.tops[i+1]) {
-          [first, last] = [range.factors[j-1], range.factors[j]]
+      for (let j = ind; j < factors.length; j++) {
+        if (factors[j][0] == tops[i+1]) {
+          [first, last] = [factors[j-1], factors[j]]
           ind = j
           break
         }
@@ -92,7 +109,7 @@ export class CategoricalAxisView extends AxisView {
   }
 
   protected _get_factor_info(): [GraphicsBoxes, Coords, Orient | number, visuals.Text][] {
-    const [range] = this.ranges as [FactorRange, FactorRange]
+    const [range] = this.ranges
     const [start, end] = this.computed_bounds
     const loc = this.loc
 
@@ -109,22 +126,29 @@ export class CategoricalAxisView extends AxisView {
       return map(this.model.formatter.doFormat(ticks, this))
     }
 
-    if (range.levels == 1) {
-      const major = ticks.major as L1Factor[]
-      const labels = format(major)
-      info.push([labels, coords.major, this.model.major_label_orientation, this.visuals.major_label_text])
-    } else if (range.levels == 2) {
-      const major = (ticks.major as L2Factor[]).map((x) => x[1])
-      const labels = format(major)
-      info.push([labels, coords.major, this.model.major_label_orientation, this.visuals.major_label_text])
-      info.push([map(ticks.tops as string[]), coords.tops, this.model.group_label_orientation, this.visuals.group_text])
-    } else if (range.levels == 3) {
-      const major = (ticks.major as L3Factor[]).map((x) => x[2])
-      const labels = format(major)
-      const mid_labels = ticks.mids.map((x) => x[1])
-      info.push([labels, coords.major, this.model.major_label_orientation, this.visuals.major_label_text])
-      info.push([map(mid_labels), coords.mids, this.model.subgroup_label_orientation, this.visuals.subgroup_text])
-      info.push([map(ticks.tops as string[]), coords.tops, this.model.group_label_orientation, this.visuals.group_text])
+    switch (range.mapper.levels) {
+      case 1: {
+        const major = ticks.major as L1Factor[]
+        const labels = format(major)
+        info.push([labels, coords.major, this.model.major_label_orientation, this.visuals.major_label_text])
+        break
+      }
+      case 2: {
+        const major = (ticks.major as L2Factor[]).map((x) => x[1])
+        const labels = format(major)
+        info.push([labels, coords.major, this.model.major_label_orientation, this.visuals.major_label_text])
+        info.push([map(ticks.tops as L1Factor[]), coords.tops, this.model.group_label_orientation, this.visuals.group_text])
+        break
+      }
+      case 3: {
+        const major = (ticks.major as L3Factor[]).map((x) => x[2])
+        const labels = format(major)
+        const mid_labels = ticks.mids.map((x) => x[1])
+        info.push([labels, coords.major, this.model.major_label_orientation, this.visuals.major_label_text])
+        info.push([map(mid_labels), coords.mids, this.model.subgroup_label_orientation, this.visuals.subgroup_text])
+        info.push([map(ticks.tops as L1Factor[]), coords.tops, this.model.group_label_orientation, this.visuals.group_text])
+        break
+      }
     }
 
     return info
@@ -133,7 +157,7 @@ export class CategoricalAxisView extends AxisView {
   override get tick_coords(): CategoricalTickCoords {
     const i = this.dimension
     const j = 1 - i
-    const [range] = this.ranges as [FactorRange, FactorRange]
+    const [range] = this.ranges
     const [start, end] = this.computed_bounds
 
     const ticks = this.model.ticker.get_ticks(start, end, range, this.loc)
@@ -148,12 +172,13 @@ export class CategoricalAxisView extends AxisView {
     coords.major[i] = ticks.major as any
     coords.major[j] = ticks.major.map(() => this.loc)
 
-    if (range.levels == 3) {
+    const {levels} = range.mapper
+    if (levels == 3) {
       coords.mids[i] = ticks.mids as any
       coords.mids[j] = ticks.mids.map(() => this.loc)
     }
 
-    if (range.levels > 1) {
+    if (levels > 1) {
       coords.tops[i] = ticks.tops as any
       coords.tops[j] = ticks.tops.map(() => this.loc)
     }

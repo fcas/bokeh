@@ -18,6 +18,8 @@ in the browser,  or with python callbacks that execute on a Bokeh server.
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false, reportAssignmentType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -25,9 +27,12 @@ log = logging.getLogger(__name__)
 # Imports
 #-----------------------------------------------------------------------------
 
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
 from ...core.has_props import abstract
-from ...core.properties import Override
+from ...core.property.override import Override
 from ..layouts import LayoutDOM
 
 #-----------------------------------------------------------------------------
@@ -53,7 +58,7 @@ class Widget(LayoutDOM):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     margin = Override(default=5)

@@ -34,23 +34,25 @@ log = logging.getLogger(__name__)
 #-----------------------------------------------------------------------------
 
 # Standard library imports
-from typing import TYPE_CHECKING, Any, Literal
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    cast,
+)
 from urllib.parse import quote_plus
 
-## External imports
-if TYPE_CHECKING:
-    from tornado.ioloop import IOLoop
-
 # Bokeh imports
-from ..core.types import ID
 from ..document import Document
 from ..resources import DEFAULT_SERVER_HTTP_URL, SessionCoordinates
-from ..util.browser import NEW_PARAM, BrowserLike, BrowserTarget
+from ..util.browser import NEW_PARAM
 from ..util.token import generate_jwt_token, generate_session_id
-from .states import ErrorReason
 from .util import server_url_for_websocket_url, websocket_url_for_server_url
 
 if TYPE_CHECKING:
+    from tornado.ioloop import IOLoop
+
+    from ..core.types import ID
     from ..document.events import (
         DocumentPatchedEvent,
         SessionCallbackAdded,
@@ -60,7 +62,11 @@ if TYPE_CHECKING:
     from ..protocol.messages.patch_doc import patch_doc
     from ..protocol.messages.server_info_reply import ServerInfo
     from ..server.callbacks import DocumentCallbackGroup
+    from ..util.asyncio import Loop
+    from ..util.browser import BrowserLike, BrowserTarget
     from .connection import ClientConnection
+    from .states import ErrorReason
+
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -317,7 +323,10 @@ class ClientSession:
         self._connection = ClientConnection(session=self, io_loop=io_loop, websocket_url=websocket_url, arguments=arguments, max_message_size=max_message_size)
 
         from ..server.callbacks import DocumentCallbackGroup
-        self._callbacks = DocumentCallbackGroup(self._connection.io_loop)
+
+        # Tornado's IOLoop exposes ``asyncio_loop`` at runtime, but its type
+        # declarations don't include that attribute required by ``Loop``.
+        self._callbacks = DocumentCallbackGroup(cast("Loop", self._connection.io_loop))
 
     def __enter__(self) -> ClientSession:
         '''
@@ -355,7 +364,7 @@ class ClientSession:
         return self._connection.url
 
     @property
-    def document(self) -> Document:
+    def document(self) -> Document | None:
         ''' A |Document| that will be kept in sync with the corresponding
         ``Document`` on the server.
 
@@ -409,6 +418,8 @@ class ClientSession:
 
         '''
         if not self.connected:
+            from .states import ErrorReason
+
             if self.error_reason is ErrorReason.HTTP_ERROR:
                 if self.error_code == 404:
                     raise OSError(f"Check your application path! The given Path is not valid: {self.url}")
@@ -428,6 +439,8 @@ class ClientSession:
         self.check_connection_errors()
 
         if self.document is None:
+            from ..document import Document
+
             doc = Document()
         else:
             doc = self.document
@@ -452,6 +465,8 @@ class ClientSession:
         '''
         if self.document is None:
             if document is None:
+                from ..document import Document
+
                 doc = Document()
             else:
                 doc = document
@@ -497,8 +512,10 @@ class ClientSession:
                 opens a new tab. If **new** is 'window', then opens a new window.
 
         '''
-        if obj and obj not in self.document.roots:
-            self.document.add_root(obj)
+        document = self.document
+        assert document is not None
+        if obj and obj not in document.roots:
+            document.add_root(obj)
         show_session(session=self, browser=browser, new=new)
 
     # Internal methods --------------------------------------------------------
@@ -527,7 +544,9 @@ class ClientSession:
         return session_id
 
     def _handle_patch(self, message: patch_doc) -> None:
-        message.apply_to_document(self.document, self)
+        document = self.document
+        assert document is not None
+        message.apply_to_document(document, self)
 
     def _loop_until_closed(self) -> None:
         ''' Execute a blocking loop that runs and executes event callbacks

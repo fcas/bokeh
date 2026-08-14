@@ -1,7 +1,13 @@
-import {range as arange} from "./array"
 import {assert} from "./assert"
+import {isIterable} from "./types"
 
-export {min, max} from "./arrayable"
+export function* iter<T>(obj: T | Iterable<T>): Iterable<T> {
+  if (isIterable(obj)) {
+    yield* obj
+  } else {
+    yield obj
+  }
+}
 
 export function* range(start: number, stop?: number, step: number = 1): Iterable<number> {
   assert(step > 0)
@@ -13,7 +19,7 @@ export function* range(start: number, stop?: number, step: number = 1): Iterable
   }
 
   const delta = start <= stop ? step : -step
-  const length = max(ceil(abs(stop - start) / step), 0)
+  const length = max(ceil(abs(stop - start) / abs(step)), 0)
 
   for (let i = 0; i < length; i++, start += delta) {
     yield start
@@ -118,6 +124,27 @@ export function* flat_map<T, U>(iterable: Iterable<T>, fn: (item: T, i: number) 
   }
 }
 
+export function* filter<T>(iterable: Iterable<T>, fn: (item: T, i: number) => boolean): Iterable<T> {
+  let i = 0
+  for (const item of iterable) {
+    if (fn(item, i++)) {
+      yield item
+    }
+  }
+}
+
+const nothing = Symbol("nothing")
+
+export function* no_repeated<T>(iterable: Iterable<T>): Iterable<T> {
+  let last: T | typeof nothing = nothing
+  for (const item of iterable) {
+    if (item !== last) {
+      yield item
+    }
+    last = item
+  }
+}
+
 export function every<T>(iterable: Iterable<T>, predicate: (item: T) => boolean): boolean {
   for (const item of iterable) {
     if (!predicate(item)) {
@@ -142,12 +169,12 @@ export function* combinations<T>(seq: T[], r: number): Iterable<T[]> {
   if (r > n) {
     return
   }
-  const indices = arange(r)
+  const indices = [...range(r)]
 
   yield indices.map((i) => seq[i])
   while (true) {
     let k: number | undefined
-    for (const i of reverse(arange(r))) {
+    for (const i of range(r - 1, -1)) {
       if (indices[i] != i + n - r) {
         k = i
         break
@@ -157,7 +184,7 @@ export function* combinations<T>(seq: T[], r: number): Iterable<T[]> {
       return
     }
     indices[k] += 1
-    for (const j of arange(k + 1, r)) {
+    for (const j of range(k + 1, r)) {
       indices[j] = indices[j-1] + 1
     }
     yield indices.map((i) => seq[i])
@@ -165,7 +192,33 @@ export function* combinations<T>(seq: T[], r: number): Iterable<T[]> {
 }
 
 export function* subsets<T>(seq: T[]): Iterable<T[]> {
-  for (const k of arange(seq.length + 1)) {
+  for (const k of range(seq.length + 1)) {
     yield* combinations(seq, k)
   }
+}
+
+export function minmax(iterable: Iterable<number>): [number, number] {
+  let min = +Infinity
+  let max = -Infinity
+
+  for (const value of iterable) {
+    if (value < min) {
+      min = value
+    }
+    if (value > max) {
+      max = value
+    }
+  }
+
+  return [min, max]
+}
+
+export function min(iterable: Iterable<number>): number {
+  const [min] = minmax(iterable)
+  return min
+}
+
+export function max(iterable: Iterable<number>): number {
+  const [, max] = minmax(iterable)
+  return max
 }

@@ -1,7 +1,9 @@
-import {expect} from "assertions"
-import {display} from "../../_util"
+import {expect} from "#framework/assertions"
+import {display} from "#framework/layouts"
 
-import {FileInput} from "@bokehjs/models/widgets"
+import {FileInput, FileInputChange} from "@bokehjs/models/widgets"
+import type {MessageSent, Patch} from "@bokehjs/document"
+import {zip} from "@bokehjs/core/util/array"
 
 // FileList doesn't have a constructor (https://www.w3.org/TR/FileAPI/#filelist-section)
 class _FileList extends Array<File> implements FileList {
@@ -62,5 +64,110 @@ describe("FileInputView", () => {
     expect(model.value).to.be.equal([btoa("foo"), btoa("bar"), btoa("baz")])
     expect(model.filename).to.be.equal(["foo.txt", "bar.txt", "baz.txt"])
     expect(model.mime_type).to.be.equal(["text/plain", "text/plain", "text/plain"])
+  })
+
+  it("should support ClearInput server-sent event", async () => {
+    const file_input = new FileInput({accept: ".csv,.json.,.txt", multiple: false})
+    const {view, doc} = await display(file_input, null)
+
+    const file = new File(["foo bar"], "foo.txt", {type: "text/plain"})
+    const files = new _FileList(file)
+
+    await view.load_files(files)
+    expect(file_input.filename).to.be.equal("foo.txt")
+
+    const msg: MessageSent = {
+      kind: "MessageSent",
+      msg_type: "bokeh_event",
+      msg_data: {
+        type: "event",
+        name: "clear_input",
+        values: {
+          type: "map",
+          entries: [
+            ["model", file_input.ref()],
+          ],
+        },
+      },
+    }
+
+    const patch: Patch = {events: [msg]}
+    doc.apply_json_patch(patch)
+    await view.ready
+
+    expect(file_input.filename).to.be.equal("") // TODO should be `unset`
+  })
+
+  it("should upload a directory", async () => {
+    const model = new FileInput({directory: true})
+    const {view} = await display(model, null)
+
+    const getFileList = () => {
+      const dt = new DataTransfer()
+      const filenames = ["foo", "bar", "baz"]
+      for (const filename of filenames) {
+        const file = new File([filename], `${filename}.txt`, {type: "text/plain"})
+        // To set the `webkitRelativePath` property as it is a read-only
+        Object.defineProperty(file, "webkitRelativePath", {value: `subdir/${filename}.txt`})
+        dt.items.add(file)
+      }
+      return dt.files
+    }
+
+    const files = getFileList()
+    await view.load_files(files)
+
+    expect(model.value).to.be.equal([btoa("foo"), btoa("bar"), btoa("baz")])
+    expect(model.filename).to.be.equal(["subdir/foo.txt", "subdir/bar.txt", "subdir/baz.txt"])
+    expect(model.mime_type).to.be.equal(["text/plain", "text/plain", "text/plain"])
+  })
+
+  it("should upload a directory with accept", async () => {
+    const model = new FileInput({directory: true, accept: ".txt"})
+    const {view} = await display(model, null)
+
+    const getFileList = () => {
+      const dt = new DataTransfer()
+      const filenames = ["foo", "bar", "baz"]
+      const exts = ["txt", "csv", "json"]
+      for (const [ filename, ext ] of zip(filenames, exts)) {
+        const file = new File([filename], `${filename}.${ext}`, {type: "text/plain"})
+        // To set the `webkitRelativePath` property as it is a read-only
+        Object.defineProperty(file, "webkitRelativePath", {value: `subdir/${filename}.${ext}`})
+        dt.items.add(file)
+      }
+      return dt.files
+    }
+
+    const files = getFileList()
+    await view.load_files(files)
+
+    expect(model.value).to.be.equal([btoa("foo")])
+    expect(model.filename).to.be.equal(["subdir/foo.txt"])
+    expect(model.mime_type).to.be.equal(["text/plain"])
+  })
+
+  it("should emit FileInputChange when files are loaded", async () => {
+    const widget = new FileInput({accept: ".txt", multiple: false})
+
+    const collected_events: FileInputChange[] = []
+    widget.on_event(FileInputChange, (event) => {
+      collected_events.push(event)
+    })
+
+    const {view} = await display(widget, null)
+
+    const file = new File(["foo bar"], "foo.txt", {type: "text/plain"})
+    const files = new _FileList(file)
+
+    await view.load_files(files)
+
+    expect(collected_events.length).to.be.equal(1)
+
+    const event = collected_events[0]
+
+    expect(event.value).to.be.equal(btoa("foo bar"))
+    expect(event.filename).to.be.equal("foo.txt")
+    expect(event.mime_type).to.be.equal("text/plain")
   })
 })

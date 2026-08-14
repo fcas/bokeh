@@ -2,6 +2,19 @@ import {SVGRenderingContext2D} from "./svg"
 import {BBox} from "./bbox"
 import {div, canvas} from "../dom"
 import type {OutputBackend} from "../enums"
+import {isObject} from "./types"
+
+export const exportable = Symbol("exportable")
+
+export interface Exportable {
+  [exportable]: boolean
+  export(type?: "auto" | "png" | "svg", hidpi?: boolean): CanvasLayer
+  readonly bbox: BBox
+}
+
+export function is_Exportable<T>(obj: T): obj is T & Exportable {
+  return isObject(obj) && exportable in obj
+}
 
 export type CanvasPatternRepetition = "repeat" | "repeat-x" | "repeat-y" | "no-repeat"
 
@@ -9,6 +22,7 @@ export type Context2d = {
   // override because stdlib has a weak type for 'repetition'
   createPattern(image: CanvasImageSource, repetition: CanvasPatternRepetition | null): CanvasPattern | null
   readonly layer: CanvasLayer
+  rect_bbox(bbox: BBox): void
 } & CanvasRenderingContext2D
 
 export class CanvasLayer {
@@ -27,7 +41,10 @@ export class CanvasLayer {
     return this._el
   }
 
-  readonly pixel_ratio: number = 1
+  private _pixel_ratio: number = 1
+  get pixel_ratio(): number {
+    return this._pixel_ratio
+  }
 
   bbox: BBox = new BBox()
 
@@ -42,7 +59,7 @@ export class CanvasLayer {
         }
         this._ctx = ctx
         if (hidpi) {
-          this.pixel_ratio = devicePixelRatio
+          this._pixel_ratio = devicePixelRatio
         }
         break
       }
@@ -57,12 +74,33 @@ export class CanvasLayer {
       }
     }
 
-    (this._ctx as any).layer = this
+    Object.assign(this._ctx, {
+      layer: this,
+      rect_bbox(this: CanvasRenderingContext2D, bbox: BBox): void {
+        const {x, y, width, height} = bbox
+        this.rect(x, y, width, height)
+      },
+    })
+  }
+
+  get pixel_ratio_changed(): boolean {
+    if (this.hidpi && (this.backend == "canvas" || this.backend == "webgl")) {
+      return this.pixel_ratio != devicePixelRatio
+    } else {
+      return false
+    }
   }
 
   resize(width: number, height: number): void {
-    if (this.bbox.width == width && this.bbox.height == height) {
+    const size_changed = this.bbox.width != width || this.bbox.height != height
+    const {pixel_ratio_changed} = this
+
+    if (!size_changed && !pixel_ratio_changed) {
       return
+    }
+
+    if (pixel_ratio_changed) {
+      this._pixel_ratio = devicePixelRatio
     }
 
     this.bbox = new BBox({left: 0, top: 0, width, height})
@@ -87,7 +125,7 @@ export class CanvasLayer {
     }
   }
 
-  prepare(): void {
+  prepare(): Context2d {
     const {ctx, hidpi, pixel_ratio} = this
     ctx.save()
     if (hidpi) {
@@ -95,6 +133,7 @@ export class CanvasLayer {
       ctx.translate(0.5, 0.5)
     }
     this.clear()
+    return ctx
   }
 
   clear(): void {

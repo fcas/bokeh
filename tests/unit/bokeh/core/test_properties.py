@@ -58,8 +58,10 @@ ALL = (
     'Array',
     'Auto',
     'Bool',
+    'BoolSpec',
     'Byte',
     'Bytes',
+    'CSSLength',
     'Color',
     'ColorHex',
     'ColorSpec',
@@ -74,11 +76,14 @@ ALL = (
     'DeprecatedAlias',
     'Dict',
     'DistanceSpec',
+    'EagerDataFrame',
+    'EagerSeries',
     'Either',
     'Enum',
     'Factor',
     'FactorSeq',
     'Float',
+    'FloatSpec',
     'FontSize',
     'FontSizeSpec',
     'FontStyleSpec',
@@ -391,15 +396,15 @@ class TestBasic:
         assert o.z == 'xyz'
 
         obj0 = ReadonlyModel(x=20)
-        with pytest.raises(RuntimeError, match="ReadonlyModel.x is a readonly property"):
+        with pytest.raises(RuntimeError, match=r"ReadonlyModel.x is a readonly property"):
             obj0.x = 30
 
         obj1 = ReadonlyModel(y=30)
-        with pytest.raises(RuntimeError, match="ReadonlyModel.y is a readonly property"):
+        with pytest.raises(RuntimeError, match=r"ReadonlyModel.y is a readonly property"):
             obj1.y = 40
 
         obj2 = ReadonlyModel(x=20, y=30)
-        with pytest.raises(RuntimeError, match="ReadonlyModel.x is a readonly property"):
+        with pytest.raises(RuntimeError, match=r"ReadonlyModel.x is a readonly property"):
             obj2.update(x=30, y=40)
 
     def test_include_defaults(self) -> None:
@@ -571,9 +576,9 @@ def test_HasProps_clone() -> None:
     assert obj1.p3.p0 == 30
     assert obj0.p3.p0 == 30
 
-    with pytest.raises(RuntimeError, match="CloneModel.p3 is a readonly property"):
+    with pytest.raises(RuntimeError, match=r"CloneModel.p3 is a readonly property"):
         obj0.p3 = None
-    with pytest.raises(RuntimeError, match="CloneModel.p3 is a readonly property"):
+    with pytest.raises(RuntimeError, match=r"CloneModel.p3 is a readonly property"):
         obj1.p3 = None
 
 def test_Model_clone() -> None:

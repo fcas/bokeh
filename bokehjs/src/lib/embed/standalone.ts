@@ -53,21 +53,22 @@ export async function add_document_standalone(document: Document, element: Embed
   const views = new ViewManager([], index)
   document.views_manager = views
 
-  async function render_view(model: HasProps): Promise<void> {
+  async function render_view(model: HasProps): Promise<View> {
     const view = await views.build_view(model)
 
     if (view instanceof DOMView) {
-      const i = document.roots().indexOf(model)
+      const i = document.all_roots.indexOf(model)
       const root_el = roots[i] ?? element
       view.build(root_el)
     }
 
-    index.add(view)
+    return view
   }
 
   async function render_model(model: HasProps): Promise<void> {
     if (model.default_view != null) {
-      await render_view(model)
+      const view = await render_view(model)
+      index.add(view)
     } else {
       document.notify_idle(model)
     }
@@ -78,8 +79,13 @@ export async function add_document_standalone(document: Document, element: Embed
     view?.remove()
   }
 
-  for (const model of document.roots()) {
+  for (const model of document.all_roots) {
     await render_model(model)
+  }
+
+  const {notifications} = document.config
+  if (notifications != null) {
+    await render_view(notifications)
   }
 
   if (use_for_title) {

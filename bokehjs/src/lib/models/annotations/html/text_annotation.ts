@@ -1,6 +1,7 @@
 import {Annotation, AnnotationView} from "../annotation"
 import type * as visuals from "core/visuals"
 import {display, undisplay} from "core/dom"
+import {StyleSheetComposer} from "core/stylesheets"
 import type * as p from "core/properties"
 import {SideLayout} from "core/layout/side_panel"
 import type {Context2d} from "core/util/canvas"
@@ -27,22 +28,18 @@ export abstract class TextAnnotationView extends AnnotationView {
     }
   }
 
-  override initialize(): void {
-    super.initialize()
-  }
-
   override connect_signals(): void {
     super.connect_signals()
-    this.connect(this.model.change, () => this.paint())
+    this.connect(this.model.change, () => this.paint(this.layer.ctx))
   }
 
-  override paint(): void {
+  override paint(ctx: Context2d): void {
     if (!this.model.visible) {
       undisplay(this.el)
       return
     }
 
-    super.paint()
+    super.paint(ctx)
   }
 
   get padding(): LRTB<number> {
@@ -68,17 +65,34 @@ export abstract class TextAnnotationView extends AnnotationView {
 
     const {padding, border_radius} = this
 
-    this.position.replace(`
-    :host {
-      left: ${sx}px;
-      top: ${sy}px;
-    }
-    `)
+    if (this.layout != null) {
+      this.position.replace(`
+      ${this.host_selector} {
+        position: relative;
+      }
+      `)
+    } else {
+      const panel = this.plot_view.frame
+      const [rsx, rsy] = panel.bbox.relativize(sx, sy)
 
-    this.style.replace(`
-    :host {
+      this.position.replace(`
+      ${this.host_selector} {
+        position: absolute;
+        left: ${rsx}px;
+        top: ${rsy}px;
+      }
+      `)
+    }
+
+    const stylesheet = new StyleSheetComposer()
+
+    stylesheet.append(`
+    ${this.host_selector} {
+      width: max-content;
+      height: max-content;
+
       color: ${ctx.fillStyle};
-      -webkit-text-stroke: 1px ${ctx.strokeStyle};
+      -webkit-text-stroke: ${ctx.lineWidth}px ${ctx.strokeStyle};
       font: ${ctx.font};
       white-space: pre;
 
@@ -94,44 +108,45 @@ export abstract class TextAnnotationView extends AnnotationView {
     }
     `)
 
-    const [x_anchor, x_t] = (() => {
-      switch (this.visuals.text.text_align.get_value()) {
-        case "left":   return ["left", "0%"]
-        case "center": return ["center", "-50%"]
-        case "right":  return ["right", "-100%"]
+    if (this.layout != null) {
+      if (angle != 0) {
+        stylesheet.append(`
+        ${this.host_selector} {
+          writing-mode: vertical-rl;
+          rotate: 180deg;
+          align-self: end;
+        }
+        `)
       }
-    })()
-    const [y_anchor, y_t] = (() => {
-      switch (this.visuals.text.text_baseline.get_value()) {
-        case "top":    return ["top", "0%"]
-        case "middle": return ["center", "-50%"]
-        case "bottom": return ["bottom", "-100%"]
-        default:       return ["center", "-50%"]  // "baseline"
+    } else {
+      const x_anchor = (() => {
+        switch (this.visuals.text.text_align.get_value()) {
+          case "left":   return "0%"
+          case "center": return "50%"
+          case "right":  return "100%"
+        }
+      })()
+      const y_anchor = (() => {
+        switch (this.visuals.text.text_baseline.get_value()) {
+          case "top":    return "0%"
+          case "middle": return "50%"
+          case "bottom": return "100%"
+          default:       return "50%"  // "baseline"
+        }
+      })()
+
+      stylesheet.append(`
+      ${this.host_selector} {
+        transform-origin: ${x_anchor} ${y_anchor};
+        transform: translate(-${x_anchor}, -${y_anchor}) rotate(${angle}rad);
       }
-    })()
-
-    let transform = `translate(${x_t}, ${y_t})`
-    if (angle != 0) {
-      transform += ` rotate(${angle}rad)`
-    }
-
-    this.style.append(`
-    :host {
-      transform-origin: ${x_anchor} ${y_anchor};
-      transform: ${transform};
-    }
-    `)
-
-    if (this.layout == null) {
-      // const {bbox} = this.plot_view.frame
-      // const {left, right, top, bottom} = bbox
-      // el.style.clipPath = ???
+      `)
     }
 
     if (this.visuals.background_fill.doit) {
       this.visuals.background_fill.set_value(ctx)
-      this.style.append(`
-      :host {
+      stylesheet.append(`
+      ${this.host_selector} {
         background-color: ${ctx.fillStyle};
       }
       `)
@@ -141,8 +156,8 @@ export abstract class TextAnnotationView extends AnnotationView {
       this.visuals.border_line.set_value(ctx)
 
       // attempt to support vector-style ("8 4 8") line dashing for css mode
-      this.style.append(`
-      :host {
+      stylesheet.append(`
+      ${this.host_selector} {
         border-style: ${ctx.getLineDash().length < 2 ? "solid" : "dashed"};
         border-width: ${ctx.lineWidth}px;
         border-color: ${ctx.strokeStyle};
@@ -150,6 +165,7 @@ export abstract class TextAnnotationView extends AnnotationView {
       `)
     }
 
+    this.self_style.replace(stylesheet.css)
     display(el)
   }
 }

@@ -1,10 +1,11 @@
 import {UIElement, UIElementView} from "../ui/ui_element"
 import {DOMNode} from "../dom/dom_node"
 import {Text} from "../dom/text"
+import {Signal} from "core/signaling"
 import type {StyleSheetLike, Keys} from "core/dom"
 import {InlineStyleSheet, px, div, bounding_box, dom_ready} from "core/dom"
 import {isString} from "core/util/types"
-import type {IterViews, ViewOf} from "core/build_views"
+import type {ChildView, ViewOf} from "core/build_views"
 import {build_view} from "core/build_views"
 import type * as p from "core/properties"
 import type {XY, LRTB} from "core/util/bbox"
@@ -18,6 +19,9 @@ import {Or, Ref} from "core/kinds"
 
 import dialogs_css, * as dialogs from "styles/dialogs.css"
 import icons_css from "styles/icons.css"
+
+// Make sure this at least an order of magnitude lower than --bokeh-top-level.
+const base_z_index = 1000
 
 const UIElementLike = Or(Ref(UIElement), Ref(DOMNode))
 type UIElementLike = typeof UIElementLike["__type__"]
@@ -47,7 +51,7 @@ const _minimization_area: HTMLElement = (() => {
   display: none;
 }
 `)
-  stylesheet.install(shadow_el)
+  shadow_el.adoptedStyleSheets = [stylesheet.to_native()]
   void dom_ready().then(() => document.body.append(el))
   return el
 })()
@@ -55,13 +59,15 @@ const _minimization_area: HTMLElement = (() => {
 export class DialogView extends UIElementView {
   declare model: Dialog
 
+  override get is_top_level(): boolean {
+    return true
+  }
+
   protected _title: ViewOf<UIElementLike>
   protected _content: ViewOf<UIElementLike>
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield this._title
-    yield this._content
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this._title, this._content]
   }
 
   protected readonly _position = new InlineStyleSheet()
@@ -97,8 +103,6 @@ export class DialogView extends UIElementView {
 
   override remove(): void {
     remove(_stacking_order, this)
-    this._content.remove()
-    this._title.remove()
     super.remove()
   }
 
@@ -258,9 +262,9 @@ export class DialogView extends UIElementView {
         target,
       }
 
-      document.addEventListener("pointermove", pointer_move)
-      document.addEventListener("pointerup", pointer_up)
-      document.addEventListener("keydown", key_press)
+      document.addEventListener("pointermove", pointer_move, {signal: this.abort_signal})
+      document.addEventListener("pointerup", pointer_up, {signal: this.abort_signal})
+      document.addEventListener("keydown", key_press, {signal: this.abort_signal})
 
       const target_el = this._handles[target]
       target_el.setPointerCapture(event.pointerId)
@@ -276,6 +280,10 @@ export class DialogView extends UIElementView {
     })
 
     this._has_rendered = true
+
+    if (this.model.visible) {
+      this.bring_to_front()
+    }
   }
 
   get resizable(): LRTB<boolean> {
@@ -539,12 +547,13 @@ export class DialogView extends UIElementView {
 
   protected _toggle(show: boolean) {
     if (show) {
+      const target = document.body
       if (!this._has_rendered) {
-        this.render_to(document.body)
+        this.render_to(target)
         this.r_after_render()
       }
-      if (!_stacking_order.includes(this)) {
-        _stacking_order.push(this)
+      if (!this.el.isConnected) {
+        target.append(this.el)
       }
       this.bring_to_front()
     } else {
@@ -553,14 +562,26 @@ export class DialogView extends UIElementView {
     }
   }
 
+  readonly displayed = new Signal<boolean, this>(this, "displayed")
+
+  get is_open(): boolean {
+    return this.model.visible
+  }
+
+  toggle(force?: boolean): void {
+    const visible = force ?? !this.model.visible
+    this.model.setv({visible}, {check_eq: false})
+    this.displayed.emit(visible)
+  }
+
   open(): void {
-    this.model.setv({visible: true}, {check_eq: false})
+    this.toggle(true)
   }
 
   close(): void {
     switch (this.model.close_action) {
       case "hide": {
-        this.model.visible = false
+        this.toggle(false)
         break
       }
       case "destroy": {
@@ -571,6 +592,9 @@ export class DialogView extends UIElementView {
   }
 
   bring_to_front(): void {
+    if (!_stacking_order.includes(this)) {
+      _stacking_order.push(this)
+    }
     const pinned = find(_stacking_order, (view) => view._pinned)
     if (pinned != null) {
       remove(_stacking_order, pinned)
@@ -583,7 +607,7 @@ export class DialogView extends UIElementView {
 
     for (const [dialog_view, i] of enumerate(_stacking_order)) {
       dialog_view._stacking.replace(":host", {
-        "z-index": `${i}`,
+        "z-index": `${base_z_index + i}`,
       })
     }
   }

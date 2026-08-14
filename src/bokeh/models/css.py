@@ -20,9 +20,14 @@ log = logging.getLogger(__name__)
 # Imports
 #-----------------------------------------------------------------------------
 
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
 from ..core.has_props import abstract
-from ..core.properties import Nullable, Required, String
+from ..core.property.nullable import Nullable
+from ..core.property.primitive import String
+from ..core.property.required import Required
 from ..model import Model
 
 #-----------------------------------------------------------------------------
@@ -46,7 +51,7 @@ class StyleSheet(Model):
     """ """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class InlineStyleSheet(StyleSheet):
@@ -60,7 +65,7 @@ class InlineStyleSheet(StyleSheet):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     css = Required(String, help="""
@@ -78,7 +83,7 @@ class ImportedStyleSheet(StyleSheet):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     url = Required(String, help="""
@@ -94,7 +99,7 @@ class GlobalInlineStyleSheet(InlineStyleSheet):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class GlobalImportedStyleSheet(ImportedStyleSheet):
@@ -106,14 +111,14 @@ class GlobalImportedStyleSheet(ImportedStyleSheet):
     """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 class Styles(Model):
     """ Allows to configure style attribute of DOM elements. """
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     align_content = Nullable(String)

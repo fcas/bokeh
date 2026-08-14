@@ -25,16 +25,15 @@ log = logging.getLogger(__name__)
 #-----------------------------------------------------------------------------
 
 # Standard library imports
-from typing import ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any
 
 # Bokeh imports
-from ...util.deprecation import Version
 from .bases import Property
-from .descriptors import (
-    AliasPropertyDescriptor,
-    DeprecatedAliasPropertyDescriptor,
-    PropertyDescriptor,
-)
+from .descriptor_factory import PropertyDescriptorLike
+from .descriptors import AliasPropertyDescriptor, DeprecatedAliasPropertyDescriptor
+
+if TYPE_CHECKING:
+    from ...util.deprecation import Version
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -45,13 +44,11 @@ __all__ = (
     "DeprecatedAlias",
 )
 
-T = TypeVar("T")
-
 #-----------------------------------------------------------------------------
 # General API
 #-----------------------------------------------------------------------------
 
-class Alias(Property[T]): # lgtm [py/missing-call-to-init]
+class Alias[T](Property[T]):
     """
     Alias another property of a model.
 
@@ -76,9 +73,15 @@ class Alias(Property[T]): # lgtm [py/missing-call-to-init]
     _help: str | None
 
     # Alias is somewhat a quasi-property
-    readonly: ClassVar[bool] = False
-    serialized: ClassVar[bool] = False
-    _default = None
+    _default: Any = None
+
+    @property
+    def readonly(self) -> bool:
+        return False
+
+    @property
+    def serialized(self) -> bool:
+        return False
 
     def __init__(self, aliased_name: str, *, help: str | None = None) -> None:
         self.aliased_name = aliased_name
@@ -86,10 +89,10 @@ class Alias(Property[T]): # lgtm [py/missing-call-to-init]
         self.alternatives = []
         self.assertions = []
 
-    def make_descriptors(self, base_name: str) -> list[PropertyDescriptor[T]]:
-        return [ AliasPropertyDescriptor(base_name, self) ]
+    def make_descriptors(self, name: str) -> list[PropertyDescriptorLike[T]]:
+        return [ AliasPropertyDescriptor(name, self) ]
 
-class DeprecatedAlias(Alias[T]):
+class DeprecatedAlias[T](Alias[T]):
     """
     Alias of another property of a model showing a deprecation message when used.
     """
@@ -100,8 +103,8 @@ class DeprecatedAlias(Alias[T]):
         self.since = since
         self.extra = extra
 
-    def make_descriptors(self, base_name: str) -> list[PropertyDescriptor[T]]:
-        return [ DeprecatedAliasPropertyDescriptor(base_name, self) ]
+    def make_descriptors(self, name: str) -> list[PropertyDescriptorLike[T]]:
+        return [ DeprecatedAliasPropertyDescriptor(name, self) ]
 
 #-----------------------------------------------------------------------------
 # Dev API

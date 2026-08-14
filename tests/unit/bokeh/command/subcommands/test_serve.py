@@ -21,6 +21,7 @@ import argparse
 import contextlib
 import os.path
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -29,10 +30,7 @@ from os.path import join, split
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
-
-# External imports
-import requests
-import requests_unixsocket
+from typing import IO
 
 # Bokeh imports
 from bokeh.command.subcommand import Argument
@@ -53,20 +51,21 @@ PORT_PAT = re.compile(r'Bokeh app running at: http://localhost:(\d+)')
 
 # http://eyalarubas.com/python-subproc-nonblock.html
 class NBSR:
-    def __init__(self, stream) -> None:
+    _s: IO[bytes]
+    _q: Queue[bytes]
+
+    def __init__(self, stream: IO[bytes]) -> None:
         '''
         stream: the stream to read from.
                 Usually a process' stdout or stderr.
         '''
-
         self._s = stream
         self._q = Queue()
 
-        def _populateQueue(stream, queue):
+        def _populateQueue(stream: IO[bytes], queue: Queue[bytes]) -> None:
             '''
             Collect lines from 'stream' and put them in 'queue'.
             '''
-
             while True:
                 line = stream.readline()
                 if line:
@@ -74,15 +73,13 @@ class NBSR:
                 else:
                     break
 
-        self._t = Thread(target = _populateQueue,
-                args = (self._s, self._q))
+        self._t = Thread(target=_populateQueue, args=(self._s, self._q))
         self._t.daemon = True
-        self._t.start() #start collecting lines from the stream
+        self._t.start() # start collecting lines from the stream
 
-    def readline(self, timeout = None):
+    def readline(self, timeout: float | None = None) -> bytes | None:
         try:
-            return self._q.get(block = timeout is not None,
-                    timeout = timeout)
+            return self._q.get(block=timeout is not None, timeout=timeout)
         except Empty:
             return None
 
@@ -425,7 +422,7 @@ def test_args() -> None:
     )
 
 @contextlib.contextmanager
-def run_bokeh_serve(args):
+def run_bokeh_serve(args: list[str]):
     cmd = [sys.executable, '-m', 'bokeh', 'serve', *args]
     with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False) as p:
         nbsr = NBSR(p.stdout)
@@ -446,32 +443,29 @@ def run_bokeh_serve(args):
             p.terminate()
             p.wait()
 
-def assert_pattern(nbsr, pat):
-    m = None
-    for i in range(20):
+def find_pattern(nbsr: NBSR, pat: re.Pattern[str]) -> re.Match[str] | None:
+    for _ in range(20):
         o = nbsr.readline(0.5)
         if not o:
             continue
-        m = pat.search(o.decode())
+        s = o.decode()
+        m = pat.search(s)
         if m is not None:
-            break
+            return m
+    return None
+
+def assert_pattern(nbsr: NBSR, pat: re.Pattern[str]):
+    m = find_pattern(nbsr, pat)
     if m is None:
         pytest.fail("Did not find pattern in process output")
 
-def check_port(nbsr):
-    m = None
-    for i in range(20):
-        o = nbsr.readline(0.5)
-        if not o:
-            continue
-        m = PORT_PAT.search(o.decode())
-        if m is not None:
-            break
+def check_port(nbsr: NBSR):
+    m = find_pattern(nbsr, PORT_PAT)
     if m is None:
         pytest.fail("Did not find port in process output")
     return int(m.group(1))
 
-def check_error(args):
+def check_error(args: list[str]):
     cmd = [sys.executable, '-m', 'bokeh', 'serve', *args]
     try:
         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
@@ -492,7 +486,7 @@ def test_unix_socket_on_windows() -> None:
 def test_unix_socket_with_port() -> None:
     unix_socket = "test.sock"
     out = check_error(["--unix-socket", unix_socket, "--port", "5000"]).strip()
-    expected = "--port arg is not supported with a unix socket"
+    expected = "ERROR: --port arg is not supported with a unix socket"
     assert expected == out
 
 def test_unix_socket_with_invalid_args() -> None:
@@ -500,11 +494,24 @@ def test_unix_socket_with_invalid_args() -> None:
     for arg in invalid_args:
         unix_socket = "test.sock"
         out = check_error(["--unix-socket", unix_socket, f"--{arg}", "value"]).strip()
-        expected = "['address', 'ssl_certfile', 'ssl_keyfile', 'port'] args are not supported with a unix socket"
+        expected = "ERROR: ['address', 'ssl_certfile', 'ssl_keyfile', 'port'] args are not supported with a unix socket"
         assert expected == out
+
+def test_dev_with_no_app() -> None:
+    out = check_error(["--dev"]).strip()
+    expected = "ERROR: Bokeh server --dev option requires an app script or directory be provided"
+    assert expected == out
+
+def test_dev_with_multiple_apps() -> None:
+    out = check_error(["--glob", APPS, "--dev"]).strip()
+    expected = "ERROR: Bokeh server --dev option can only support a single app"
+    assert expected == out
+
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Unix sockets not available on windows")
 def test_unix_socket() -> None:
+    requests = pytest.importorskip("requests")
+    requests_unixsocket = pytest.importorskip("requests_unixsocket")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         file_name = "test.socket"
 
@@ -552,6 +559,7 @@ def test_no_glob_by_default_on_filename_if_wildcard_in_quotes() -> None:
     assert '*' in out
 
 def test_glob_flag_on_filename_if_wildcard_in_quotes() -> None:
+    requests = pytest.importorskip("requests")
     pat = re.compile(r'Bokeh app running at: http://localhost:(\d+)/line_on_off')
     with run_bokeh_serve(["--port", "0", "--glob", APPS]) as (_, nbsr):
         port = check_port(nbsr)
@@ -561,6 +569,7 @@ def test_glob_flag_on_filename_if_wildcard_in_quotes() -> None:
         assert r.status_code == 200
 
 def test_actual_port_printed_out() -> None:
+    requests = pytest.importorskip("requests")
     with run_bokeh_serve(["--port", "0"]) as (_, nbsr):
         port = check_port(nbsr)
         assert port > 0
@@ -586,12 +595,14 @@ class TestXSRF:
                 assert_pattern(nbsr, pat)
 
 def test_auth_module_printed() -> None:
-    pat = re.compile(r'User authentication hooks provided \(no default user\)')
+    pat = re.compile(r'User authentication hooks provided(?! \()')
     with run_bokeh_serve(["--auth-module", join(split(__file__)[0], "_dummy_auth.py")]) as (_, nbsr):
         assert_pattern(nbsr, pat)
 
+
 class TestIco:
     def test_default(self) -> None:
+        requests = pytest.importorskip("requests")
         with run_bokeh_serve(["--port", "0", "--glob", APPS]) as (_, nbsr):
             port = check_port(nbsr)
             assert port > 0
@@ -600,6 +611,7 @@ class TestIco:
             assert r.headers["content-type"] == "image/x-icon"
 
     def test_explicit_option(self) -> None:
+        requests = pytest.importorskip("requests")
         with run_bokeh_serve(["--port", "0", "--ico-path", join(HERE, "favicon-dev.ico"), "--glob", APPS]) as (_, nbsr):
             port = check_port(nbsr)
             assert port > 0
@@ -609,6 +621,7 @@ class TestIco:
             assert r.content == (Path(HERE) / "favicon-dev.ico").read_bytes()
 
     def test_explicit_envvar(self) -> None:
+        requests = pytest.importorskip("requests")
         with envset(BOKEH_ICO_PATH=join(HERE, "favicon-dev.ico")):
             with run_bokeh_serve(["--port", "0", "--glob", APPS]) as (_, nbsr):
                 port = check_port(nbsr)
@@ -619,6 +632,7 @@ class TestIco:
                 assert r.content == (Path(HERE) / "favicon-dev.ico").read_bytes()
 
     def test_none_option(self) -> None:
+        requests = pytest.importorskip("requests")
         with run_bokeh_serve(["--port", "0", "--ico-path", "none", "--glob", APPS]) as (_, nbsr):
             port = check_port(nbsr)
             assert port > 0
@@ -626,6 +640,7 @@ class TestIco:
             assert r.status_code == 404
 
     def test_none_envvar(self) -> None:
+        requests = pytest.importorskip("requests")
         with envset(BOKEH_ICO_PATH="none"):
             with run_bokeh_serve(["--port", "0", "--glob", APPS]) as (_, nbsr):
                 port = check_port(nbsr)
@@ -633,7 +648,21 @@ class TestIco:
                 r = requests.get(f"http://localhost:{port}/favicon.ico")
                 assert r.status_code == 404
 
+@pytest.mark.skipif(sys.platform == "win32", reason="`ioloop.add_signal_handler()` is not available on Windows")
+def test_handling_SIGTERM() -> None:
+    pat_pid = re.compile(r"Starting Bokeh server with process id: (\d+)")
+    pat_term = re.compile(r"Received signal SIGTERM, shutting down")
 
+    with run_bokeh_serve([]) as (_, nbsr):
+        time.sleep(1) # otherwise won't work; can be replaced with breakpoint()
+        match = find_pattern(nbsr, pat_pid)
+        if match is None:
+            pytest.fail("Did not find server PID in process output")
+        pid = int(match.group(1))
+        os.kill(pid, signal.SIGTERM)
+        match = find_pattern(nbsr, pat_term)
+        if match is None:
+            pytest.fail("Did not find SIGTERM confirmation in process output")
 
 #-----------------------------------------------------------------------------
 # Private API

@@ -55,6 +55,7 @@ from bokeh.core.properties import (
     StringSpec,
     Tuple,
 )
+from bokeh.core.property.any import Any
 from bokeh.core.property.bases import validation_on
 from tests.support.util.api import verify_all
 
@@ -118,7 +119,7 @@ class TestValidationControl:
 
 
 class TestValidateDetailDefault:
-    # test_Any unecessary (no validation)
+    # test_Any unnecessary (no validation)
 
     # TODO (bev) test_Image
 
@@ -131,7 +132,7 @@ class TestValidateDetailDefault:
         p = Bool()
         with pytest.raises(ValueError) as e:
             p.validate("junk")
-        assert matches(str(e.value), r"expected a value of type bool or bool_, got junk of type str")
+        assert matches(str(e.value), r"expected a value of type bool or bool_?, got junk of type str")
     def test_Complex(self) -> None:
         p = Complex()
         with pytest.raises(ValueError) as e:
@@ -168,12 +169,17 @@ class TestValidateDetailDefault:
         p = List(Float)
         with pytest.raises(ValueError) as e:
             p.validate("junk")
-        assert matches(str(e.value), r"expected an element of List\(Float\), got 'junk'")
+        assert matches(str(e.value), r"expected sequence List\(Float\), got 'junk' of type <class 'str'>")
     def test_Seq(self) -> None:
         p = Seq(Float)
         with pytest.raises(ValueError) as e:
             p.validate("junk")
-        assert matches(str(e.value), r"expected an element of Seq\(Float\), got 'junk'")
+        assert matches(str(e.value), r"expected sequence Seq\(Float\), got 'junk' of type <class 'str'>")
+    def test_Seq_Any(self) -> None:
+        p = Seq(Any)
+        with pytest.raises(ValueError) as e:
+            p.validate("junk")
+        assert matches(str(e.value), r"expected sequence Seq\(Any\), got 'junk' of type <class 'str'>")
     def test_Dict(self) -> None:
         p = Dict(String, Float)
         with pytest.raises(ValueError) as e:
@@ -302,7 +308,7 @@ class TestValidateDetailDefault:
 
 @pytest.mark.parametrize('detail', [True, False])
 class TestValidateDetailExplicit:
-    # test_Any unecessary (no validation)
+    # test_Any unnecessary (no validation)
 
     # TODO (bev) test_Image
 
@@ -355,6 +361,11 @@ class TestValidateDetailExplicit:
         assert (str(e.value) == "") == (not detail)
     def test_Seq(self, detail) -> None:
         p = Seq(Float)
+        with pytest.raises(ValueError) as e:
+            p.validate("junk", detail)
+        assert (str(e.value) == "") == (not detail)
+    def test_Seq_Any(self, detail) -> None:
+        p = Seq(Any)
         with pytest.raises(ValueError) as e:
             p.validate("junk", detail)
         assert (str(e.value) == "") == (not detail)

@@ -38,7 +38,7 @@ export class HTMLLabelSetView extends DataAnnotationView {
   }
 
   protected override _rerender(): void {
-    this.paint()
+    this.paint(this.layer.ctx)
   }
 
   map_data(): void {
@@ -68,9 +68,7 @@ export class HTMLLabelSetView extends DataAnnotationView {
     })()
   }
 
-  _paint_data(): void {
-    const {ctx} = this.layer
-
+  _paint_data(ctx: Context2d): void {
     for (let i = 0, end = this.text.length; i < end; i++) {
       const x_offset_i = this.x_offset.get(i)
       const y_offset_i = this.y_offset.get(i)
@@ -98,7 +96,7 @@ export class HTMLLabelSetView extends DataAnnotationView {
     el.style.left = `${sx}px`
     el.style.top = `${sy}px`
     el.style.color = ctx.fillStyle as string
-    el.style.webkitTextStroke = `1px ${ctx.strokeStyle}`
+    el.style.webkitTextStroke = `${ctx.lineWidth}px ${ctx.strokeStyle}`
     el.style.font = ctx.font
     el.style.lineHeight = "normal" // needed to prevent ipynb css override
     el.style.whiteSpace = "pre"

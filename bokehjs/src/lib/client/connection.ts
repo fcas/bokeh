@@ -1,3 +1,4 @@
+import {ClientReconnected, ConnectionLost} from "core/bokeh_events"
 import {logger} from "core/logging"
 import type {DocJson, DocumentEvent} from "document"
 import {Document} from "document"
@@ -5,9 +6,14 @@ import {Message} from "protocol/message"
 import {Receiver} from "protocol/receiver"
 import type {ErrorMsg} from "./session"
 import {ClientSession} from "./session"
+import {assert} from "core/util/assert"
+import type {ID} from "core/types"
 
 export const DEFAULT_SERVER_WEBSOCKET_URL = "ws://localhost:5006/ws"
 export const DEFAULT_TOKEN = "eyJzZXNzaW9uX2lkIjogImRlZmF1bHQifQ"
+
+const MAX_RECONNECTION_ATTEMPTS = 5
+const RECONNECT_BASE_DELAY = 1000
 
 let _connection_count: number = 0
 
@@ -31,6 +37,14 @@ export function parse_token(token: string): Token {
   return JSON.parse(atob(payload.replace(/_/g, "/").replace(/-/g, "+")))
 }
 
+// WebSocket close event is emitted before page is destroyed, resulting in an
+// unnecessary reconnect attempt and a UI notification just before page reloads.
+let _prevent_reconnect: boolean = false
+
+addEventListener("beforeunload", () => {
+  _prevent_reconnect = true
+})
+
 export class ClientConnection {
   protected readonly _number = _connection_count++
 
@@ -38,7 +52,13 @@ export class ClientConnection {
   session: ClientSession | null = null
 
   closed_permanently: boolean = false
-  id: string
+  readonly id: string
+
+  protected _reconnection_attempts_left = MAX_RECONNECTION_ATTEMPTS
+
+  get reconnection_attempts(): number {
+    return MAX_RECONNECTION_ATTEMPTS - this._reconnection_attempts_left
+  }
 
   protected _current_handler: ((message: Message<unknown>) => void) | null = null
   protected _pending_replies: Map<string, PendingReply> = new Map()
@@ -50,6 +70,10 @@ export class ClientConnection {
               readonly args_string: string | null = null) {
     this.id = parse_token(token).session_id.split(".")[0]
     logger.debug(`Creating websocket ${this._number} to '${this.url}' session '${this.id}'`)
+  }
+
+  async reconnect(): Promise<void> {
+    this._try_reconnect(true)
   }
 
   async connect(): Promise<ClientSession> {
@@ -73,13 +97,14 @@ export class ClientConnection {
       this.socket = new WebSocket(versioned_url, ["bokeh", this.token])
 
       return new Promise((resolve, reject) => {
+        assert(this.socket != null)
         // "arraybuffer" gives us binary data we can look at;
         // if we just needed an opaque blob we could use "blob"
-        this.socket!.binaryType = "arraybuffer"
-        this.socket!.onopen = () => this._on_open(resolve, reject)
-        this.socket!.onmessage = (event) => this._on_message(event)
-        this.socket!.onclose = (event) => this._on_close(event, reject)
-        this.socket!.onerror = () => this._on_error(reject)
+        this.socket.binaryType = "arraybuffer"
+        this.socket.onopen = () => this._on_open(resolve, reject)
+        this.socket.onmessage = (event) => this._on_message(event)
+        this.socket.onclose = (event) => this._on_close(event, reject)
+        this.socket.onerror = () => this._on_error(reject)
       })
     } catch (error) {
       logger.error(`websocket creation failed to url: ${this.url}`)
@@ -99,27 +124,42 @@ export class ClientConnection {
     }
   }
 
-  protected _schedule_reconnect(milliseconds: number): void {
-    const retry = () => {
-      // TODO commented code below until we fix reconnection to repull
-      // the document when required. Otherwise, we get a lot of
-      // confusing errors that are causing trouble when debugging.
-      /*
-      if (this.closed_permanently) {
-      */
-      if (!this.closed_permanently) {
-        logger.info(`Websocket connection ${this._number} disconnected, will not attempt to reconnect`)
-        this.session?.notify_connection_lost()
+  protected _try_reconnect(force: boolean = false): void {
+    if (this.closed_permanently) {
+      logger.info(`Websocket connection ${this._number} permanently disconnected, will not attempt to reconnect`)
+    } else if (!force && this._reconnection_attempts_left <= 0) {
+      logger.info(`Websocket connection ${this._number} disconnected, will not attempt to automatically reconnect`)
+    } else {
+      if (this.socket?.readyState !== WebSocket.OPEN && this.socket?.readyState !== WebSocket.CONNECTING) {
+        this._reconnection_attempts_left -= 1
+
+        logger.debug(`Attempting to reconnect websocket ${this._number}, ${this._reconnection_attempts_left} attempts left`)
+
+        this.connect().then(() => {
+          logger.info(`Reconnected websocket ${this._number}`)
+          this._reconnection_attempts_left = MAX_RECONNECTION_ATTEMPTS
+          this.session?.document.event_manager.send_event(new ClientReconnected())
+        }).catch(err => {
+          logger.debug(`Could not reconnect ${this._number}, ${err}`)
+        })
       }
-      return
-      /*
-      } else {
-        logger.debug(`Attempting to reconnect websocket ${this._number}`)
-        this.connect()
-      }
-      */
     }
-    setTimeout(retry, milliseconds)
+  }
+
+  protected _schedule_reconnect(milliseconds: number): void {
+    if (this.session == null) {
+      return
+    }
+
+    const {document} = this.session
+    const should_reconnect = document.config.reconnect_session && this._reconnection_attempts_left > 0
+    const timeout = should_reconnect ? milliseconds : null
+    const event = new ConnectionLost(new WeakRef(this), this.reconnection_attempts, timeout)
+    document.event_manager.send_event(event)
+
+    if (should_reconnect) {
+      setTimeout(() => this._try_reconnect(), milliseconds)
+    }
   }
 
   send(message: Message<unknown>): void {
@@ -143,30 +183,30 @@ export class ClientConnection {
     }
   }
 
-  protected async _pull_doc_json(): Promise<DocJson> {
+  protected async _pull_doc_json(): Promise<{doc_json: DocJson, buffers: Map<ID, ArrayBuffer>}> {
     const message = Message.create("PULL-DOC-REQ", {}, {})
     const reply = await this.send_with_reply<{doc: DocJson}>(message)
     if (!("doc" in reply.content)) {
       throw new Error("No 'doc' field in PULL-DOC-REPLY")
     }
-    return reply.content.doc
+    return {doc_json: reply.content.doc, buffers: reply.buffers}
   }
 
   protected async _repull_session_doc(resolve: SessionResolver, reject: Rejecter): Promise<void> {
     logger.debug(this.session != null ? "Repulling session" : "Pulling session for first time")
     try {
-      const doc_json = await this._pull_doc_json()
+      const {doc_json, buffers} = await this._pull_doc_json()
       if (this.session == null) {
         if (this.closed_permanently) {
           logger.debug("Got new document after connection was already closed")
           reject(new Error("The connection has been closed"))
         } else {
           const events: DocumentEvent[] = []
-          const document = Document.from_json(doc_json, events)
+          const document = Document.from_json(doc_json, events, buffers)
 
           this.session = new ClientSession(this, document)
 
-          // Send back change events that happend during model initialization.
+          // Send back change events that happened during model initialization.
           for (const event of events) {
             document._trigger_on_change(event)
           }
@@ -182,7 +222,7 @@ export class ClientConnection {
       } else {
         this.session.document.replace_with_json(doc_json)
         logger.debug("Updated existing session with new pulled doc")
-        // Since the session already exists, we don't need to call `resolve` again.
+        resolve(this.session)
       }
     } catch (error) {
       console.trace(error)
@@ -220,6 +260,15 @@ export class ClientConnection {
     }
   }
 
+  /**
+   * The reconnect delay exponentially increases after each attempt. The
+   * first attempt is done immediately.
+   */
+  private _reconnect_delay(): number {
+    const retries = MAX_RECONNECTION_ATTEMPTS - this._reconnection_attempts_left
+    return retries == 0 ? 0 : RECONNECT_BASE_DELAY * 2**retries
+  }
+
   protected _on_close(event: CloseEvent, reject: Rejecter): void {
     logger.info(`Lost websocket ${this._number} connection, ${event.code} (${event.reason})`)
     this.socket = null
@@ -227,8 +276,9 @@ export class ClientConnection {
     this._pending_replies.forEach((pr) => pr.reject("Disconnected"))
     this._pending_replies.clear()
 
-    if (!this.closed_permanently) {
-      this._schedule_reconnect(2000)
+    if (!this.closed_permanently && !_prevent_reconnect) {
+      logger.debug(`Pending schedule_reconnect for ${this._number}`)
+      this._schedule_reconnect(this._reconnect_delay())
     }
 
     reject(new Error(`Lost websocket connection, ${event.code} (${event.reason})`))

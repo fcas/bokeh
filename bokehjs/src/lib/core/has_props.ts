@@ -18,8 +18,8 @@ import {serialize} from "./serialization"
 import type {Document} from "../document/document"
 import type {DocumentEvent} from "../document/events"
 import {DocumentEventBatch, ModelChangedEvent, ColumnsPatchedEvent, ColumnsStreamedEvent} from "../document/events"
-import type {Equatable, Comparator} from "./util/eq"
-import {equals, is_equal} from "./util/eq"
+import type {Equatable} from "./util/eq"
+import {equals, Comparator} from "./util/eq"
 import type {Printable, Printer} from "./util/pretty"
 import {pretty} from "./util/pretty"
 import type {Cloneable} from "./util/cloneable"
@@ -32,7 +32,7 @@ import {stream_to_columns, patch_to_columns} from "./patching"
 
 type AttrsLike = Dict<unknown>
 
-export module HasProps {
+export namespace HasProps {
   export type Attrs = p.AttrsOf<Props>
   export type Props = {}
 
@@ -46,7 +46,6 @@ export module HasProps {
 
 export interface HasProps extends HasProps.Attrs, ISignalable {
   constructor: Function & {
-    __name__: string
     __module__?: string
     __qualified__: string
   }
@@ -69,14 +68,17 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
     return this.constructor.__qualified__
   }
 
-  static __name__: string
+  get is_root(): boolean {
+    return this.document?.roots().includes(this) ?? false
+  }
+
   static __module__?: string
 
   static get __qualified__(): string {
     let qualified = _qualified_names.get(this)
     if (qualified == null) {
-      const {__module__, __name__} = this
-      qualified = __module__ != null ? `${__module__}.${__name__}` : __name__
+      const {__module__, name} = this
+      qualified = __module__ != null ? `${__module__}.${name}` : name
       _qualified_names.set(this, qualified)
     }
     return qualified
@@ -100,9 +102,9 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
 
   /** @prototype */
   declare _props: {[key: string]: {
-    type: p.PropertyConstructor<unknown>
+    type: p.PropertyConstructor<unknown, HasProps>
     default_value: (self: HasProps) => unknown | p.Unset
-    options: p.PropertyOptions<unknown>
+    options: p.PropertyOptions<unknown, HasProps>
   }}
 
   /** @prototype */
@@ -159,7 +161,7 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
     }
   }
 
-  static internal<T>(obj: Partial<p.DefineOf<T>> | ((types: typeof kinds) => Partial<p.DefineOf<T>>)): void {
+  static internal<T, HP extends HasProps = HasProps>(obj: Partial<p.DefineOf<T, HP>> | ((types: typeof kinds) => Partial<p.DefineOf<T, HP>>)): void {
     const _object: any = {}
     for (const [name, prop] of entries(isFunction(obj) ? obj(kinds) : obj)) {
       const [type, default_value, options = {}] = prop as any
@@ -196,7 +198,7 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
     this.prototype._mixins = [...this.prototype._mixins, ...mixins]
   }
 
-  static override<T>(obj: Partial<p.DefaultsOf<T>>): void {
+  static override<T, HP extends HasProps = HasProps>(obj: Partial<p.DefaultsOf<T, HP>>): void {
     for (const [name, prop] of entries(obj)) {
       const default_value = this._fix_default(prop, name)
       if (!(name in this.prototype._props)) {
@@ -205,6 +207,20 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
       const value = this.prototype._props[name]
       const props = {...this.prototype._props}
       props[name] = {...value, default_value}
+      this.prototype._props = props
+    }
+  }
+
+  static override_options<T, HP extends HasProps = HasProps>(obj: Partial<p.OptionsOf<T, HP>>): void {
+    for (const [name, options] of entries(obj)) {
+      if (!(name in this.prototype._props)) {
+        throw new Error(`attempted to override nonexistent '${this.prototype.type}.${name}'`)
+      }
+      const current = this.prototype._props[name]
+      const props = {
+        ...this.prototype._props,
+        [name]: {...current, options: {...current.options, ...options as any}},
+      }
       this.prototype._props = props
     }
   }
@@ -236,10 +252,26 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
     }
   }
 
+  /**
+   * Gets values of all set properties.
+   */
   get attributes(): Attrs {
     const attrs: Attrs = {}
     for (const prop of this) {
       if (!prop.is_unset) {
+        attrs[prop.attr] = prop.get_value()
+      }
+    }
+    return attrs
+  }
+
+  /**
+   * Gets values of all set and dirty (modified) properties.
+   */
+  get dirty_attributes(): Attrs {
+    const attrs: Attrs = {}
+    for (const prop of this) {
+      if (!prop.is_unset && prop.dirty) {
         attrs[prop.attr] = prop.get_value()
       }
     }
@@ -401,9 +433,13 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
   }
 
   // Create a new model with exact attribute values to this one, but new identity.
-  clone(): this {
+  clone(attrs?: Partial<HasProps.Attrs>): this {
     const cloner = new Cloner()
-    return cloner.clone(this)
+    const that = cloner.clone(this)
+    if (attrs != null) {
+      that.setv(attrs)
+    }
+    return that
   }
 
   private _watchers: WeakMap<object, boolean> = new WeakMap()
@@ -431,8 +467,9 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
     const changing   = this._changing
     this._changing = true
 
+    const cmp = new Comparator({no_fail: true})
     for (const [prop, value] of changes) {
-      if (check_eq === false || prop.is_unset || !is_equal(prop.get_value(), value)) {
+      if (check_eq === false || prop.is_unset || !cmp.eq(prop.get_value(), value)) {
         prop.set_value(value)
         changed.add(prop)
       }
@@ -464,7 +501,7 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
     return changed
   }
 
-  setv(changed_attrs: Attrs, options: HasProps.SetOptions = {}): void {
+  setv<T extends Attrs>(changed_attrs: Partial<T>, options: HasProps.SetOptions = {}): void {
     const changes = entries(changed_attrs)
 
     if (changes.length == 0) {
@@ -501,9 +538,9 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
         }
       }
 
-      for (const [prop, old_value, new_value] of changed) {
-        if (prop.may_have_refs && this._needs_invalidate(old_value, new_value)) {
-          document._invalidate_all_models()
+      for (const [prop, _, new_value] of changed) {
+        if (prop.may_have_refs) {
+          document.partially_update_all_models(new_value)
           break
         }
       }
@@ -600,30 +637,10 @@ export abstract class HasProps extends Signalable() implements Equatable, Printa
 
   detach_document(): void {
     // This should only be called by the Document implementation to unset the document field
-    this._doc_detached()
-    this.document = null
-  }
-
-  protected _needs_invalidate(old_value: unknown, new_value: unknown): boolean {
-    const new_refs = new Set<HasProps>()
-    HasProps._value_record_references(new_value, new_refs, {recursive: false})
-
-    const old_refs = new Set<HasProps>()
-    HasProps._value_record_references(old_value, old_refs, {recursive: false})
-
-    for (const new_id of new_refs) {
-      if (!old_refs.has(new_id)) {
-        return true
-      }
+    if (this.document != null) {
+      this._doc_detached()
+      this.document = null
     }
-
-    for (const old_id of old_refs) {
-      if (!new_refs.has(old_id)) {
-        return true
-      }
-    }
-
-    return false
   }
 
   protected _push_changes(changes: [Property, unknown, unknown][], sync: boolean): void {

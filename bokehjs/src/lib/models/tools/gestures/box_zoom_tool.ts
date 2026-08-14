@@ -3,10 +3,12 @@ import {GestureTool, GestureToolView} from "./gesture_tool"
 import {BoxAnnotation} from "../../annotations/box_annotation"
 import type {CartesianFrameView} from "../../canvas/cartesian_frame"
 import type {RangeState} from "../../plots/range_manager"
+import {MenuItem} from "../../ui/menus"
+import type {MenuItemLike} from "../../ui/menus"
+import type {IconLike} from "../../common/kinds"
 import type * as p from "core/properties"
 import type {PanEvent, KeyEvent, TapEvent} from "core/ui_events"
 import {Dimensions, BoxOrigin} from "core/enums"
-import type {MenuItem} from "core/util/menus"
 import * as icons from "styles/icons.css"
 
 type Point = [number, number]
@@ -92,6 +94,30 @@ export class BoxZoomToolView extends GestureToolView {
     return [[left, right], [bottom, top]]
   }
 
+  protected _get_dimensions(base_point: Point, curr_point: Point): Dimensions {
+    const {dimensions} = this.model
+    if (dimensions == "auto") {
+      const [bx, by] = base_point
+      const [cx, cy] = curr_point
+
+      const dx = Math.abs(bx - cx)
+      const dy = Math.abs(by - cy)
+
+      const tol_d = 15
+      const tol_aspect_ratio = 3
+
+      if (dx < tol_d && dy > tol_d && dy > tol_aspect_ratio*dx) {
+        return "height"
+      } else if (dx > tol_d && dy < tol_d && dx > tol_aspect_ratio*dy) {
+        return "width"
+      } else {
+        return "both"
+      }
+    } else {
+      return dimensions
+    }
+  }
+
   protected _compute_limits(base_point: Point, curr_point: Point): [Point, Point] {
     const {frame} = this.plot_view
 
@@ -101,28 +127,7 @@ export class BoxZoomToolView extends GestureToolView {
       base_point = [cx - (dx - cx), cy - (dy - cy)]
     }
 
-    const dims = (() => {
-      const {dimensions} = this.model
-      if (dimensions == "auto") {
-        const [bx, by] = base_point
-        const [cx, cy] = curr_point
-
-        const dx = Math.abs(bx - cx)
-        const dy = Math.abs(by - cy)
-
-        const tol = 5
-
-        if (dx < tol && dy > tol) {
-          return "height"
-        } else if (dx > tol && dy < tol) {
-          return "width"
-        } else {
-          return "both"
-        }
-      } else {
-        return dimensions
-      }
-    })()
+    const dims = this._get_dimensions(base_point, curr_point)
 
     if (this.model.match_aspect && dims == "both") {
       return this._match_aspect(base_point, curr_point, frame)
@@ -143,7 +148,10 @@ export class BoxZoomToolView extends GestureToolView {
       return
     }
 
-    const [[left, right], [top, bottom]] = this._compute_limits(this._base_point, [ev.sx, ev.sy])
+    const [sxlim, sylim] = this._compute_limits(this._base_point, [ev.sx, ev.sy])
+    const dims = this._get_dimensions(this._base_point, [ev.sx, ev.sy])
+    const {line_width} = this.model.overlay
+    const [[left, right], [top, bottom]] = this.model._compute_overlay_limits(sxlim, sylim, dims, line_width)
     this.model.overlay.update({left, right, top, bottom})
   }
 
@@ -253,7 +261,7 @@ export class BoxZoomTool extends GestureTool {
     this.prototype.default_view = BoxZoomToolView
 
     this.define<BoxZoomTool.Props>(({Bool, Ref, Or, Auto}) => ({
-      dimensions:   [ Or(Dimensions, Auto), "both" ],
+      dimensions:   [ Or(Dimensions, Auto), "auto" ],
       overlay:      [ Ref(BoxAnnotation), DEFAULT_BOX_OVERLAY ],
       match_aspect: [ Bool, false ],
       origin:       [ BoxOrigin, "corner" ],
@@ -272,7 +280,7 @@ export class BoxZoomTool extends GestureTool {
   }
   override default_order = 20
 
-  override get computed_icon(): string {
+  override get computed_icon(): IconLike {
     const icon = super.computed_icon
     if (icon != null) {
       return icon
@@ -290,41 +298,48 @@ export class BoxZoomTool extends GestureTool {
     return this._get_dim_tooltip(this.dimensions)
   }
 
-  override get menu(): MenuItem[] | null {
+  override get menu(): MenuItemLike[] {
     return [
-      {
-        icon: icons.tool_icon_box_zoom,
+      new MenuItem({
+        icon: `.${icons.tool_icon_box_zoom}`,
+        label: "XY mode",
         tooltip: "Box zoom in both dimensions",
-        active: () => this.dimensions == "both",
-        handler: () => {
+        checked: () => this.dimensions == "both",
+        action: () => {
           this.dimensions = "both"
           this.active = true
         },
-      }, {
-        icon: icons.tool_icon_x_box_zoom,
+      }),
+      new MenuItem({
+        icon: `.${icons.tool_icon_x_box_zoom}`,
+        label: "X-only",
         tooltip: "Box zoom in x-dimension",
-        active: () => this.dimensions == "width",
-        handler: () => {
+        checked: () => this.dimensions == "width",
+        action: () => {
           this.dimensions = "width"
           this.active = true
         },
-      }, {
-        icon: icons.tool_icon_y_box_zoom,
+      }),
+      new MenuItem({
+        icon: `.${icons.tool_icon_y_box_zoom}`,
+        label: "Y-only",
         tooltip: "Box zoom in y-dimension",
-        active: () => this.dimensions == "height",
-        handler: () => {
+        checked: () => this.dimensions == "height",
+        action: () => {
           this.dimensions = "height"
           this.active = true
         },
-      }, {
-        icon: icons.tool_icon_auto_box_zoom,
+      }),
+      new MenuItem({
+        icon: `.${icons.tool_icon_auto_box_zoom}`,
+        label: "Auto mode",
         tooltip: "Automatic mode (box zoom in x, y or both dimensions, depending on the mouse gesture)",
-        active: () => this.dimensions == "auto",
-        handler: () => {
+        checked: () => this.dimensions == "auto",
+        action: () => {
           this.dimensions = "auto"
           this.active = true
         },
-      },
+      }),
     ]
   }
 }

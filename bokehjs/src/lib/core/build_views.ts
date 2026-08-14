@@ -4,10 +4,13 @@ import type {ViewManager} from "./view_manager"
 import {difference} from "./util/array"
 import {assert} from "./util/assert"
 
-export type {IterViews, ViewOf} from "./view"
+export type {IterViews, ViewOf, View, ChildView} from "./view"
 
 export type ViewStorage<T extends HasProps> = Map<T, ViewOf<T>>
-export type Options<T extends View> = {parent: T["parent"] | null, owner?: ViewManager}
+export type Options<T extends View> = {
+  parent: T["parent"] | null | ((obj: HasProps) => T["parent"] | null)
+  owner?: ViewManager
+}
 
 async function _build_view<T extends HasProps>(view_cls: T["default_view"], model: T, options: Options<ViewOf<T>>): Promise<ViewOf<T>> {
   assert(view_cls != null, "model doesn't implement a view")
@@ -68,5 +71,23 @@ export function remove_views(view_storage: ViewStorage<HasProps>): void {
   for (const [model, view] of view_storage) {
     view.remove()
     view_storage.delete(model)
+  }
+}
+
+export function traverse_views(views: View[], fn: (view: View) => void): void {
+  const visited = new Set<View>()
+  const queue: View[] = [...views]
+
+  while (true) {
+    const view = queue.shift()
+    if (view === undefined) {
+      break
+    }
+    if (visited.has(view)) {
+      continue
+    }
+    visited.add(view)
+    queue.push(...view.children_views())
+    fn(view)
   }
 }

@@ -3,9 +3,8 @@ import type {BaseText} from "../text/base_text"
 import {MathTextView} from "../text/math_text"
 import type {GraphicsBox} from "core/graphics"
 import type * as p from "core/properties"
-import type {ViewStorage, IterViews} from "core/build_views"
-import {build_views, remove_views} from "core/build_views"
-import {non_null} from "core/util/types"
+import type {ViewStorage, ChildView} from "core/build_views"
+import {build_views} from "core/build_views"
 import {enumerate} from "core/util/iterator"
 
 export interface MathTextGlyphView extends MathTextGlyph.Data {}
@@ -16,14 +15,8 @@ export abstract class MathTextGlyphView extends TextView {
 
   protected _label_views: ViewStorage<BaseText> = new Map()
 
-  override remove(): void {
-    remove_views(this._label_views)
-    super.remove()
-  }
-
-  override *children(): IterViews {
-    yield* super.children()
-    yield* this._label_views.values()
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), ...this._label_views.values()]
   }
 
   override has_finished(): boolean {
@@ -47,7 +40,7 @@ export abstract class MathTextGlyphView extends TextView {
       return text_i == null ? null : this._build_label(text_i)
     })
 
-    await build_views(this._label_views, labels.filter(non_null), {parent: this.renderer})
+    await build_views(this._label_views, labels.filter((v) => v != null), {parent: this.renderer})
 
     return labels.map((label_i) => {
       return label_i == null ? null : this._label_views.get(label_i)!.graphics()

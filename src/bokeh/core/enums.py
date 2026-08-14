@@ -46,9 +46,6 @@ as well as containment tests:
     >>> "port" in MyEnum
     True
 
-Enumerations can be easily documented in Sphinx documentation with the
-:ref:`bokeh.sphinxext.bokeh_enum` Sphinx extension.
-
 ----
 
 .. autofunction:: bokeh.core.enums.enumeration
@@ -77,12 +74,13 @@ from typing import (
     Any,
     Iterator,
     Literal,
+    Sequence,
+    TypeAliasType,
     get_args,
 )
 
 # Bokeh imports
 from .. import colors, palettes
-from ..util.strings import nice_join
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -93,9 +91,14 @@ __all__ = (
     'AlternationPolicy',
     'Anchor',
     'AngleUnits',
+    'Auto',
     'AutosizeMode',
+    'AxisLabelStandoffMode',
+    'AxisType',
+    'BuiltinFormatter',
     'ButtonType',
     'CalendarPosition',
+    'ColorScheme',
     'ContextWhich',
     'CoordinateUnits',
     'DashPattern',
@@ -109,9 +112,11 @@ __all__ = (
     'HAlign',
     'HatchPattern',
     'HatchPatternAbbreviation',
+    'HexTileOrientation',
     'HoldPolicy',
     'HorizontalLocation',
     'ImageOrigin',
+    'ImplicitTarget',
     'JitterRandomDistribution',
     'KeyModifier',
     'LabelOrientation',
@@ -132,7 +137,10 @@ __all__ = (
     'OutputBackend',
     'PaddingUnits',
     'Palette',
+    'PanDirection',
     'Place',
+    'RadiusDimension',
+    'RegionSelectionMode',
     'RenderLevel',
     'ResetPolicy',
     'Resizable',
@@ -146,16 +154,20 @@ __all__ = (
     'SpatialUnits',
     'StartEnd',
     'StepMode',
+    'TeXDisplay',
     'TextAlign',
     'TextBaseline',
     'TextureRepetition',
+    'TimedeltaResolutionType',
     'ToolIcon',
+    'ToolName',
     'TooltipAttachment',
     'TooltipFieldFormatter',
     'TrackPolicy',
     'VAlign',
     'VerticalAlign',
     'VerticalLocation',
+    'WindowAxis',
 )
 
 #-----------------------------------------------------------------------------
@@ -176,16 +188,16 @@ class Enumeration:
     '''
     __slots__ = ()
 
-    _values: list[str]
-    _default: str
+    _values: list[str | int]
+    _default: str | int
     _case_sensitive: bool
     _quote: bool
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self) -> Iterator[str | int]:
         return iter(self._values)
 
-    def __contains__(self, value: str) -> bool:
-        if not self._case_sensitive:
+    def __contains__(self, value: str | int) -> bool:
+        if not self._case_sensitive and isinstance(value, str):
             value = value.lower()
         return value in self._values
 
@@ -198,7 +210,7 @@ class Enumeration:
 
     __repr__ = __str__
 
-def enumeration(*values: Any, case_sensitive: bool = True, quote: bool = False) -> Enumeration:
+def enumeration(*values: str | int | TypeAliasType, case_sensitive: bool = True, quote: bool = False) -> Enumeration:
     ''' Create an |Enumeration| object from a sequence of values.
 
     Call ``enumeration`` with a sequence of (unique) strings to create an
@@ -209,38 +221,53 @@ def enumeration(*values: Any, case_sensitive: bool = True, quote: bool = False) 
         #: Specify the horizontal alignment for rendering text
         TextAlign = enumeration("left", "right", "center")
 
+        #: Specify either ascending or descending item order
+        AscDesc = enumeration(1, -1)
+
     Args:
-        values (str) : string enumeration values, passed as positional arguments
+        values (str | int) : string or integer enumeration values, passed as
+            positional arguments
 
             The order of arguments is the order of the enumeration, and the
             first element will be considered the default value when used
             to create |Enum| properties.
 
-    Keyword Args:
         case_sensitive (bool, optional) :
             Whether validation should consider case or not (default: True)
 
-        quote (bool, optional):
+        quote (bool, optional) :
             Whether values should be quoted in the string representations
             (default: False)
 
     Raises:
-        ValueError if values empty, if any value is not a string or not unique
+        ValueError: if ``values`` is empty or if any value is not a string or not unique
 
     Returns:
         Enumeration
 
     '''
-    if len(values) == 1 and hasattr(values[0], "__args__"):
-        values = get_args(values[0])
+    def descend(items: Sequence[str | int | TypeAliasType]) -> Sequence[str | int]:
+        collected: list[str | int] = []
+        for item in items:
+            if isinstance(item, TypeAliasType):
+                collected.extend(descend(get_args(item.__value__)))
+            else:
+                collected.append(item)
+        return collected
 
-    if not (values and all(isinstance(value, str) and value for value in values)):
-        raise ValueError(f"expected a non-empty sequence of strings, got {nice_join(values)}")
+    values = tuple(descend(values))
+
+    if not (values and
+            (all(isinstance(value, str) and value for value in values) or
+             all(isinstance(value, int) for value in values))):
+        from ..util.strings import nice_join
+        raise ValueError(f"expected a non-empty heterogenous sequence of strings or integers, got {nice_join(values)}")
 
     if len(values) != len(set(values)):
+        from ..util.strings import nice_join
         raise ValueError(f"enumeration items must be unique, got {nice_join(values)}")
 
-    attrs: dict[str, Any] = {value: value for value in values}
+    attrs: dict[str, Any] = {value: value for value in values if isinstance(value, str)}
     attrs.update({
         "_values": list(values),
         "_default": values[0],
@@ -250,95 +277,114 @@ def enumeration(*values: Any, case_sensitive: bool = True, quote: bool = False) 
 
     return type("Enumeration", (Enumeration,), attrs)()
 
-#: Alignment (vertical or horizontal) of a child item
-AlignType = Literal["start", "center", "end"]
+type AlignType = Literal["start", "center", "end"]
+#: Alignment (vertical or horizontal) of a child item.
 Align = enumeration(AlignType)
 
-#: Horizontal alignment of a child item
-HAlignType = Literal["top", "center", "bottom"]
+type HAlignType = Literal["left", "center", "right"]
+#: Horizontal alignment of a child item.
 HAlign = enumeration(HAlignType)
 
-#: Vertical alignment of a child item
-VAlignType = Literal["left", "center", "right"]
+type VAlignType = Literal["top", "center", "bottom"]
+#: Vertical alignment of a child item.
 VAlign = enumeration(VAlignType)
 
-#: Specify to which items apply styling in a container (e.g. in a legend)
-AlternationPolicyType = Literal["none", "even", "odd", "every"]
+type AlternationPolicyType = Literal["none", "even", "odd", "every"]
+#: Specify to which items apply styling in a container (e.g. in a legend).
 AlternationPolicy = enumeration(AlternationPolicyType)
 
-#: Specify an anchor position on a box/frame
-AnchorType = Literal[
+type AnchorType = Literal[
     "top_left",    "top_center",    "top_right",
     "center_left", "center_center", "center_right",
     "bottom_left", "bottom_center", "bottom_right",
     "top", "left", "center", "right", "bottom",
 ]
+#: Specify an anchor position on a box/frame.
 Anchor = enumeration(AnchorType)
 
-#: Specify the units for an angle value
-AngleUnitsType = Literal["deg", "rad", "grad", "turn"]
+type AngleUnitsType = Literal["deg", "rad", "grad", "turn"]
+#: Specify the units for an angle value.
 AngleUnits = enumeration(AngleUnitsType)
 
-#: Specify autosize mode for DataTable
-AutosizeModeType = Literal["fit_columns", "fit_viewport", "force_fit", "none"]
+type AutoType = Literal["auto"]
+#: Context dependent keyword that specifies the automated, default, computed, etc. behavior.
+Auto = enumeration(AutoType)
+
+type AutosizeModeType = Literal["fit_columns", "fit_viewport", "force_fit", "ignore_viewport", "none"]
+#: Specify autosize mode for DataTable.
 AutosizeMode = enumeration(AutosizeModeType)
 
-#: Specify a style for button widgets
-ButtonTypeType = Literal["default", "primary", "success", "warning", "danger", "light"]
+type AxisLabelStandoffModeType = Literal["tick_labels", "axis"]
+#: Specify the reference point of the ``axis_label_standoff``.
+AxisLabelStandoffMode = enumeration(AxisLabelStandoffModeType)
+
+type AxisTypeType = Literal["linear", "log", "datetime", "timedelta", "mercator"]
+#: Specify the type of the axis.
+AxisType = enumeration(AxisTypeType)
+
+type BuiltinFormatterType = Literal["raw", "basic", "numeral", "printf", "datetime"]
+#: Names of built-in value formatters.
+BuiltinFormatter = enumeration(BuiltinFormatterType)
+
+type ButtonTypeType = Literal["default", "primary", "success", "warning", "danger", "light"]
+#: Specify a style for button widgets.
 ButtonType = enumeration(ButtonTypeType)
 
-#: Specify a position for the DatePicker calendar to display
-CalendarPositionType = Literal["auto", "above", "below"]
+type CalendarPositionType = Literal["auto", "above", "below"]
+#: Specify a position for the DatePicker calendar to display.
 CalendarPosition = enumeration(CalendarPositionType)
 
-#: Specify which tick to add additional context to
-ContextWhichType = Literal["start", "center", "end", "all"]
+type ColorSchemeType = Literal["auto", "light", "dark"]
+#: Specify a color scheme for the document.
+ColorScheme = enumeration(ColorSchemeType)
+
+type ContextWhichType = Literal["start", "center", "end", "all"]
+#: Specify which tick to add additional context to.
 ContextWhich = enumeration(ContextWhichType)
 
-#: Specify units for mapping coordinates
-CoordinateUnitsType = Literal["canvas", "screen", "data"]
+type CoordinateUnitsType = Literal["canvas", "screen", "data"]
+#: Specify units for mapping coordinates.
 CoordinateUnits = enumeration(CoordinateUnitsType)
 
-#: Specify a named dashing patter for stroking lines
-DashPatternType = Literal["solid", "dashed", "dotted", "dotdash", "dashdot"]
+type DashPatternType = Literal["solid", "dashed", "dotted", "dotdash", "dashdot"]
+#: Specify a named dashing pattern for stroking lines.
 DashPattern = enumeration(DashPatternType)
 
-#: Specify a format for printing dates
-DateFormatType = Literal[
+type DateFormatType = Literal[
     "ATOM", "W3C", "RFC-3339", "ISO-8601", "COOKIE", "RFC-822",
     "RFC-850", "RFC-1036", "RFC-1123", "RFC-2822", "RSS", "TIMESTAMP",
 ]
+#: Specify a format for printing dates.
 DateFormat = enumeration(DateFormatType)
 
-#: Specify a date/time scale
-DatetimeUnitsType = Literal[
+type DatetimeUnitsType = Literal[
     "microseconds", "milliseconds", "seconds", "minsec",
     "minutes", "hourmin", "hours", "days", "months", "years",
 ]
+#: Specify a date/time scale.
 DatetimeUnits = enumeration(DatetimeUnitsType)
 
-#: Specify a vertical/horizontal dimension
-DimensionType = Literal["width", "height"]
+type DimensionType = Literal["width", "height"]
+#: Specify a vertical/horizontal dimension.
 Dimension = enumeration(DimensionType)
 
-#: Specify a vertical/horizontal dimensions
-DimensionsType = Literal["width", "height", "both"]
+type DimensionsType = Literal["width", "height", "both"]
+#: Specify a vertical/horizontal dimensions.
 Dimensions = enumeration(DimensionsType)
 
+type DirectionType = Literal["clock", "anticlock"]
 #: Specify a stroke direction for circles, wedges, etc.
-DirectionType = Literal["clock", "anticlock"]
 Direction = enumeration(DirectionType)
 
+type FlowModeType = Literal["block", "inline"]
 #: Specify the flow behavior in CSS layouts.
-FlowModeType = Literal["block", "inline"]
 FlowMode = enumeration(FlowModeType)
 
-#: Specify the font style for rendering text
-FontStyleType = Literal["normal", "italic", "bold", "bold italic"]
+type FontStyleType = Literal["normal", "italic", "bold", "bold italic"]
+#: Specify the font style for rendering text.
 FontStyle = enumeration(FontStyleType)
 
-#: Specify one of the built-in patterns for hatching fills
-HatchPatternType = Literal[
+type HatchPatternType = Literal[
     "blank",
     "dot",
     "ring",
@@ -357,9 +403,11 @@ HatchPatternType = Literal[
     "vertical_wave",
     "criss_cross",
 ]
+#: Specify one of the built-in patterns for hatching fills.
 HatchPattern = enumeration(HatchPatternType)
 
-#: Specify one of the built-in patterns for hatching fills with a one-letter abbreviation
+type HatchPatternAbbreviationType = Literal[" ", ".", "o", "-", "|", "+", '"', ":", "@", "/", "\\", "x", ",", "`", "v", ">", "*"]
+#: Specify one of the built-in patterns for hatching fills with a one-letter abbreviation.
 #:
 #: The abbreviations are mapped as follows:
 #:
@@ -382,270 +430,358 @@ HatchPattern = enumeration(HatchPatternType)
 #:     "v"  :  horizontal_wave
 #:     ">"  :  vertical_wave
 #:     "*"  :  criss_cross
-HatchPatternAbbreviationType = Literal[" ", ".", "o", "-", "|", "+", '"', ":", "@", "/", "\\", "x", ",", "`", "v", ">", "*"]
 HatchPatternAbbreviation = enumeration(HatchPatternAbbreviationType, quote=True)
 
-#: Specify whether events should be combined or collected as-is when a Document hold is in effect
-HoldPolicyType = Literal["combine", "collect"]
+type HexTileOrientationType = Literal["pointytop", "flattop"]
+#: The orientation of the hex tiles.
+HexTileOrientation = enumeration(HexTileOrientationType)
+
+type HoldPolicyType = Literal["combine", "collect"]
+#: Specify whether events should be combined or collected as-is when a Document hold is in effect.
 HoldPolicy = enumeration(HoldPolicyType)
 
-#: Specify a horizontal location in plot layouts
-HorizontalLocationType = Literal["left", "right"]
+type HorizontalLocationType = Literal["left", "right"]
+#: Specify a horizontal location in plot layouts.
 HorizontalLocation = enumeration(HorizontalLocationType)
 
-#: Defines the coordinate space within an image
-ImageOriginType = Literal["bottom_left", "top_left", "bottom_right", "top_right"]
+type ImageOriginType = Literal["bottom_left", "top_left", "bottom_right", "top_right"]
+#: Defines the coordinate space within an image.
 ImageOrigin = enumeration(ImageOriginType)
 
-#: Specify a distribution to use for the Jitter class
-JitterRandomDistributionType = Literal["uniform", "normal"]
+type ImplicitTargetType = Literal["viewport", "canvas", "plot", "frame", "parent"]
+#: Implicitly defined target of a node.
+ImplicitTarget = enumeration(ImplicitTargetType)
+
+type JitterRandomDistributionType = Literal["uniform", "normal"]
+#: Specify a distribution to use for the Jitter class.
 JitterRandomDistribution = enumeration(JitterRandomDistributionType)
 
-#: Keyboard modifier key used to configure tools or report in UI events
-KeyModifierType = Literal["shift", "ctrl", "alt"]
+type KeyModifierType = Literal["shift", "ctrl", "alt"]
+#: Keyboard modifier key used to configure tools or report in UI events.
 KeyModifier = enumeration(KeyModifierType)
 
-#: Specify how labels are oriented with respect to an axis
-LabelOrientationType = Literal["horizontal", "vertical", "parallel", "normal"]
+type LabelOrientationType = Literal["horizontal", "vertical", "parallel", "normal"]
+#: Specify how labels are oriented with respect to an axis.
 LabelOrientation = enumeration(LabelOrientationType)
 
-#: Specify whether a dimension or coordinate is latitude or longitude
-LatLonType = Literal["lat", "lon"]
+type LatLonType = Literal["lat", "lon"]
+#: Specify whether a dimension or coordinate is latitude or longitude.
 LatLon = enumeration(LatLonType)
 
-#: Specify how a legend should respond to click events
-LegendClickPolicyType = Literal["none", "hide", "mute"]
+type LegendClickPolicyType = Literal["none", "hide", "mute"]
+#: Specify how a legend should respond to click events.
 LegendClickPolicy = enumeration(LegendClickPolicyType)
 
-#: Specify a fixed location for a legend
 LegendLocationType = AnchorType
+#: Specify a fixed location for a legend.
 LegendLocation = Anchor
 
-#: Specify how stroked lines should be terminated
-LineCapType = Literal["butt", "round", "square"]
+type LineCapType = Literal["butt", "round", "square"]
+#: Specify how stroked lines should be terminated.
 LineCap = enumeration(LineCapType)
 
-#: Specify a named dash pattern for stroking lines
-LineDashType = Literal["solid", "dashed", "dotted", "dotdash", "dashdot"]
+type LineDashType = Literal["solid", "dashed", "dotted", "dotdash", "dashdot"]
+#: Specify a named dash pattern for stroking lines.
 LineDash = enumeration(LineDashType)
 
-#: Specify how stroked lines should be joined together
-LineJoinType = Literal["miter", "round", "bevel"]
+type LineJoinType = Literal["miter", "round", "bevel"]
+#: Specify how stroked lines should be joined together.
 LineJoin = enumeration(LineJoinType)
 
-#: Specify a location in plot layouts
-LocationType = Literal["above", "below", "left", "right"]
+type LocationType = Literal["above", "below", "left", "right"]
+#: Specify a location in plot layouts.
 Location = enumeration(LocationType)
 
-#: Specify a style for a Google map
-MapTypeType = Literal["satellite", "roadmap", "terrain", "hybrid"]
+type MapTypeType = Literal["satellite", "roadmap", "terrain", "hybrid"]
+#: Specify a style for a Google map.
 MapType = enumeration(MapTypeType)
 
-#: Specify one of the built-in marker types
-MarkerTypeType = Literal[
+type MarkerTypeType = Literal[
     "asterisk", "circle", "circle_cross", "circle_dot", "circle_x",
     "circle_y", "cross", "dash", "diamond", "diamond_cross", "diamond_dot",
     "dot", "hex", "hex_dot", "inverted_triangle", "plus", "square",
     "square_cross", "square_dot", "square_pin", "square_x", "star", "star_dot",
     "triangle", "triangle_dot", "triangle_pin", "x", "y",
 ]
+#: Specify one of the built-in marker types.
 MarkerType = enumeration(MarkerTypeType)
 
+type MovableType = Literal["none", "x", "y", "both"]
 #: Indicates in which dimensions an object (a renderer or an UI element) can be moved.
-MovableType = Literal["none", "x", "y", "both"]
 Movable = enumeration(MovableType)
 
-#: Specify one of the CSS4 named colors (https://www.w3.org/TR/css-color-4/#named-colors)
+type NamedColorType = str # TODO Literal[...]
+#: Specify one of the |named CSS colors|.
 NamedColor = enumeration(*colors.named.__all__, case_sensitive=False)
 
-#: Specify a locale for printing numeric values
-NumeralLanguageType = Literal["be-nl", "chs", "cs", "da-dk", "de-ch", "de", "en",
+type NumeralLanguageType = Literal["be-nl", "chs", "cs", "da-dk", "de-ch", "de", "en",
                               "en-gb", "es-ES", "es", "et", "fi", "fr-CA", "fr-ch",
                               "fr", "hu", "it", "ja", "nl-nl", "pl", "pt-br",
                               "pt-pt", "ru", "ru-UA", "sk", "th", "tr", "uk-UA"]
+#: Specify a locale for printing numeric values.
 NumeralLanguage = enumeration(NumeralLanguageType)
 
-#: Specify a vertical/horizontal orientation for something
-OrientationType = Literal["horizontal", "vertical"]
+type OrientationType = Literal["horizontal", "vertical"]
+#: Specify a vertical/horizontal orientation for something.
 Orientation = enumeration(OrientationType)
 
-#: Names of pre-defined outline shapes (used in ``Text.outline_shape``)
-OutlineShapeName = Literal["none", "box", "rectangle", "square", "circle", "ellipse", "trapezoid", "parallelogram", "diamond", "triangle"]
-OutlineShapeName = enumeration(OutlineShapeName)
+type OutlineShapeNameType = Literal["none", "box", "rectangle", "square", "circle", "ellipse", "trapezoid", "parallelogram", "diamond", "triangle"]
+#: Names of pre-defined outline shapes (used in ``Text.outline_shape``).
+OutlineShapeName = enumeration(OutlineShapeNameType)
 
-#: Specify an output backend to render a plot area onto
-OutputBackendType = Literal["canvas", "svg", "webgl"]
+type OutputBackendType = Literal["canvas", "svg", "webgl"]
+#: Specify an output backend to render a plot area onto.
 OutputBackend = enumeration(OutputBackendType)
 
-#: Whether range padding should be interpreted a percentage or and absolute quantity
-PaddingUnitsType = Literal["percent", "absolute"]
+type PaddingUnitsType = Literal["percent", "absolute"]
+#: Whether range padding should be interpreted a percentage or and absolute quantity.
 PaddingUnits = enumeration(PaddingUnitsType)
 
-#: Specify the name of a palette from :ref:`bokeh.palettes`
+type PanDirectionType = Literal["left", "right", "up", "down", "west", "east", "north", "south"]
+#: Which direction click pan tool acts on.
+PanDirection = enumeration(PanDirectionType)
+
+type PaletteType = str # TODO Literal[...]
+#: Specify the name of a palette from :ref:`bokeh.palettes`.
 Palette = enumeration(*palettes.__palettes__)
 
-#: Placement of a layout element, in particular in border-style layouts
-PlaceType = Literal["above", "below", "left", "right", "center"]
+type PlaceType = Literal["above", "below", "left", "right", "center"]
+#: Placement of a layout element, in particular in border-style layouts.
 Place = enumeration(PlaceType)
 
-#: Specify a position in the render order for a renderer
-RenderLevelType = Literal["image", "underlay", "glyph", "guide", "annotation", "overlay"]
+type RadiusDimensionType = Literal["x", "y", "max", "min"]
+#: Specify which dimension or dimensions to use when measuring circle radius.
+RadiusDimension = enumeration(RadiusDimensionType)
+
+type RenderLevelType = Literal["image", "underlay", "glyph", "guide", "annotation", "overlay"]
+#: Specify a position in the render order for a renderer.
 RenderLevel = enumeration(RenderLevelType)
 
-#: What reset actions should occur on a Plot reset
-ResetPolicyType = Literal["standard", "event_only"]
+type ResetPolicyType = Literal["standard", "event_only"]
+#: What reset actions should occur on a Plot reset.
 ResetPolicy = enumeration(ResetPolicyType)
 
+type ResizableType = Literal["none", "left", "right", "top", "bottom", "x", "y", "all"]
 #: Indicates in which dimensions an object (a renderer or an UI element) can be resized.
-ResizableType = Literal["none", "left", "right", "top", "bottom", "x", "y", "all"]
 Resizable = enumeration(ResizableType)
 
-#: Specify which resolutions should be used for stripping of leading zeros
-ResolutionTypeType = Literal["microseconds", "milliseconds", "seconds", "minsec", "minutes", "hourmin", "hours", "days", "months", "years"]
+type ResolutionTypeType = Literal["microseconds", "milliseconds", "seconds", "minsec", "minutes", "hourmin", "hours", "days", "months", "years"]
+#: Specify which resolutions should be used for stripping of leading zeros.
 ResolutionType = enumeration(ResolutionTypeType)
 
-#: Specify a policy for  how numbers should be rounded
-RoundingFunctionType = Literal["round", "nearest", "floor", "rounddown", "ceil", "roundup"]
+type RoundingFunctionType = Literal["round", "nearest", "floor", "rounddown", "ceil", "roundup"]
+#: Specify a policy for  how numbers should be rounded.
 RoundingFunction = enumeration(RoundingFunctionType)
 
-#: Scrollbar policies
-ScrollbarPolicyType = Literal["auto", "visible", "hidden"]
+type ScrollbarPolicyType = Literal["auto", "visible", "hidden"]
+#: Scrollbar policies.
 ScrollbarPolicy = enumeration(ScrollbarPolicyType)
 
-#: Selection modes
-SelectionModeType = Literal["replace", "append", "intersect", "subtract", "xor"]
+type RegionSelectionModeType = Literal["replace", "append", "intersect", "subtract", "xor"]
+#: Region selection modes.
+RegionSelectionMode = enumeration(RegionSelectionModeType)
+
+type SelectionModeType = Literal[RegionSelectionModeType, "toggle"]
+#: Selection modes.
 SelectionMode = enumeration(SelectionModeType)
 
-#: Sizing mode policies
-SizingModeType = Literal["stretch_width", "stretch_height", "stretch_both", "scale_width", "scale_height", "scale_both", "fixed", "inherit"]
+type SizingModeType = Literal["stretch_width", "stretch_height", "stretch_both", "scale_width", "scale_height", "scale_both", "fixed", "inherit"]
+#: Sizing mode policies.
 SizingMode = enumeration(SizingModeType)
 
-#: Individual sizing mode policies
-SizingPolicyType = Literal["fixed", "fit", "min", "max"]
+type SizingPolicyType = Literal["fixed", "fit", "min", "max"]
+#: Individual sizing mode policies.
 SizingPolicy = enumeration(SizingPolicyType)
 
-#: Specify sorting directions
-SortDirectionType = Literal["ascending", "descending"]
+type SortDirectionType = Literal["ascending", "descending"]
+#: Specify sorting directions.
 SortDirection = enumeration(SortDirectionType)
 
-#: Specify units for mapping values
-SpatialUnitsType = Literal["screen", "data"]
+type SpatialUnitsType = Literal["screen", "data"]
+#: Specify units for mapping values.
 SpatialUnits = enumeration(SpatialUnitsType)
 
-#: Specify a start/end value
-StartEndType = Literal["start", "end"]
+type StartEndType = Literal["start", "end"]
+#: Specify a start/end value.
 StartEnd = enumeration(StartEndType)
 
-#: Specify a mode for stepwise interpolation
-StepModeType = Literal["before", "after", "center"]
-StepMode = enumeration(StepModeType)
+type StepModeType = Literal["before", "after", "center"]
+#: Specify a mode for stepwise interpolation.
+StepMode = enumeration(*["before", "after", "center"])
 
-#: Specify the horizontal alignment for rendering text
-TextAlignType = Literal["left", "right", "center"]
+type TeXDisplayType = Literal["inline", "block", "auto"]
+#: Display mode in TeX.
+TeXDisplay = enumeration(TeXDisplayType)
+
+type TextAlignType = Literal["left", "right", "center"]
+#: Specify the horizontal alignment for rendering text.
 TextAlign = enumeration(TextAlignType)
 
-#: Specify the baseline location for rendering text
-TextBaselineType = Literal["top", "middle", "bottom", "alphabetic", "hanging", "ideographic"]
+type TextBaselineType = Literal["top", "middle", "bottom", "alphabetic", "hanging", "ideographic"]
+#: Specify the baseline location for rendering text.
 TextBaseline = enumeration(TextBaselineType)
 
-#: Specify how textures used as canvas patterns should repeat
-TextureRepetitionType = Literal["repeat", "repeat_x", "repeat_y", "no_repeat"]
+type TextureRepetitionType = Literal["repeat", "repeat_x", "repeat_y", "no_repeat"]
+#: Specify how textures used as canvas patterns should repeat.
 TextureRepetition = enumeration(TextureRepetitionType)
 
-#: Well known tool icon names
-ToolIconType = Literal[
-  "append_mode",
-  "arrow_down_to_bar",
-  "arrow_up_from_bar",
+type TimedeltaResolutionTypeType = Literal["nanoseconds", "microseconds", "milliseconds", "seconds", "minsec", "minutes", "hourmin", "hours", "days"]
+#: Specify which resolutions should be used for stripping of leading zeros.
+TimedeltaResolutionType = enumeration(TimedeltaResolutionTypeType)
+
+type ToolIconType = Literal[
+    "append_mode",
+    "arrow_down_to_bar",
+    "arrow_up_from_bar",
+    "auto_box_zoom",
+    "bold",
+    "box_edit",
+    "box_select",
+    "box_zoom",
+    "caret_down",
+    "caret_left",
+    "caret_right",
+    "caret_up",
+    "check",
+    "chevron_down",
+    "chevron_left",
+    "chevron_right",
+    "chevron_up",
+    "clear_selection",
+    "copy",
+    "crosshair",
+    "dark_theme",
+    "delete",
+    "freehand_draw",
+    "fullscreen",
+    "help",
+    "hover",
+    "intersect_mode",
+    "invert_selection",
+    "italic",
+    "lasso_select",
+    "light_theme",
+    "line_edit",
+    "maximize",
+    "minimize",
+    "pan",
+    "pin",
+    "point_draw",
+    "pointer",
+    "poly_draw",
+    "poly_edit",
+    "polygon_select",
+    "range",
+    "redo",
+    "replace_mode",
+    "reset",
+    "save",
+    "see_off",
+    "see_on",
+    "settings",
+    "square",
+    "square_check",
+    "subtract_mode",
+    "system_theme",
+    "tap_select",
+    "text_align_center",
+    "text_align_left",
+    "text_align_right",
+    "undo",
+    "unknown",
+    "unpin",
+    "wheel_pan",
+    "wheel_zoom",
+    "x_box_select",
+    "x_box_zoom",
+    "x_grip",
+    "x_pan",
+    "xor_mode",
+    "y_box_select",
+    "y_box_zoom",
+    "y_grip",
+    "y_pan",
+    "zoom_in",
+    "zoom_out",
+]
+#: Well known tool icon names.
+ToolIcon = enumeration(ToolIconType)
+
+type ToolNameType = Literal[
   "auto_box_zoom",
-  "bold",
-  "box_edit",
   "box_select",
   "box_zoom",
-  "caret_down",
-  "caret_left",
-  "caret_right",
-  "caret_up",
-  "check",
-  "chevron_down",
-  "chevron_left",
-  "chevron_right",
-  "chevron_up",
-  "clear_selection",
+  "click",
   "copy",
   "crosshair",
-  "delete",
+  "doubletap",
+  "examine",
   "freehand_draw",
   "fullscreen",
   "help",
   "hover",
-  "intersect_mode",
-  "invert_selection",
-  "italic",
   "lasso_select",
-  "line_edit",
-  "maximize",
-  "minimize",
   "pan",
-  "pin",
-  "point_draw",
-  "pointer",
-  "poly_draw",
-  "poly_edit",
-  "polygon_select",
-  "range",
+  "pan_down",
+  "pan_east",
+  "pan_left",
+  "pan_north",
+  "pan_right",
+  "pan_south",
+  "pan_up",
+  "pan_west",
+  "poly_select",
   "redo",
-  "replace_mode",
   "reset",
   "save",
-  "see_off",
-  "see_on",
-  "settings",
-  "square",
-  "square_check",
-  "subtract_mode",
-  "tap_select",
-  "text_align_center",
-  "text_align_left",
-  "text_align_right",
+  "tap",
   "undo",
-  "unknown",
-  "unpin",
-  "wheel_pan",
   "wheel_zoom",
-  "x_box_select",
-  "x_box_zoom",
-  "x_grip",
-  "x_pan",
-  "xor_mode",
-  "y_box_select",
-  "y_box_zoom",
-  "y_grip",
-  "y_pan",
+  "xbox_select",
+  "xbox_zoom",
+  "xcrosshair",
+  "xpan",
+  "xwheel_pan",
+  "xwheel_zoom",
+  "xzoom_in",
+  "xzoom_out",
+  "ybox_select",
+  "ybox_zoom",
+  "ycrosshair",
+  "ypan",
+  "ywheel_pan",
+  "ywheel_zoom",
+  "yzoom_in",
+  "yzoom_out",
   "zoom_in",
   "zoom_out",
 ]
-ToolIcon = enumeration(ToolIconType)
+#: Known tool names/aliases.
+ToolName = enumeration(ToolNameType)
 
-#: Specify an attachment for tooltips
-TooltipAttachmentType = Literal["horizontal", "vertical", "left", "right", "above", "below"]
+type TooltipAttachmentType = Literal["horizontal", "vertical", "left", "right", "above", "below"]
+#: Specify an attachment for tooltips.
 TooltipAttachment = enumeration(TooltipAttachmentType)
 
-#: Specify how a format string for a tooltip field should be interpreted
-TooltipFieldFormatterType = Literal["numeral", "datetime", "printf"]
+type TooltipFieldFormatterType = Literal["numeral", "datetime", "printf"]
+#: Specify how a format string for a tooltip field should be interpreted.
 TooltipFieldFormatter = enumeration(TooltipFieldFormatterType)
 
-#: Grid track (row/column) sizing policies
-TrackPolicyType = Literal["auto", "min", "max", "flex", "fixed"]
+type TrackPolicyType = Literal["auto", "min", "max", "flex", "fixed"]
+#: Grid track (row/column) sizing policies.
 TrackPolicy = enumeration(TrackPolicyType)
 
-#: Specify the vertical alignment for rendering text
-VerticalAlignType = Literal["top", "middle", "bottom"]
+type VerticalAlignType = Literal["top", "middle", "bottom"]
+#: Specify the vertical alignment for rendering text.
 VerticalAlign = enumeration(VerticalAlignType)
 
-#: Specify a vertical location in plot layouts
-VerticalLocationType = Literal["above", "below"]
+type VerticalLocationType = Literal["above", "below"]
+#: Specify a vertical location in plot layouts.
 VerticalLocation = enumeration(VerticalLocationType)
+
+type WindowAxisType = Literal["none", "x", "y"]
+#: Specify a which axis to use for windowed auto-ranging.
+WindowAxis = enumeration(WindowAxisType)
 
 #-----------------------------------------------------------------------------
 # Private API

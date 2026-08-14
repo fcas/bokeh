@@ -14,6 +14,8 @@ models for instances that match specified criteria.
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportArgumentType=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -23,14 +25,14 @@ log = logging.getLogger(__name__)
 
 # Standard library imports
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Iterable,
-    TypeAlias,
 )
 
-# Bokeh imports
-from ..model import Model
+if TYPE_CHECKING:
+    from ..model import Model
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -51,7 +53,7 @@ __all__ = (
     'is_single_string_selector',
 )
 
-SelectorType: TypeAlias = dict[str | type["_Operator"], Any]
+type SelectorType = dict[str | type["_Operator"], Any]
 
 #-----------------------------------------------------------------------------
 # General API
@@ -62,7 +64,7 @@ def find(objs: Iterable[Model], selector: SelectorType) -> Iterable[Model]:
     a selector.
 
     Args:
-        obj (Model) : object to test
+        objs (Iterable[Model]) : model objects to test
         selector (JSON-like) : query selector
 
     Yields:

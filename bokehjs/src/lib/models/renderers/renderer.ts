@@ -1,11 +1,11 @@
-import type {ViewOf, View} from "core/view"
+import type {ViewOf, ChildView, View} from "core/view"
 import {StyledElement, StyledElementView} from "../ui/styled_element"
 import {build_view} from "core/build_views"
 import * as visuals from "core/visuals"
 import {RenderLevel} from "core/enums"
 import type * as p from "core/properties"
 import {isNumber} from "core/util/types"
-import type {CanvasLayer} from "core/util/canvas"
+import type {CanvasLayer, Context2d} from "core/util/canvas"
 import {assert} from "core/util/assert"
 import type {Plot, PlotView} from "../plots/plot"
 import type {CanvasView} from "../canvas/canvas"
@@ -16,8 +16,9 @@ import {Menu} from "../ui/menus/menu"
 import type {HTML} from "../dom/html"
 import {RendererGroup} from "./renderer_group"
 import {InlineStyleSheet} from "core/dom"
-import type {StyleSheetLike} from "core/dom"
-import renderer_css from "styles/renderer.css"
+import type {RenderingTarget} from "core/dom_view"
+import type {SidePanel} from "core/layout/side_panel"
+import type {Layoutable} from "core/layout"
 
 export abstract class RendererView extends StyledElementView implements visuals.Paintable {
   declare model: Renderer
@@ -25,18 +26,33 @@ export abstract class RendererView extends StyledElementView implements visuals.
 
   declare readonly parent: PlotView
 
-  readonly position = new InlineStyleSheet()
+  layout?: Layoutable
 
-  /**
-   * Define where to render this element, usually a canvas layer.
-   */
-  rendering_target(): HTMLElement {
+  protected _panel: SidePanel | null = null
+  get panel(): SidePanel | null {
+    return this._panel
+  }
+  set panel(panel: SidePanel) {
+    this._panel = panel
+  }
+
+  readonly position = new InlineStyleSheet("", "position")
+
+  override computed_stylesheets(): InlineStyleSheet[] {
+    return [...super.computed_stylesheets(), this.position]
+  }
+
+  override rendering_target(): RenderingTarget | null {
     return this.plot_view.canvas_view.underlays_el
   }
 
   protected _context_menu: ViewOf<Menu> | null = null
   get context_menu(): ViewOf<Menu> | null {
     return this._context_menu
+  }
+
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this._context_menu]
   }
 
   protected _coordinates?: CoordinateTransform
@@ -54,10 +70,6 @@ export abstract class RendererView extends StyledElementView implements visuals.
     this._custom_coordinates = custom_coordinates
   }
 
-  override stylesheets(): StyleSheetLike[] {
-    return [...super.stylesheets(), renderer_css, this.position]
-  }
-
   override initialize(): void {
     super.initialize()
     this.visuals = new visuals.Visuals(this)
@@ -69,11 +81,6 @@ export abstract class RendererView extends StyledElementView implements visuals.
     if (context_menu != null) {
       this._context_menu = await build_view(context_menu, {parent: this.plot_view})
     }
-  }
-
-  override remove(): void {
-    this._context_menu?.remove()
-    super.remove()
   }
 
   override connect_signals(): void {
@@ -167,7 +174,11 @@ export abstract class RendererView extends StyledElementView implements visuals.
     return true
   }
 
-  paint(): void {
+  get is_dual_renderer(): boolean {
+    return false
+  }
+
+  paint(ctx: Context2d): void {
     // It would be better to update geometry (the internal layout) only when
     // necessary, but conditions for that are not clear, so for now update
     // at every paint.
@@ -176,13 +187,13 @@ export abstract class RendererView extends StyledElementView implements visuals.
     this.update_position()
 
     if (this.displayed && this.is_renderable) {
-      this._paint()
+      this._paint(ctx)
     }
 
     this.mark_finished()
   }
 
-  protected abstract _paint(): void
+  protected abstract _paint(ctx: Context2d): void
 
   renderer_view<T extends Renderer>(_renderer: T): T["__view_type__"] | undefined {
     return undefined
@@ -202,19 +213,30 @@ export abstract class RendererView extends StyledElementView implements visuals.
    * Updates the position of the associated DOM element.
    */
   update_position(): void {
-    const {bbox} = this
+    const {bbox, position} = this
     if (bbox != null && bbox.is_valid) {
-      this.position.replace(`
-      :host {
-        left:   ${bbox.left}px;
-        top:    ${bbox.top}px;
-        width:  ${bbox.width}px;
-        height: ${bbox.height}px;
+      if (this.panel != null) {
+        position.replace(`
+        ${this.host_selector} {
+          position: relative;
+          width:    ${bbox.width}px;
+          height:   ${bbox.height}px;
+        }
+        `)
+      } else {
+        position.replace(`
+        ${this.host_selector} {
+          position: absolute;
+          left:     ${bbox.left}px;
+          top:      ${bbox.top}px;
+          width:    ${bbox.width}px;
+          height:   ${bbox.height}px;
+        }
+        `)
       }
-      `)
     } else {
-      this.position.replace(`
-      :host {
+      position.replace(`
+      ${this.host_selector} {
         display: none;
       }
       `)

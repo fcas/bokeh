@@ -14,8 +14,8 @@ export function resolve_line_dash(line_dash: LineDash | string | number[]): numb
   } else {
     switch (line_dash) {
       case "solid":   return []
-      case "dashed":  return [6]
-      case "dotted":  return [2, 4]
+      case "dashed":  return [3, 2]
+      case "dotted":  return [2, 1]
       case "dotdash": return [2, 4, 6, 4]
       case "dashdot": return [6, 4, 2, 4]
       default:
@@ -34,16 +34,29 @@ export class Line extends VisualProperties {
     return !(color == null || alpha == 0 || width == 0)
   }
 
-  apply(ctx: Context2d): boolean {
+  apply(ctx: Context2d, path?: Path2D): boolean {
     const {doit} = this
     if (doit) {
       this.set_value(ctx)
-      ctx.stroke()
+      if (path != null) {
+        ctx.stroke(path)
+      } else {
+        ctx.stroke()
+      }
     }
     return doit
   }
 
   declare Values: ValuesOf<mixins.Line>
+  declare ComputedValues: {
+    color:  string
+    width:  number
+    join:   LineJoin
+    cap:    LineCap
+    dash:   LineDash | number[]
+    offset: number
+  }
+
   values(): this["Values"] {
     return {
       color:  this.get_line_color(),
@@ -56,16 +69,27 @@ export class Line extends VisualProperties {
     }
   }
 
-  set_value(ctx: Context2d): void {
+  computed_values(): this["ComputedValues"] {
     const color = this.get_line_color()
     const alpha = this.get_line_alpha()
+    return {
+      color:  color2css(color, alpha),
+      width:  this.get_line_width(),
+      join:   this.get_line_join(),
+      cap:    this.get_line_cap(),
+      dash:   this.get_line_dash(),
+      offset: this.get_line_dash_offset(),
+    }
+  }
 
-    ctx.strokeStyle    = color2css(color, alpha)
-    ctx.lineWidth      = this.get_line_width()
-    ctx.lineJoin       = this.get_line_join()
-    ctx.lineCap        = this.get_line_cap()
-    ctx.setLineDash(resolve_line_dash(this.get_line_dash()))
-    ctx.lineDashOffset = this.get_line_dash_offset()
+  set_value(ctx: Context2d): void {
+    const {color, width, join, cap, dash, offset} = this.computed_values()
+    ctx.strokeStyle    = color
+    ctx.lineWidth      = width
+    ctx.lineJoin       = join
+    ctx.lineCap        = cap
+    ctx.setLineDash(resolve_line_dash(dash))
+    ctx.lineDashOffset = offset
   }
 
   get_line_color(): Color | null {
@@ -151,11 +175,15 @@ export class LineScalar extends VisualUniforms {
     return !(color == 0 || alpha == 0 || width == 0)
   }
 
-  apply(ctx: Context2d): boolean {
+  apply(ctx: Context2d, path?: Path2D): boolean {
     const {doit} = this
     if (doit) {
       this.set_value(ctx)
-      ctx.stroke()
+      if (path != null) {
+        ctx.stroke(path)
+      } else {
+        ctx.stroke()
+      }
     }
     return doit
   }
@@ -224,11 +252,15 @@ export class LineVector extends VisualUniforms {
     return true
   }
 
-  apply(ctx: Context2d, i: number): boolean {
+  apply(ctx: Context2d, i: number, path?: Path2D): boolean {
     const doit = this.v_doit(i)
     if (doit) {
       this.set_vectorize(ctx, i)
-      ctx.stroke()
+      if (path != null) {
+        ctx.stroke(path)
+      } else {
+        ctx.stroke()
+      }
     }
     return doit
   }

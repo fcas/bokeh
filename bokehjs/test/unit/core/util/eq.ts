@@ -1,8 +1,8 @@
-import {expect} from "assertions"
+import {expect} from "#framework/assertions"
 
 import type {Comparator} from "@bokehjs/core/util/eq"
 import type {Equatable} from "@bokehjs/core/util/eq"
-import {is_equal, equals} from "@bokehjs/core/util/eq"
+import {is_equal, is_structurally_equal, equals} from "@bokehjs/core/util/eq"
 import {HasProps} from "@bokehjs/core/has_props"
 import type * as p from "@bokehjs/core/properties"
 
@@ -34,8 +34,8 @@ describe("core/util/eq module", () => {
   describe("implements is_equal() function", () => {
     it("that supports number type", () => {
       expect(is_equal(0, 0)).to.be.true
-      expect(is_equal(0, -0)).to.be.false
-      expect(is_equal(-0, 0)).to.be.false
+      expect(is_equal(0, -0)).to.be.true
+      expect(is_equal(-0, 0)).to.be.true
       expect(is_equal(-0, -0)).to.be.true
       expect(is_equal(0, 1)).to.be.false
       expect(is_equal(1, 0)).to.be.false
@@ -90,6 +90,33 @@ describe("core/util/eq module", () => {
       expect(is_equal([], new Int32Array())).to.be.false
       expect(is_equal([], new Float32Array())).to.be.false
       expect(is_equal([], new Float64Array())).to.be.false
+    })
+
+    it("that supports ArrayBufferLike", () => {
+      const b0 = new Uint8Array([0, 1, 2]).buffer
+      const b1 = new Uint8Array([0, 1, 2]).buffer
+      const b2 = new Uint8Array([0, 1, 3]).buffer
+      const b3 = new Uint8Array([0, 1, 2, 4]).buffer
+
+      expect(is_equal(b0, b1)).to.be.true
+      expect(is_equal(b0, b2)).to.be.false
+      expect(is_equal(b0, b3)).to.be.false
+
+      if (typeof SharedArrayBuffer !== "undefined") {
+        const sb0 = new SharedArrayBuffer(3)
+        const sb1 = new SharedArrayBuffer(3)
+        const sb2 = new SharedArrayBuffer(3)
+        const sb3 = new SharedArrayBuffer(4)
+
+        new Uint8Array(sb0).set([0, 1, 2])
+        new Uint8Array(sb1).set([0, 1, 2])
+        new Uint8Array(sb2).set([0, 1, 3])
+        new Uint8Array(sb3).set([0, 1, 2, 3])
+
+        expect(is_equal(sb0, sb1)).to.be.true
+        expect(is_equal(sb0, sb2)).to.be.false
+        expect(is_equal(sb0, sb3)).to.be.false
+      }
     })
 
     it("that supports Map<K, V>", () => {
@@ -209,22 +236,25 @@ describe("core/util/eq module", () => {
     const div2 = document.createElement("div")
     div2.appendChild(div1)
 
-    expect(is_equal(text0, text0)).to.be.true
-    expect(is_equal(text0, text1)).to.be.true
-    expect(is_equal(text0, text2)).to.be.false
-    expect(is_equal(text0, span0)).to.be.false
-    expect(is_equal(text0, div0)).to.be.false
-    expect(is_equal(text0, div1)).to.be.false
-    expect(is_equal(text0, div2)).to.be.false
+    expect(is_structurally_equal(text0, text0)).to.be.true
+    expect(is_structurally_equal(text0, text1)).to.be.true
+    expect(is_structurally_equal(text0, text2)).to.be.false
+    expect(is_structurally_equal(text0, span0)).to.be.false
+    expect(is_structurally_equal(text0, div0)).to.be.false
+    expect(is_structurally_equal(text0, div1)).to.be.false
+    expect(is_structurally_equal(text0, div2)).to.be.false
 
-    expect(is_equal(span0, div0)).to.be.false
+    expect(is_structurally_equal(span0, div0)).to.be.false
+
+    expect(is_structurally_equal(div0, div0)).to.be.true
+    expect(is_structurally_equal(div0, div1)).to.be.false
+    expect(is_structurally_equal(div0, div2)).to.be.false
+    expect(is_structurally_equal(div1, div2)).to.be.false
+    expect(is_structurally_equal(div1, div1)).to.be.true
+    expect(is_structurally_equal(div2, div2)).to.be.true
 
     expect(is_equal(div0, div0)).to.be.true
     expect(is_equal(div0, div1)).to.be.false
-    expect(is_equal(div0, div2)).to.be.false
-    expect(is_equal(div1, div2)).to.be.false
-    expect(is_equal(div1, div1)).to.be.true
-    expect(is_equal(div2, div2)).to.be.true
   })
 
   it("that supports HasProps instances", () => {

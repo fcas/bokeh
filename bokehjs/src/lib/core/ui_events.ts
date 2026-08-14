@@ -1,5 +1,5 @@
 import {UIGestures} from "./ui_gestures"
-import {Signal} from "./signaling"
+import {Signal, Signal0} from "./signaling"
 import type {Keys} from "./dom"
 import {offset_bbox} from "./dom"
 import * as events from "./bokeh_events"
@@ -10,7 +10,6 @@ import {isObject, isBoolean} from "./util/types"
 import type {PlotView} from "../models/plots/plot"
 import type {Tool, ToolView} from "../models/tools/tool"
 import type {ToolLike} from "../models/tools/tool_proxy"
-import {ToolProxy} from "../models/tools/tool_proxy"
 import type {RendererView} from "../models/renderers/renderer"
 import type {CanvasView} from "../models/canvas/canvas"
 
@@ -122,19 +121,22 @@ export class UIEventBus {
   readonly rotate:       UISignal<RotateEvent> = new Signal(this, "rotate")
   readonly rotate_end:   UISignal<RotateEvent> = new Signal(this, "rotate:end")
 
-  readonly tap:          UISignal<TapEvent>     = new Signal(this, "tap")
-  readonly doubletap:    UISignal<TapEvent>     = new Signal(this, "doubletap")
-  readonly press:        UISignal<TapEvent>     = new Signal(this, "press")
-  readonly pressup:      UISignal<TapEvent>     = new Signal(this, "pressup")
+  readonly tap:          UISignal<TapEvent>    = new Signal(this, "tap")
+  readonly doubletap:    UISignal<TapEvent>    = new Signal(this, "doubletap")
+  readonly press:        UISignal<TapEvent>    = new Signal(this, "press")
+  readonly pressup:      UISignal<TapEvent>    = new Signal(this, "pressup")
 
-  readonly move_enter:   UISignal<MoveEvent>    = new Signal(this, "move:enter")
-  readonly move:         UISignal<MoveEvent>    = new Signal(this, "move")
-  readonly move_exit:    UISignal<MoveEvent>    = new Signal(this, "move:exit")
+  readonly move_enter:   UISignal<MoveEvent>   = new Signal(this, "move:enter")
+  readonly move:         UISignal<MoveEvent>   = new Signal(this, "move")
+  readonly move_exit:    UISignal<MoveEvent>   = new Signal(this, "move:exit")
 
-  readonly scroll:       UISignal<ScrollEvent>  = new Signal(this, "scroll")
+  readonly scroll:       UISignal<ScrollEvent> = new Signal(this, "scroll")
 
-  readonly keydown:      UISignal<KeyEvent>     = new Signal(this, "keydown")
-  readonly keyup:        UISignal<KeyEvent>     = new Signal(this, "keyup")
+  readonly keydown:      UISignal<KeyEvent>    = new Signal(this, "keydown")
+  readonly keyup:        UISignal<KeyEvent>    = new Signal(this, "keyup")
+
+  readonly focus:        Signal0<this>         = new Signal0(this, "focus")
+  readonly blur:         Signal0<this>         = new Signal0(this, "blur")
 
   readonly hit_area: HTMLElement
   readonly ui_gestures: UIGestures
@@ -163,20 +165,26 @@ export class UIEventBus {
     this.on_rotate = this.on_rotate.bind(this)
     this.on_rotate_end = this.on_rotate_end.bind(this)
 
-    this.ui_gestures = new UIGestures(this.hit_area, this, {must_be_target: true})
-    this.ui_gestures.connect_signals()
-
     this.on_context_menu = this.on_context_menu.bind(this)
     this.on_mouse_wheel = this.on_mouse_wheel.bind(this)
 
     this.on_key_down = this.on_key_down.bind(this)
     this.on_key_up = this.on_key_up.bind(this)
 
+    this.on_focus = this.on_focus.bind(this)
+    this.on_blur = this.on_blur.bind(this)
+
+    this.ui_gestures = new UIGestures(this.hit_area, this, {must_be_target: true})
+    this.ui_gestures.connect_signals()
+
     this.hit_area.addEventListener("contextmenu", this.on_context_menu)
     this.hit_area.addEventListener("wheel", this.on_mouse_wheel)
 
-    document.addEventListener("keydown", this.on_key_down)
-    document.addEventListener("keyup", this.on_key_up)
+    this.hit_area.addEventListener("focus", this.on_focus)
+    this.hit_area.addEventListener("blur", this.on_blur)
+
+    this.hit_area.addEventListener("keydown", this.on_key_down)
+    this.hit_area.addEventListener("keyup", this.on_key_up)
   }
 
   remove(): void {
@@ -201,13 +209,14 @@ export class UIEventBus {
     }
   }
 
-  hit_test_renderers(plot_view: PlotView, sx: number, sy: number): RendererView | null {
-    for (const view of reversed(plot_view.computed_renderer_views)) {
+  hit_test_renderers(plot_view: PlotView, sx: number, sy: number): RendererView[] {
+    const collected = []
+    for (const view of reversed(plot_view.all_renderer_views)) {
       if (view.interactive_hit?.(sx, sy) ?? false) {
-        return view
+        collected.push(view)
       }
     }
-    return null
+    return collected
   }
 
   set_cursor(cursor?: string | null): void {
@@ -330,10 +339,12 @@ export class UIEventBus {
     }
   }
 
+  private _current_interactive_tool_view: ToolView | null = null
+
   private _current_pan_view: (RendererView & Pannable) | null = null
   private _current_pinch_view: (RendererView & Pinchable) | null = null
   private _current_rotate_view: (RendererView & Rotatable) | null = null
-  private _current_move_view: (RendererView & Moveable) | null = null
+  private _current_move_views: (RendererView & Moveable)[] = []
 
   __trigger<E extends UIEvent>(plot_view: PlotView, signal: UISignal<E>, e: E, srcEvent: Event): void {
     const gestures = plot_view.model.toolbar.gestures
@@ -341,13 +352,17 @@ export class UIEventBus {
 
     const event_type = signal.name
     const base_type = event_type.split(":")[0] as BaseType
-    const view = this.hit_test_renderers(plot_view, e.sx, e.sy)
+    const views = this.hit_test_renderers(plot_view, e.sx, e.sy)
 
     if (base_type == "pan") {
+      const event = e as PanEvent
       if (this._current_pan_view == null) {
-        if (view != null) {
-          if (event_type == "pan:start" && is_Pannable(view)) {
-            if (view.on_pan_start(e as PanEvent)) {
+        if (event_type == "pan:start") {
+          for (const view of views) {
+            if (!is_Pannable(view)) {
+              continue
+            }
+            if (view.on_pan_start(event)) {
               this._current_pan_view = view
               srcEvent.preventDefault()
               return
@@ -356,19 +371,24 @@ export class UIEventBus {
         }
       } else {
         if (event_type == "pan") {
-          this._current_pan_view.on_pan(e as PanEvent)
+          this._current_pan_view.on_pan(event)
         } else if (event_type == "pan:end") {
-          this._current_pan_view.on_pan_end(e as PanEvent)
+          this._current_pan_view.on_pan_end(event)
+          this.set_cursor(this._current_pan_view.cursor(event.sx, event.sy))
           this._current_pan_view = null
         }
         srcEvent.preventDefault()
         return
       }
     } else if (base_type == "pinch") {
+      const event = e as PinchEvent
       if (this._current_pinch_view == null) {
-        if (view != null) {
-          if (event_type == "pinch:start" && is_Pinchable(view)) {
-            if (view.on_pinch_start(e as PinchEvent)) {
+        if (event_type == "pinch:start") {
+          for (const view of views) {
+            if (!is_Pinchable(view)) {
+              continue
+            }
+            if (view.on_pinch_start(event)) {
               this._current_pinch_view = view
               srcEvent.preventDefault()
               return
@@ -377,19 +397,23 @@ export class UIEventBus {
         }
       } else {
         if (event_type == "pinch") {
-          this._current_pinch_view.on_pinch(e as PinchEvent)
+          this._current_pinch_view.on_pinch(event)
         } else if (event_type == "pinch:end") {
-          this._current_pinch_view.on_pinch_end(e as PinchEvent)
+          this._current_pinch_view.on_pinch_end(event)
           this._current_pinch_view = null
         }
         srcEvent.preventDefault()
         return
       }
     } else if (base_type == "rotate") {
+      const event = e as RotateEvent
       if (this._current_rotate_view == null) {
-        if (view != null) {
-          if (event_type == "rotate:start" && is_Rotatable(view)) {
-            if (view.on_rotate_start(e as RotateEvent)) {
+        if (event_type == "rotate:start") {
+          for (const view of views) {
+            if (!is_Rotatable(view)) {
+              continue
+            }
+            if (view.on_rotate_start(event)) {
               this._current_rotate_view = view
               srcEvent.preventDefault()
               return
@@ -398,37 +422,53 @@ export class UIEventBus {
         }
       } else {
         if (event_type == "rotate") {
-          this._current_rotate_view.on_rotate(e as RotateEvent)
+          this._current_rotate_view.on_rotate(event)
         } else if (event_type == "rotate:end") {
-          this._current_rotate_view.on_rotate_end(e as RotateEvent)
+          this._current_rotate_view.on_rotate_end(event)
           this._current_rotate_view = null
         }
         srcEvent.preventDefault()
         return
       }
     } else if (base_type == "move") {
-      if (this._current_move_view == view) {
-        this._current_move_view?.on_move(e as MoveEvent)
-      } else {
-        this._current_move_view?.on_leave(e as MoveEvent)
-        this._current_move_view = null
+      const event = e as MoveEvent
+      const new_views = new Set(views)
 
-        if (view != null && is_Moveable(view)) {
+      const current_views = new Set(this._current_move_views)
+      this._current_move_views = []
+
+      for (const view of current_views) {
+        if (!new_views.has(view)) {
+          current_views.delete(view)
+          view.on_leave(event)
+        }
+      }
+
+      for (const view of views) {
+        if (!is_Moveable(view)) {
+          continue
+        }
+
+        if (!current_views.has(view)) {
           if (view.on_enter(e as MoveEvent)) {
-            this._current_move_view = view
+            this._current_move_views.push(view)
           }
+        } else {
+          this._current_move_views.push(view)
+          view.on_move(event)
         }
       }
     }
 
     function get_tool_view(tool_like: ToolLike<Tool> | null): ToolView | null {
       if (tool_like != null) {
-        const tool = tool_like instanceof ToolProxy ? tool_like.tools[0] : tool_like
-        return plot_view.tool_views.get(tool) ?? null
+        return plot_view.tool_views.get(tool_like.underlying) ?? null
       } else {
         return null
       }
     }
+
+    const top_view = views.at(0)
 
     switch (base_type) {
       case "move": {
@@ -441,11 +481,12 @@ export class UIEventBus {
 
         const cursor = (() => {
           const current_view =
+            this._current_interactive_tool_view ??
             this._current_pan_view ??
             this._current_pinch_view ??
             this._current_rotate_view ??
-            this._current_move_view ??
-            view ??
+            this._current_move_views.at(0) ??
+            top_view ??
             get_tool_view(active_gesture)
 
           if (current_view != null) {
@@ -464,11 +505,6 @@ export class UIEventBus {
         })()
         this.set_cursor(cursor)
 
-        if (view != null && !view.model.propagate_hover && !is_empty(active_inspectors)) {
-          // override event_type to cause inspectors to clear overlays
-          signal = this.move_exit as any // XXX
-        }
-
         active_inspectors.map((inspector) => this.trigger(signal, e, inspector))
         break
       }
@@ -478,7 +514,7 @@ export class UIEventBus {
           return // don't trigger bokeh events
         }
 
-        view?.on_hit?.(e.sx, e.sy)
+        top_view?.on_hit?.(e.sx, e.sy)
 
         if (this.hit_test_frame(plot_view, e.sx, e.sy)) {
           const active_gesture = gestures.tap.active
@@ -528,21 +564,27 @@ export class UIEventBus {
       }
       case "pan": {
         const active_gesture = gestures.pan.active
-        if (active_gesture != null) {
+        const active_pan_view = get_tool_view(active_gesture)
+        if (active_pan_view != null) {
+          switch (event_type) {
+            case "pan:start": {
+              this._current_interactive_tool_view = active_pan_view
+              break
+            }
+            case "pan:end": {
+              this._current_interactive_tool_view = null
+              break
+            }
+          }
+
           if (this.trigger(signal, e, active_gesture)) {
             srcEvent.preventDefault()
             srcEvent.stopPropagation()
           }
-        }
 
-        /* TODO this requires knowledge of the current interactive
-                tool (similar to _current_pan_view, etc.)
-        const active_pan_view = get_tool_view(active_gesture)
-        if (active_pan_view != null) {
           const cursor = active_pan_view.cursor(e.sx, e.sy)
           this.set_cursor(cursor)
         }
-        */
         break
       }
       default: {
@@ -604,7 +646,9 @@ export class UIEventBus {
     } else {
       let result = false
       for (const tool of this._tools.keys()) {
-        result ||= emit(tool)
+        // don't conflate these lines because of short circuiting nature of ||= operator
+        const emitted = emit(tool)
+        result ||= emitted
       }
       return result
     }
@@ -759,5 +803,13 @@ export class UIEventBus {
   on_key_up(event: KeyboardEvent): void {
     // NOTE: keyup event triggered unconditionally
     this.trigger(this.keyup, this._key_event(event))
+  }
+
+  on_focus(): void {
+    this.focus.emit()
+  }
+
+  on_blur(): void {
+    this.blur.emit()
   }
 }

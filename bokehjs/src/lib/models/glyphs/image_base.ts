@@ -16,6 +16,7 @@ import {assert} from "core/util/assert"
 import type {XY} from "core/util/bbox"
 import {Anchor} from "../common/kinds"
 import {anchor} from "../common/resolve"
+import {LogScale} from "../scales/log_scale"
 
 type ImageData = HTMLCanvasElement | null
 
@@ -24,9 +25,6 @@ export interface ImageBaseView extends ImageBase.Data {}
 export abstract class ImageBaseView extends XYGlyphView {
   declare model: ImageBase
   declare visuals: ImageBase.Visuals
-
-  protected _width: Uint32Array
-  protected _height: Uint32Array
 
   override connect_signals(): void {
     super.connect_signals()
@@ -107,31 +105,41 @@ export abstract class ImageBaseView extends XYGlyphView {
 
   protected abstract _flat_img_to_buf8(img: NDArrayType<number>): Uint8ClampedArray
 
+  protected get _can_inherit_image_data(): boolean {
+    return this.inherited_image
+  }
+
   protected override _set_data(indices: number[] | null): void {
     const n = this.data_size
 
-    if (this.image_data == null || this.image_data.length != n) {
-      this.image_data = new Array(n).fill(null)
-      this._width = new Uint32Array(n)
-      this._height = new Uint32Array(n)
-    }
-
-    const {image_dimension} = this
-
-    for (let i = 0; i < n; i++) {
-      if (indices != null && !indices.includes(i)) {
-        continue
+    if (!this._can_inherit_image_data) {
+      if (typeof this.image_data === "undefined" || this.image_data.length != n) {
+        this._define_attr<ImageBase.Data>("image_data", new Array(n).fill(null))
+        this._define_attr<ImageBase.Data>("image_width", new Uint32Array(n))
+        this._define_attr<ImageBase.Data>("image_height", new Uint32Array(n))
       }
 
-      const img = this.image.get(i)
-      assert(img.dimension == image_dimension, `expected a ${image_dimension}D array, not ${img.dimension}D`)
+      const {image_dimension} = this
 
-      const [width, height] = img.shape
-      this._height[i] = width
-      this._width[i] = height
+      for (let i = 0; i < n; i++) {
+        if (indices != null && !indices.includes(i)) {
+          continue
+        }
 
-      const buf8 = this._flat_img_to_buf8(img)
-      this._set_image_data_from_buffer(i, buf8)
+        const img = this.image.get(i)
+        assert(img.dimension == image_dimension, `expected a ${image_dimension}D array, not ${img.dimension}D`)
+
+        const [height, width] = img.shape
+        this.image_width[i] = width
+        this.image_height[i] = height
+
+        const buf8 = this._flat_img_to_buf8(img)
+        this._set_image_data_from_buffer(i, buf8)
+      }
+    } else {
+      this._inherit_attr<ImageBase.Data>("image_data")
+      this._inherit_attr<ImageBase.Data>("image_width")
+      this._inherit_attr<ImageBase.Data>("image_height")
     }
   }
 
@@ -164,22 +172,25 @@ export abstract class ImageBaseView extends XYGlyphView {
   protected _get_or_create_canvas(i: number): HTMLCanvasElement {
     assert(this.image_data != null)
     const image_data_i = this.image_data[i]
-    if (image_data_i != null && image_data_i.width  == this._width[i]
-                             && image_data_i.height == this._height[i]) {
+    if (image_data_i != null && image_data_i.width  == this.image_width[i]
+                             && image_data_i.height == this.image_height[i]) {
       return image_data_i
     } else {
       const canvas = document.createElement("canvas")
-      canvas.width = this._width[i]
-      canvas.height = this._height[i]
+      canvas.width = this.image_width[i]
+      canvas.height = this.image_height[i]
       return canvas
     }
   }
 
   protected _set_image_data_from_buffer(i: number, buf8: Uint8ClampedArray): void {
     assert(this.image_data != null)
+    // This creates a software 2D canvas, which is good for frequent getImageData() and
+    // putImageData(), but not for general rendering due to lack of hardware acceleration.
     const canvas = this._get_or_create_canvas(i)
-    const ctx = canvas.getContext("2d")!
-    const image_data = ctx.getImageData(0, 0, this._width[i], this._height[i])
+    const ctx = canvas.getContext("2d", {willReadFrequently: true})
+    assert(ctx != null)
+    const image_data = ctx.getImageData(0, 0, this.image_width[i], this.image_height[i])
     image_data.data.set(buf8)
     ctx.putImageData(image_data, 0, 0)
     this.image_data[i] = canvas
@@ -213,13 +224,32 @@ export abstract class ImageBaseView extends XYGlyphView {
 
   protected _image_index(index: number, x: number, y: number): ImageIndex {
     const [l, r, t, b] = this._lrtb(index)
-    const width = this._width[index]
-    const height = this._height[index]
-    const dx = (r - l) / width
-    const dy = (t - b) / height
-    const i = Math.floor((x - l) / dx)
-    const j = Math.floor((y - b) / dy)
-    return {index, i, j, flat_index: j*width + i}
+    const nx = this.image_width[index]
+    const ny = this.image_height[index]
+
+    // The handling of log scales here assumes that users themselves have
+    // generated images that are "pre-transformed", e.g. an np.meshgrid where
+    // np.logspace was used for one or both inputs. Bokeh images always assume
+    // square pixels and do not do any sort of transformation on the canvas
+
+    const dx = (() => {
+      if (this.renderer.xscale instanceof LogScale) {
+        return Math.log(x/l) / Math.log(r/l)
+      }
+      return (x-l) / (r-l)
+    })()
+
+    const dy = (() => {
+      if (this.renderer.yscale instanceof LogScale) {
+        return Math.log(y/b) / Math.log(t/b)
+      }
+      return (y-b) / (t-b)
+    })()
+
+    const i = Math.floor(dx * nx)
+    const j = Math.floor(dy * ny)
+
+    return {index, i, j, flat_index: j*nx + i}
   }
 
   override _hit_point(geometry: PointGeometry): Selection {
@@ -260,7 +290,14 @@ export namespace ImageBase {
   export type Visuals = XYGlyph.Visuals & {image: visuals.ImageVector}
 
   export type Data = p.GlyphDataOf<Props> & {
-    image_data: Arrayable<ImageData> | null
+    image_data: Arrayable<ImageData> | undefined
+    inherited_image_data: boolean
+
+    image_width: Uint32Array
+    inherited_image_width: boolean
+
+    image_height: Uint32Array
+    inherited_image_height: boolean
   }
 }
 

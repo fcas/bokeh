@@ -4,6 +4,32 @@ import {assert, assert_debug} from "./assert"
 
 const {floor} = Math
 
+export function minmax(array: Arrayable<number>): [number, number] {
+  let min = +Infinity
+  let max = -Infinity
+  const {length} = array
+  for (let i = 0; i < length; i++) {
+    const value = array[i]
+    if (value < min) {
+      min = value
+    }
+    if (value > max) {
+      max = value
+    }
+  }
+  return [min, max]
+}
+
+export function min(array: Arrayable<number>): number {
+  const [min] = minmax(array)
+  return min
+}
+
+export function max(array: Arrayable<number>): number {
+  const [, max] = minmax(array)
+  return max
+}
+
 export function is_empty(array: Arrayable): boolean {
   return array.length == 0
 }
@@ -27,6 +53,9 @@ export function is_sorted<T>(array: Arrayable<T>): boolean {
   return true
 }
 
+export function copy<T>(array: T[]): T[]
+export function copy<T>(array: Arrayable<T>): Arrayable<T>
+
 export function copy<T>(array: Arrayable<T>): Arrayable<T> {
   if (Array.isArray(array)) {
     return array.slice()
@@ -35,7 +64,20 @@ export function copy<T>(array: Arrayable<T>): Arrayable<T> {
   }
 }
 
+export function splice<T>(array: T[], start: number, k?: number, ...items: T[]): T[]
+export function splice<T>(array: Arrayable<T>, start: number, k?: number, ...items: T[]): Arrayable<T>
+
 export function splice<T>(array: Arrayable<T>, start: number, k?: number, ...items: T[]): Arrayable<T> {
+  if (Array.isArray(array)) {
+    const result = copy(array)
+    if (k === undefined) {
+      result.splice(start)
+    } else {
+      result.splice(start, k, ...items)
+    }
+    return result
+  }
+
   const len = array.length
 
   if (start < 0) {
@@ -74,17 +116,29 @@ export function splice<T>(array: Arrayable<T>, start: number, k?: number, ...ite
   return result
 }
 
+export function head<T>(array: T[], n: number): T[]
+export function head<T>(array: Arrayable<T>, n: number): Arrayable<T>
+
 export function head<T>(array: Arrayable<T>, n: number): Arrayable<T> {
   return splice(array, n, array.length - n)
 }
+
+export function insert<T>(array: T[], item: T, i: number): T[]
+export function insert<T>(array: Arrayable<T>, item: T, i: number): Arrayable<T>
 
 export function insert<T>(array: Arrayable<T>, item: T, i: number): Arrayable<T> {
   return splice(array, i, 0, item)
 }
 
+export function append<T>(array: T[], item: T): T[]
+export function append<T>(array: Arrayable<T>, item: T): Arrayable<T>
+
 export function append<T>(array: Arrayable<T>, item: T): Arrayable<T> {
   return splice(array, array.length, 0, item)
 }
+
+export function prepend<T>(array: T[], item: T): T[]
+export function prepend<T>(array: Arrayable<T>, item: T): Arrayable<T>
 
 export function prepend<T>(array: Arrayable<T>, item: T): Arrayable<T> {
   return splice(array, 0, 0, item)
@@ -204,48 +258,6 @@ export function sort_by<T>(array: Arrayable<T>, key: (item: T) => number): Array
     return left.index - right.index
   })
   return map(array, (_, i) => array[tmp[i].index])
-}
-
-export function min(iterable: Iterable<number>): number {
-  let result = Infinity
-
-  for (const value of iterable) {
-    if (!isNaN(value) && value < result) {
-      result = value
-    }
-  }
-
-  return result
-}
-
-export function max(iterable: Iterable<number>): number {
-  let result = -Infinity
-
-  for (const value of iterable) {
-    if (!isNaN(value) && value > result) {
-      result = value
-    }
-  }
-
-  return result
-}
-
-export function minmax(iterable: Iterable<number>): [number, number] {
-  let min = +Infinity
-  let max = -Infinity
-
-  for (const value of iterable) {
-    if (!isNaN(value)) {
-      if (value < min) {
-        min = value
-      }
-      if (value > max) {
-        max = value
-      }
-    }
-  }
-
-  return [min, max]
 }
 
 export function minmax2(arr: Arrayable<number>, brr: Arrayable<number>): [number, number, number, number] {

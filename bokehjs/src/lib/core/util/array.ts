@@ -3,19 +3,21 @@
 //     (c) 2009-2015 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
 //     Underscore may be freely distributed under the MIT license.
 
+import {logger} from "../logging"
 import type {Arrayable} from "../types"
 import {randomIn} from "./math"
 import {assert} from "./assert"
 import {isInteger} from "./types"
 import {min, min_by, max_by, includes, filter} from "./arrayable"
+import * as iter from "./iterator"
 
 export {
   map, reduce, min, min_by, max, max_by, sum, cumsum, every, some,
   find, find_last, find_index, find_last_index, sorted_index,
-  is_empty, includes, contains, sort_by,
+  is_empty, includes, contains, sort_by, subselect,
 } from "./arrayable"
 
-const slice = Array.prototype.slice
+const {slice} = Array.prototype
 
 export function head<T>(array: T[]): T {
   if (array.length != 0) {
@@ -105,13 +107,22 @@ export function range(start: number, stop?: number, step: number = 1): number[] 
 
   const delta = start <= stop ? step : -step
   const length = max(ceil(abs(stop - start) / step), 0)
-  const range = new Array(length)
-
-  for (let i = 0; i < length; i++, start += delta) {
-    range[i] = start
+  try {
+    // Creating an array too large for V8's allowed array lengths raises an error
+    const range = new Array(length)
+    for (let i = 0; i < length; i++, start += delta) {
+      range[i] = start
+    }
+    return range
+  } catch (error) {
+    if (error instanceof RangeError) {
+      logger.error(
+        "Caught a structural array size limit error, not an JS engine-wide out-of-memory error:",
+        error.message,
+      )
+    }
+    throw (error)
   }
-
-  return range
 }
 
 export function linspace(start: number, stop: number, num: number = 100): number[] {
@@ -119,7 +130,18 @@ export function linspace(start: number, stop: number, num: number = 100): number
   const array = new Array(num)
 
   for (let i = 0; i < num; i++) {
-    array[i] = start + step*i
+    array[i] = start + i*step
+  }
+
+  return array
+}
+
+export function logspace(start: number, stop: number, num: number = 100, base: number = 10): number[] {
+  const step = num == 1 ? 0 : (stop - start) / (num - 1)
+  const array = new Array(num)
+
+  for (let i = 0; i < num; i++) {
+    array[i] = base**(start + i*step)
   }
 
   return array
@@ -148,6 +170,15 @@ export function argmin(array: number[]): number {
 
 export function argmax(array: number[]): number {
   return max_by(range(array.length), (i) => array[i])
+}
+
+/**
+ * Return the permutation indices for sorting an array.
+ */
+export function argsort(array: number[]): number[] {
+  const indices = Array.from(array.keys())
+  indices.sort((a, b) => array[a] - array[b])
+  return indices
 }
 
 export function uniq<T>(array: Arrayable<T>): T[] {
@@ -330,4 +361,8 @@ export function resize<T>(array: T[], new_length: number, fill_value?: T): T[] {
     }
     return array.concat(suffix)
   }
+}
+
+export function interleave<T>(seq: Iterable<T>, separator: () => T): T[] {
+  return [...iter.interleave(seq, separator)]
 }

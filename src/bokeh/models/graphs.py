@@ -10,6 +10,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -17,18 +19,15 @@ log = logging.getLogger(__name__)
 # Imports
 #-----------------------------------------------------------------------------
 
+# Standard library imports
+from typing import Any
+
 # Bokeh imports
 from ..core.has_props import abstract
-from ..core.properties import (
-    Dict,
-    Either,
-    Float,
-    Instance,
-    Int,
-    Len,
-    Seq,
-    String,
-)
+from ..core.property.container import Dict, Len, Seq
+from ..core.property.either import Either
+from ..core.property.instance import Instance
+from ..core.property.primitive import Float, Int, String
 from ..model import Model
 from .expressions import CoordinateTransform
 
@@ -65,7 +64,7 @@ class LayoutProvider(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     @property
@@ -82,7 +81,7 @@ class StaticLayoutProvider(LayoutProvider):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     graph_layout = Dict(Either(Int, String), Len(Seq(Float), 2), default={}, help="""
@@ -103,24 +102,24 @@ class StaticLayoutProvider(LayoutProvider):
 @abstract
 class GraphCoordinates(CoordinateTransform):
     '''
-    Abstract class for coordinate transform expression obtained from ``LayoutProvider``
+    Abstract class for coordinate transform expression obtained from ``LayoutProvider``.
 
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     layout = Instance(LayoutProvider)
 
 class NodeCoordinates(GraphCoordinates):
     '''
-    Node coordinate expression obtained from ``LayoutProvider``
+    Node coordinate expression obtained from ``LayoutProvider``.
 
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -131,7 +130,7 @@ class EdgeCoordinates(GraphCoordinates):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -142,7 +141,7 @@ class GraphHitTestPolicy(Model):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -154,7 +153,7 @@ class EdgesOnly(GraphHitTestPolicy):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -166,7 +165,7 @@ class NodesOnly(GraphHitTestPolicy):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -180,7 +179,7 @@ class NodesAndLinkedEdges(GraphHitTestPolicy):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -194,7 +193,7 @@ class EdgesAndLinkedNodes(GraphHitTestPolicy):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 
@@ -209,7 +208,7 @@ class NodesAndAdjacentNodes(GraphHitTestPolicy):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
 

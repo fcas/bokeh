@@ -1,5 +1,5 @@
 import * as sinon from "sinon"
-import {expect, expect_instanceof} from "assertions"
+import {expect, expect_instanceof} from "#framework/assertions"
 
 import {CustomJS} from "@bokehjs/models/callbacks/customjs"
 import {Range1d} from "@bokehjs/models/ranges/range1d"
@@ -95,7 +95,7 @@ describe("CustomJS", () => {
       expect(module).to.be.equal(true)
     })
 
-    it("should support ES module bad deafult export", async () => {
+    it("should support ES module bad default export", async () => {
       const cb = new CustomJS({code: "const some = 10;\nexport default some"})
       const logger_spy = sinon.spy(logger, "warn")
       try {

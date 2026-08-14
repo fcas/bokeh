@@ -1,8 +1,8 @@
 import {UIElement, UIElementView} from "./ui_element"
 import {DOMNode} from "../dom/dom_node"
 import {HTML} from "../dom/html"
-import type {ViewStorage, BuildResult, IterViews, ViewOf} from "core/build_views"
-import {build_views, remove_views} from "core/build_views"
+import type {ViewStorage, BuildResult, ChildView, ViewOf} from "core/build_views"
+import {build_views} from "core/build_views"
 import type * as p from "core/properties"
 import {Ref, Or} from "core/kinds"
 
@@ -18,12 +18,11 @@ export class PaneView extends UIElementView {
     return this.model.elements
   }
   get element_views(): ViewOf<ElementLike>[] {
-    return this.elements.map((element) => this._element_views.get(element)!)
+    return this.elements.map((element) => this._element_views.get(element)).filter((view) => view != null)
   }
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield* this.element_views
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), ...this.element_views]
   }
 
   override async lazy_initialize(): Promise<void> {
@@ -37,30 +36,22 @@ export class PaneView extends UIElementView {
 
   protected async _update_elements(): Promise<void> {
     const {created} = await this._build_elements()
-    const created_elements = new Set(created)
+    const created_views = new Set(created)
 
-    // First remove and then either reattach existing elements or render and
-    // attach new elements, so that the order of children is consistent, while
-    // avoiding expensive re-rendering of existing views.
-    for (const element_view of this.element_views) {
-      element_view.el.remove()
-    }
-
-    for (const element_view of this.element_views) {
-      const is_new = created_elements.has(element_view)
-
+    // Since appending to a DOM node will move the node to the end if it has
+    // already been added appending all the children in order will result in
+    // correct ordering.
+    for (const view of this.element_views) {
+      const is_new = created_views.has(view)
+      const target = view.rendering_target() ?? this.self_target
       if (is_new) {
-        element_view.render_to(this.shadow_el)
+        view.render_to(target)
       } else {
-        this.shadow_el.append(element_view.el)
+        target.append(view.el)
       }
     }
-    this.r_after_render()
-  }
 
-  override remove(): void {
-    remove_views(this._element_views)
-    super.remove()
+    this.r_after_render()
   }
 
   override connect_signals(): void {
@@ -75,7 +66,8 @@ export class PaneView extends UIElementView {
     super.render()
 
     for (const element_view of this.element_views) {
-      element_view.render_to(this.shadow_el)
+      const target = element_view.rendering_target() ?? this.self_target
+      element_view.render_to(target)
     }
   }
 

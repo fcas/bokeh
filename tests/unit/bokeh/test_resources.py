@@ -23,7 +23,6 @@ import subprocess
 import sys
 
 # External imports
-import bs4
 from packaging.version import Version as V
 
 # Bokeh imports
@@ -31,6 +30,7 @@ import bokeh.util.version as buv
 from bokeh.models import Model
 from bokeh.resources import RuntimeMessage, _get_cdn_urls
 from bokeh.settings import LogLevel, settings
+from tests.support.util.env import envset
 
 # Module under test
 import bokeh.resources as resources  # isort:skip
@@ -48,7 +48,7 @@ LOG_LEVELS: list[LogLevel] = ["trace", "debug", "info", "warn", "error", "fatal"
 DEFAULT_LOG_JS_RAW = 'Bokeh.set_log_level("info");'
 
 def teardown_module() -> None:
-    Model._clear_extensions()
+    Model.clear_extensions()
 
 # -----------------------------------------------------------------------------
 # General API
@@ -59,8 +59,10 @@ VERSION_PAT = re.compile(r"^(\d+\.\d+\.\d+)$")
 ALL_VERSIONS = resources.get_all_sri_versions()
 
 # very old Bokeh versions are inconsistent and have to be handled specially
-STANDARD_VERSIONS = {v for v in ALL_VERSIONS if V(v) >= V("0.4.1")}
-WIERD_VERSIONS = ALL_VERSIONS - STANDARD_VERSIONS
+_STANDARD_VERSIONS = {v for v in ALL_VERSIONS if V(v) >= V("0.4.1")}
+_WEIRD_VERSIONS = ALL_VERSIONS - _STANDARD_VERSIONS
+STANDARD_VERSIONS = sorted(_STANDARD_VERSIONS)
+WEIRD_VERSIONS = sorted(_WEIRD_VERSIONS)
 
 class TestSRIHashes:
     def test_get_all_sri_versions_valid_format(self) -> None:
@@ -78,7 +80,7 @@ class TestSRIHashes:
             assert f"bokeh-widgets-{v}.js" in h
             assert f"bokeh-widgets-{v}.min.js" in h
 
-    @pytest.mark.parametrize("v", WIERD_VERSIONS)
+    @pytest.mark.parametrize("v", WEIRD_VERSIONS)
     def test_get_sri_hashes_for_weird_versions(self, v) -> None:
 
         h = resources.get_sri_hashes_for_version(v)
@@ -86,7 +88,7 @@ class TestSRIHashes:
         if v <= "0.2.0":
             return
 
-        # other early versions omitted trailing .0 in filnames
+        # other early versions omitted trailing .0 in filenames
         v = v.rstrip(".0")
         assert f"bokeh-{v}.js" in h
         assert f"bokeh-{v}.min.js" in h
@@ -348,6 +350,7 @@ class TestResources:
             pytest.fail(f"resources import failed with {env} set")
 
     def test_render_js_cdn_release(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        bs4 = pytest.importorskip("bs4")
         monkeypatch.setattr(buv, "__version__", "2.0.0")
         monkeypatch.setattr(resources, "__version__", "2.0.0")
         r = resources.CDN.clone()
@@ -355,7 +358,7 @@ class TestResources:
         r.components.remove("bokeh-mathjax")
         out = r.render_js()
         html = bs4.BeautifulSoup(out, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         for script in scripts:
             if "src" not in script.attrs:
                 continue
@@ -364,16 +367,18 @@ class TestResources:
 
     @pytest.mark.parametrize('v', ["1.8.0.rc1", "1.8.0.dev6"])
     def test_render_js_cdn_dev_release(self, v: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        bs4 = pytest.importorskip("bs4")
         monkeypatch.setattr(buv, "__version__", v)
         monkeypatch.setattr(resources, "__version__", v)
         out = resources.CDN.render_js()
         html = bs4.BeautifulSoup(out, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         for script in scripts:
             assert "crossorigin" not in script.attrs
             assert "integrity" not in script.attrs
 
     def test_render_js_cdn_dev_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        bs4 = pytest.importorskip("bs4")
         monkeypatch.setattr(buv, "__version__", "2.0.0+foo")
         monkeypatch.setattr(resources, "__version__", "2.0.0+foo")
         r = resources.CDN.clone()
@@ -381,7 +386,7 @@ class TestResources:
         r.components.remove("bokeh-mathjax")
         out = r.render_js()
         html = bs4.BeautifulSoup(out, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         for script in scripts:
             if "src" not in script.attrs:
                 continue
@@ -390,11 +395,12 @@ class TestResources:
 
     @pytest.mark.parametrize('v', ["2.0.0", "2.0.0+foo", "1.8.0.rc1", "1.8.0.dev6"])
     def test_render_js_inline(self, v, monkeypatch: pytest.MonkeyPatch) -> None:
+        bs4 = pytest.importorskip("bs4")
         monkeypatch.setattr(buv, "__version__", v)
         monkeypatch.setattr(resources, "__version__", v)
         out = resources.INLINE.render_js()
         html = bs4.BeautifulSoup(out, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         for script in scripts:
             assert "crossorigin" not in script.attrs
             assert "integrity" not in script.attrs
@@ -438,6 +444,10 @@ def test_external_js_and_css_resource_embedding() -> None:
     assert r.js_files.count("external_js_3") == 1
     assert r.js_files.count("external_js_1") == 1
 
+    # The files should be in the order defined by the lists in CustomModel2 and CustomModel3
+    assert r.css_files.index("external_css_3") > r.css_files.index("external_css_2")
+    assert r.js_files.index("external_js_3") > r.js_files.index("external_js_2")
+
 
 def test_external_js_and_css_resource_ordering() -> None:
     class ZClass(Model):
@@ -451,9 +461,48 @@ def test_external_js_and_css_resource_ordering() -> None:
     # a_class is before z_class because they're sorted alphabetically
     assert r.js_files.index("a_class") < r.js_files.index("z_class")
 
-    # The files should be in the order defined by the lists in CustomModel2 and CustomModel3
-    assert r.css_files.index("external_css_3") > r.css_files.index("external_css_2")
-    assert r.js_files.index("external_js_3") > r.js_files.index("external_js_2")
+
+@pytest.mark.parametrize("mode", ["cdn", "inline"])
+def test_Resources_with_BOKEH_MINIFIED(mode: resources.ResourcesMode) -> None:
+    with envset(BOKEH_MINIFIED="yes"):
+        r = resources.Resources(mode=mode)
+        assert r.minified is True
+
+    with envset(BOKEH_MINIFIED="no"):
+        r = resources.Resources(mode=mode)
+        assert r.minified is False
+
+    with envset(BOKEH_DEV="yes"):
+        r = resources.Resources(mode=mode, minified=True)
+        assert r.minified is True
+
+    with envset(BOKEH_DEV="yes"):
+        r = resources.Resources(mode=mode, minified=False)
+        assert r.minified is False
+
+    with envset(BOKEH_DEV="no"):
+        r = resources.Resources(mode=mode, minified=True)
+        assert r.minified is True
+
+    with envset(BOKEH_DEV="no"):
+        r = resources.Resources(mode=mode, minified=False)
+        assert r.minified is False
+
+    with envset(BOKEH_MINIFIED="yes", BOKEH_DEV="yes"):
+        r = resources.Resources(mode=mode)
+        assert r.minified is False
+
+    with envset(BOKEH_MINIFIED="yes", BOKEH_DEV="no"):
+        r = resources.Resources(mode=mode)
+        assert r.minified is True
+
+    with envset(BOKEH_MINIFIED="no", BOKEH_DEV="yes"):
+        r = resources.Resources(mode=mode)
+        assert r.minified is False
+
+    with envset(BOKEH_MINIFIED="no", BOKEH_DEV="no"):
+        r = resources.Resources(mode=mode)
+        assert r.minified is False
 
 # -----------------------------------------------------------------------------
 # Dev API

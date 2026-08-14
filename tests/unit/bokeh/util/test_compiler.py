@@ -19,6 +19,8 @@ import pytest ; pytest
 # Standard library imports
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Lock
 from unittest.mock import MagicMock, patch
 
 # Module under test
@@ -136,6 +138,37 @@ def test_jsons() -> None:
             with open(os.path.join(buc.bokehjs_dir, "js", file), encoding="utf-8") as f:
                 assert all('\\' not in mod for mod in json.load(f))
 
+def test_bundle_models_coalesces_concurrent_compilation(monkeypatch: pytest.MonkeyPatch) -> None:
+    started = Event()
+    release = Event()
+    calls = 0
+    calls_lock = Lock()
+    custom_models = {"TestModel": MagicMock(full_name="TestModel")}
+
+    def bundle(models):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        started.set()
+        assert release.wait(timeout=2)
+        return "bundle"
+
+    monkeypatch.setattr(buc, "_bundle_cache", {})
+    monkeypatch.setattr(buc, "_bundle_futures", {})
+    monkeypatch.setattr(buc, "_get_custom_models", lambda models: custom_models)
+    monkeypatch.setattr(buc, "_bundle_models", bundle)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(buc.bundle_models, None)
+        assert started.wait(timeout=1)
+        second = executor.submit(buc.bundle_models, None)
+        release.set()
+
+        assert first.result(timeout=1) == "bundle"
+        assert second.result(timeout=1) == "bundle"
+
+    assert calls == 1
+
 def test_inline_extension() -> None:
     from bokeh.io import save
     from bokeh.models import TickFormatter
@@ -174,6 +207,24 @@ def test_inline_extension() -> None:
     p.scatter([1, 2, 3, 4, 6], [5, 7, 3, 2, 4])
     p.xaxis.formatter = TestFormatter()
     save(p)
+
+@patch("bokeh.util.compiler._run")
+def test_npmjs_version(mock_run: MagicMock) -> None:
+    mock_run.side_effect = [FileNotFoundError, "11.6.3\n"]
+    # assume npm is not installed, no file can be found and None is returned
+    assert buc.npmjs_version() is None
+    # assume npm is installed, a version is returned and stripped
+    assert buc.npmjs_version() == "11.6.3"
+
+@patch("bokeh.util.compiler._run")
+@patch("bokeh.util.compiler._nodejs_path")
+def test_nodejs_version(mock_path: MagicMock, mock_run: MagicMock) -> None:
+    mock_path.side_effect = [RuntimeError, "node"]
+    mock_run.return_value = "v20.19.5\n"
+    # assume node is not installed, then `_detect_nodejs()` raises a RuntimeError
+    assert buc.nodejs_version() is None
+    # assume node is installed, a version is returned and stripped
+    assert buc.nodejs_version() == "v20.19.5"
 
 #-----------------------------------------------------------------------------
 # Dev API

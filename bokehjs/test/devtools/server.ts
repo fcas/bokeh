@@ -1,13 +1,13 @@
-import fs from "fs"
-import {spawn} from "child_process"
-import {join, resolve, dirname} from "path"
+import fs from "node:fs"
+import {spawn} from "node:child_process"
+import {join, resolve, dirname} from "node:path"
 
 import yargs from "yargs"
 import express from "express"
 import cors from "cors"
 import nunjucks from "nunjucks"
 
-import * as sys from "./sys"
+import * as sys from "./sys.js"
 
 const app = express()
 
@@ -22,14 +22,16 @@ app.use("/static", express.static("build/"))
 app.use("/assets", express.static("test/assets/"))
 app.use("/cases", express.static("../tests/baselines/cross/"))
 
-const js_path = (name: string): string => {
-  return `/static/js/${name}.js`
+const js_path = (name: string, dev: boolean = true): string => {
+  const min = dev ? "" : ".min"
+  return `/static/js/${name}${min}.js`
 }
 
 const test = (main: string, title: string) => {
   return (run: boolean = false) => {
-    return (_req: express.Request, res: express.Response) => {
-      const js = (name: string) => js_path(name)
+    return (req: express.Request, res: express.Response) => {
+      const dev = req.query.dev !== "false"
+      const js = (name: string) => js_path(name, dev)
       res.render("test/devtools/test.html", {main, title, run, js})
     }
   }
@@ -63,6 +65,10 @@ function using_report(fn: (report: Report, req: express.Request, res: express.Re
   }
 }
 
+app.get("/", async (_req, res) => {
+  res.render("test/devtools/server_home.html")
+})
+
 const unit = test("unit.js", "Unit Tests")
 const defaults = test("defaults.js", "Defaults Tests")
 const integration = test("integration.js", "Integration Tests")
@@ -83,6 +89,11 @@ app.get("/integration/report", using_report(({results}, req, res) => {
 app.get("/integration/metrics", using_report(({metrics}, _, res) => {
   res.render("test/devtools/metrics.html", {title: "Integration Tests Metrics", metrics, js: js_path})
 }))
+
+app.post("/ajax/dummy_data", async (_req, res) => {
+  res.setHeader("Content-Type", "application/json")
+  res.end(JSON.stringify({x: [0, 1, 2], y: [1, 2, 3], radius: [0.5, 0.7, 1.1], color: ["red", "green", "blue"]}))
+})
 
 app.get("/examples", async (_req, res) => {
   const dir = await fs.promises.opendir("examples")
@@ -119,7 +130,7 @@ type BuildOptions = {dev?: boolean, resources?: Resources}
 
 async function build_example(path: string, options: BuildOptions = {}): Promise<string | null> {
   const code = `\
-__file__ = "${path}"
+__file__ = r"${path}"
 
 import random
 random.seed(1)
@@ -138,6 +149,7 @@ with open(__file__, "rb") as example:
     ...process.env,
     BOKEH_DEV: (options.dev ?? true) ? "true" : "false",
     BOKEH_RESOURCES: options.resources ?? "server",
+    BOKEH_BROWSER: "none",
     BOKEH_DEFAULT_SERVER_HOST: host,
     BOKEH_DEFAULT_SERVER_PORT: `${port}`,
   }
@@ -223,7 +235,15 @@ app.get("/bokeh/examples/:path(*)", async (req, res) => {
     return
   }
 
-  const error = await build_example(py_path, {dev: argv.dev, resources: argv.resources as Resources})
+  const dev = (() => {
+    if ("dev" in req.query) {
+      return req.query.dev !== "false"
+    } else {
+      return argv.dev
+    }
+  })()
+
+  const error = await build_example(py_path, {dev, resources: argv.resources as Resources})
   if (error != null) {
     res.status(200).render("test/devtools/bokeh_example.html", {title: py_path, contents: error})
     return
@@ -254,7 +274,7 @@ const {host, port} = argv
 const server = app.listen(port, host)
 
 server.on("listening", () => {
-  console.log(`listening on ${host}:${port}`)
+  console.log(`listening on http://${host}:${port}`)
   process.send?.("ready")
 })
 server.on("error", (error) => {

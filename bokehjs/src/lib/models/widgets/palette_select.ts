@@ -1,12 +1,12 @@
-import type {Keys} from "core/dom"
-import {div, canvas, empty, px} from "core/dom"
-import type {StyleSheetLike} from "core/dom"
+import {div, empty, px, InlineStyleSheet} from "core/dom"
+import type {StyleSheetLike, Keys} from "core/dom"
 import {DropPane} from "core/util/panes"
 import type * as p from "core/properties"
 import {enumerate} from "core/util/iterator"
 import {color2css} from "core/util/color"
 import {cycle} from "core/util/math"
 import {linspace} from "core/util/array"
+import {assert} from "core/util/assert"
 
 import {InputWidget, InputWidgetView} from "./input_widget"
 import * as inputs_css from "styles/widgets/inputs.css"
@@ -28,14 +28,16 @@ export class PaletteSelectView extends InputWidgetView {
   protected _value_el: HTMLElement
   protected _pane: DropPane
 
+  protected readonly _style = new InlineStyleSheet("", "select")
+
   override stylesheets(): StyleSheetLike[] {
-    return [...super.stylesheets(), palette_select_css.default, item_css.default, icons_css.default]
+    return [...super.stylesheets(), palette_select_css.default, item_css.default, icons_css.default, this._style]
   }
 
   override connect_signals(): void {
     super.connect_signals()
     const {value, items, ncols, swatch_width, swatch_height} = this.model.properties
-    this.on_change([items, swatch_width, swatch_height], () => this.render())
+    this.on_change([items, swatch_width, swatch_height], () => this.rerender())
     this.on_change(value, () => this._update_value())
     this.on_change(ncols, () => this._update_ncols())
   }
@@ -53,56 +55,12 @@ export class PaletteSelectView extends InputWidgetView {
     this._pane.el.style.setProperty("--number-of-columns", `${ncols}`)
   }
 
-  protected _render_image(item: Item): HTMLCanvasElement {
-    const [_name, colors] = item
-    const {swatch_width, swatch_height} = this.model
-
-    const width = swatch_width
-    const height = swatch_height == "auto" ? swatch_width : swatch_height
-
-    const img = canvas({width, height})
-    const ctx = img.getContext("2d")!
-
-    const n = colors.length
-    const dx = 100.0/n
-
-    for (const [color, i] of enumerate(colors)) {
-      ctx.beginPath()
-      ctx.rect(i*dx, 0, dx, 20)
-      const css_color = color2css(color)
-      ctx.strokeStyle = css_color
-      ctx.fillStyle = css_color
-      ctx.fill()
-      ctx.stroke()
-    }
-
-    return img
-  }
-
   protected _render_item(item: Item): HTMLElement {
-    const [name, colors] = item
-    const {swatch_width, swatch_height} = this.model
-
-    const n = colors.length
-    const stops = linspace(0, 100, n + 1)
-    const color_map: string[] = []
-
-    for (const [color, i] of enumerate(colors)) {
-      const [from, to] = [stops[i], stops[i + 1]]
-      color_map.push(`${color2css(color)} ${from}% ${to}%`)
-    }
-
-    const img = div()
-    img.style.background = `linear-gradient(to right, ${color_map.join(", ")})`
-    img.style.width = px(swatch_width)
-    if (swatch_height == "auto") {
-      img.style.alignSelf = "stretch"
-    } else {
-      img.style.height = px(swatch_height)
-    }
-
-    const entry = div({class: item_css.entry}, img, name)
-    return entry
+    const [name] = item
+    const i = this.model.items.indexOf(item)
+    assert(i != -1)
+    const swatch = div({class: item_css.swatch, id: `item_${i}`})
+    return div({class: item_css.entry}, swatch, div(name))
   }
 
   protected _render_value(): HTMLElement | null {
@@ -117,7 +75,7 @@ export class PaletteSelectView extends InputWidgetView {
 
   protected _render_input(): HTMLElement {
     this._value_el = div({class: [palette_select_css.value, item_css.entry]}, this._render_value())
-    const chevron_el = div({class: [palette_select_css.chevron, icons_css.tool_icon_chevron_down]})
+    const chevron_el = div({class: [palette_select_css.chevron]})
 
     const input_el = div({class: [inputs_css.input, palette_select_css.value_input]}, this._value_el, chevron_el)
 
@@ -134,8 +92,35 @@ export class PaletteSelectView extends InputWidgetView {
   override render(): void {
     super.render()
 
-    const item_els: HTMLElement[] = []
+    const {swatch_width, swatch_height} = this.model
+    this._style.replace(`
+      .${item_css.swatch} {
+        width: ${swatch_width}px;
+        height: ${swatch_height == "auto" ? "auto" : px(swatch_height)};
+      }
+    `)
 
+    for (const [item, i] of enumerate(this.model.items)) {
+      const [, colors] = item
+
+      const n = colors.length
+      const stops = linspace(0, 100, n + 1)
+      const color_map: string[] = []
+
+      for (const [color, i] of enumerate(colors)) {
+        const [from, to] = [stops[i], stops[i + 1]]
+        color_map.push(`${color2css(color)} ${from}% ${to}%`)
+      }
+
+      const gradient = color_map.join(", ")
+      this._style.append(`
+        #item_${i} {
+          background: linear-gradient(to right, ${gradient});
+        }
+      `)
+    }
+
+    const item_els: HTMLElement[] = []
     for (const [item, i] of enumerate(this.model.items)) {
       const entry_el = this._render_item(item)
       const item_el = div({class: item_css.item, tabIndex: 0}, entry_el)
@@ -183,7 +168,7 @@ export class PaletteSelectView extends InputWidgetView {
     this._pane = new DropPane(item_els, {
       target: this.group_el,
       prevent_hide: this.input_el,
-      extra_stylesheets: [item_css.default, pane_css.default],
+      extra_stylesheets: [item_css.default, pane_css.default, this._style],
     })
 
     this._update_ncols()
@@ -253,9 +238,9 @@ export namespace PaletteSelect {
   export type Props = InputWidget.Props & {
     value: p.Property<string>
     items: p.Property<Item[]>
+    ncols: p.Property<number>
     swatch_width: p.Property<number>
     swatch_height: p.Property<number | "auto">
-    ncols: p.Property<number>
   }
 }
 
@@ -272,14 +257,12 @@ export class PaletteSelect extends InputWidget {
   static {
     this.prototype.default_view = PaletteSelectView
 
-    this.define<PaletteSelect.Props>(({Int, Str, List, NonNegative, Positive, Or, Auto}) => {
-      return {
-        value: [ Str ],
-        items: [ List(Item) ],
-        swatch_width: [ NonNegative(Int), 100 ],
-        swatch_height: [ Or(Auto, NonNegative(Int)), "auto" ],
-        ncols: [ Positive(Int), 1 ],
-      }
-    })
+    this.define<PaletteSelect.Props>(({Int, Str, List, NonNegative, Positive, Or, Auto}) => ({
+      value: [ Str ],
+      items: [ List(Item) ],
+      ncols: [ Positive(Int), 1 ],
+      swatch_width: [ NonNegative(Int), 100 ],
+      swatch_height: [ Or(Auto, NonNegative(Int)), "auto" ],
+    }))
   }
 }

@@ -21,8 +21,10 @@ log = logging.getLogger(__name__)
 # Standard library imports
 import base64
 import datetime as dt
+import gzip
 import sys
 from array import array as TypedArray
+from dataclasses import dataclass, field
 from math import isinf, isnan
 from types import SimpleNamespace
 from typing import (
@@ -30,13 +32,11 @@ from typing import (
     Any,
     Callable,
     ClassVar,
-    Generic,
     Literal,
     NoReturn,
+    NotRequired,
     Sequence,
-    TypeAlias,
     TypedDict,
-    TypeVar,
     cast,
 )
 
@@ -44,12 +44,8 @@ from typing import (
 import numpy as np
 
 # Bokeh imports
-from ..util.dataclasses import (
-    Unspecified,
-    dataclass,
-    entries,
-    is_dataclass,
-)
+from ..settings import settings
+from ..util.dataclasses import Unspecified, entries, is_dataclass
 from ..util.dependencies import uses_pandas
 from ..util.serialization import (
     array_encoding_disabled,
@@ -61,12 +57,10 @@ from ..util.serialization import (
     transform_array,
     transform_series,
 )
-from ..util.warnings import BokehUserWarning, warn
 from .types import ID
 
 if TYPE_CHECKING:
     import numpy.typing as npt
-    from typing_extensions import NotRequired
 
     from ..core.has_props import Setter
     from ..model import Model
@@ -90,7 +84,7 @@ _MAX_SAFE_INT = 2**53 - 1
 # General API
 #-----------------------------------------------------------------------------
 
-AnyRep: TypeAlias = Any
+type AnyRep = Any
 
 class Ref(TypedDict):
     id: ID
@@ -111,7 +105,7 @@ class ArrayRep(TypedDict):
     type: Literal["array"]
     entries: NotRequired[list[AnyRep]]
 
-ArrayRepLike: TypeAlias = ArrayRep | list[AnyRep]
+type ArrayRepLike = ArrayRep | list[AnyRep]
 
 class SetRep(TypedDict):
     type: Literal["set"]
@@ -144,10 +138,10 @@ class ObjectRefRep(TypedDict):
 
 ModelRep = ObjectRefRep
 
-ByteOrder: TypeAlias = Literal["little", "big"]
+type ByteOrder = Literal["little", "big"]
 
-DataType: TypeAlias = Literal["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"] # "uint64", "int64"
-NDDataType: TypeAlias = Literal["bool"] | DataType | Literal["object"]
+type DataType = Literal["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"] # "uint64", "int64"
+type NDDataType = Literal["bool"] | DataType | Literal["object"]
 
 class TypedArrayRep(TypedDict):
     type: Literal["typed_array"]
@@ -174,18 +168,24 @@ class Buffer:
     def to_bytes(self) -> bytes:
         return self.data.tobytes() if isinstance(self.data, memoryview) else self.data
 
-    def to_base64(self) -> str:
-        return base64.b64encode(self.data).decode("utf-8")
+    def to_compressed_bytes(self) -> bytes:
+        level = settings.compression_level()
+        # we do not want the result to be different depending on mtime, since that is
+        # irrelevant and also makes things harder to test, but Python 3.11 and 3.12 have
+        # bug where using mtime=0 results in the Gzip header OS field varies by platforam
+        # instead of getting set to a fixed value of 255. So, for now use mtime=1 instead.
+        return gzip.compress(self.to_bytes(), mtime=1, compresslevel=level)
 
-T = TypeVar("T")
+    def to_base64(self) -> str:
+        return base64.b64encode(self.to_compressed_bytes()).decode("utf-8")
 
 @dataclass
-class Serialized(Generic[T]):
+class Serialized[T]:
     content: T
-    buffers: list[Buffer] | None = None
+    buffers: list[Buffer] = field(default_factory=list[Buffer])
 
-Encoder: TypeAlias = Callable[[Any, "Serializer"], AnyRep]
-Decoder: TypeAlias = Callable[[AnyRep, "Deserializer"], Any]
+type Encoder = Callable[[Any, "Serializer"], AnyRep]
+type Decoder = Callable[[AnyRep, "Deserializer"], Any]
 
 class SerializationError(ValueError):
     pass
@@ -213,12 +213,14 @@ class Serializer:
 
     _references: dict[ObjID, Ref]
     _deferred: bool
+    _check_circular: bool
     _circular: dict[ObjID, Any]
     _buffers: list[Buffer]
 
-    def __init__(self, *, references: set[Model] = set(), deferred: bool = True) -> None:
+    def __init__(self, *, references: set[Model] = set(), deferred: bool = True, check_circular: bool = False) -> None:
         self._references = {id(obj): obj.ref for obj in references}
         self._deferred = deferred
+        self._check_circular = check_circular
         self._circular = {}
         self._buffers = []
 
@@ -245,14 +247,15 @@ class Serializer:
             return ref
 
         ident = id(obj)
-        if ident in self._circular:
+        if self._check_circular and ident in self._circular:
             self.error("circular reference")
 
         self._circular[ident] = obj
         try:
             return self._encode(obj)
         finally:
-            del self._circular[ident]
+            if ident in self._circular:
+                del self._circular[ident]
 
     def encode_struct(self, **fields: Any) -> dict[str, AnyRep]:
         return {key: self.encode(val) for key, val in fields.items() if val is not Unspecified}
@@ -308,6 +311,8 @@ class Serializer:
         if -_MAX_SAFE_INT < obj <= _MAX_SAFE_INT:
             return obj
         else:
+            from ..util.warnings import BokehUserWarning, warn
+
             warn("out of range integer may result in loss of precision", BokehUserWarning)
             return self._encode_float(float(obj))
 
@@ -402,12 +407,14 @@ class Serializer:
                         case 1: return "uint8"
                         case 2: return "uint16"
                         case 4: return "uint32"
+                        # TODO: support 64-bit integer typed arrays when the wire dtype supports them.
                         #case 8: return "uint64"
                 case "b" | "h" | "i" | "l" | "q":
                     match obj.itemsize:
                         case 1: return "int8"
                         case 2: return "int16"
                         case 4: return "int32"
+                        # TODO: support 64-bit integer typed arrays when the wire dtype supports them.
                         #case 8: return "int64"
             self.error(f"can't serialize array with items of type '{typecode}@{itemsize}'")
 
@@ -423,7 +430,10 @@ class Serializer:
 
         data: ArrayRepLike | BytesRep
         dtype: NDDataType
-        if array_encoding_disabled(array):
+        if array.dtype.kind == 'U':
+            data = obj.flatten().tolist()
+            dtype = "object"
+        elif array_encoding_disabled(array):
             data = self._encode_list(array.flatten().tolist())
             dtype = "object"
         else:
@@ -441,13 +451,13 @@ class Serializer:
     def _encode_other(self, obj: Any) -> AnyRep:
         # date/time values that get serialized as milliseconds
         if is_datetime_type(obj):
-            return convert_datetime_type(obj)
+            return self.encode(convert_datetime_type(obj))
 
         if is_timedelta_type(obj):
-            return convert_timedelta_type(obj)
+            return self.encode(convert_timedelta_type(obj))
 
         if isinstance(obj, dt.date):
-            return obj.isoformat()
+            return self.encode(obj.isoformat())
 
         # NumPy scalars
         if np.issubdtype(type(obj), np.floating):
@@ -460,7 +470,7 @@ class Serializer:
         # avoid importing pandas here unless it is actually in use
         if uses_pandas(obj):
             import pandas as pd
-            if isinstance(obj, pd.Series | pd.Index | pd.api.extensions.ExtensionArray):
+            if isinstance(obj, (pd.Series, pd.Index, pd.api.extensions.ExtensionArray)):
                 return self._encode_ndarray(transform_series(obj))
             elif obj is pd.NA:
                 return None
@@ -600,11 +610,11 @@ class Deserializer:
         entries = obj.get("entries", [])
         return { self._decode(key): self._decode(val) for key, val in entries }
 
-    def _decode_bytes(self, obj: BytesRep) -> bytes:
+    def _decode_bytes(self, obj: BytesRep) -> bytes | memoryview[int]:
         data = obj["data"]
 
         if isinstance(data, str):
-            return base64.b64decode(data)
+            return gzip.decompress(base64.b64decode(data))
         elif isinstance(data, Buffer):
             buffer = data # in case of decode(encode(obj))
         else:
@@ -682,6 +692,8 @@ class Deserializer:
         id = obj["id"]
         instance = self._references.get(id)
         if instance is not None:
+            from ..util.warnings import BokehUserWarning, warn
+
             warn(f"reference already known '{id}'", BokehUserWarning)
             return instance
 
@@ -689,7 +701,7 @@ class Deserializer:
         attributes = obj.get("attributes")
 
         cls = self._resolve_type(name)
-        instance = cls.__new__(cls, id=id)
+        instance = cls._new(id)
 
         if instance is None:
             self.error(f"can't instantiate {name}(id={id})")

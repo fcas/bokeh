@@ -1,32 +1,36 @@
 import {Renderer, RendererView} from "./renderer"
 import {UIElement} from "../ui/ui_element"
 import {DOMNode} from "../dom/dom_node"
-import type {ViewStorage, BuildResult, IterViews, ViewOf} from "core/build_views"
-import {build_views, remove_views} from "core/build_views"
+import type {ViewStorage, BuildResult, ChildView, ViewOf} from "core/build_views"
+import {build_views} from "core/build_views"
 import type * as p from "core/properties"
 import {Ref, Or} from "core/kinds"
+import type {Context2d} from "core/util/canvas"
+import {LayoutDOM} from "models/layouts/layout_dom"
 
 // TODO UIElement needs to inherit from DOMNode
-const ElementLike = Or(Ref(UIElement), Ref(DOMNode))
-type ElementLike = typeof ElementLike["__type__"]
+export const ElementLike = Or(Ref(UIElement), Ref(DOMNode))
+export type ElementLike = typeof ElementLike["__type__"]
 
 export abstract class CompositeRendererView extends RendererView {
   declare model: CompositeRenderer
 
   protected readonly _renderer_views: ViewStorage<Renderer> = new Map()
   get renderer_views(): ViewOf<Renderer>[] {
-    return this.model.renderers.map((renderer) => this._renderer_views.get(renderer)!)
+    return this.computed_renderer_views
   }
+
+  protected _computed_renderer_views: ViewOf<Renderer>[] = []
 
   protected readonly _element_views: ViewStorage<ElementLike> = new Map()
   get element_views(): ViewOf<ElementLike>[] {
-    return this.model.elements.map((element) => this._element_views.get(element)!)
+    return this.computed_element_views
   }
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield* this.renderer_views
-    yield* this.element_views
+  protected _computed_element_views: ViewOf<ElementLike>[] = []
+
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), ...this.renderer_views, ...this.element_views]
   }
 
   override async lazy_initialize(): Promise<void> {
@@ -35,12 +39,34 @@ export abstract class CompositeRendererView extends RendererView {
     await this._build_elements()
   }
 
+  protected readonly _computed_renderers: Renderer[] = []
+  get computed_renderers(): Renderer[] {
+    return [...this.model.renderers, ...this._computed_renderers]
+  }
+  get computed_renderer_views(): ViewOf<Renderer>[] {
+    return this._computed_renderer_views
+  }
+
   protected async _build_renderers(): Promise<BuildResult<Renderer>> {
-    return await build_views(this._renderer_views, this.model.renderers, {parent: this.plot_view})
+    const renderers = this.computed_renderers
+    const result = await build_views(this._renderer_views, renderers, {parent: this.plot_view})
+    this._computed_renderer_views = renderers.map((item) => this._renderer_views.get(item)).filter((rv) => rv != null)
+    return result
+  }
+
+  protected readonly _computed_elements: ElementLike[] = []
+  get computed_elements(): ElementLike[] {
+    return [...this.model.elements, ...this._computed_elements]
+  }
+  get computed_element_views(): ViewOf<ElementLike>[] {
+    return this._computed_element_views
   }
 
   protected async _build_elements(): Promise<BuildResult<ElementLike>> {
-    return await build_views(this._element_views, this.model.elements, {parent: this.plot_view})
+    const elements = this.computed_elements
+    const result = await build_views(this._element_views, elements, {parent: (model) => model instanceof LayoutDOM ? null : this.plot_view})
+    this._computed_element_views = elements.map((item) => this._element_views.get(item)).filter((ev) => ev != null)
+    return result
   }
 
   protected async _update_renderers(): Promise<void> {
@@ -49,31 +75,31 @@ export abstract class CompositeRendererView extends RendererView {
 
   protected async _update_elements(): Promise<void> {
     const {created} = await this._build_elements()
-    const created_elements = new Set(created)
+    const created_views = new Set(created)
 
-    // First remove and then either reattach existing elements or render and
-    // attach new elements, so that the order of children is consistent, while
-    // avoiding expensive re-rendering of existing views.
-    for (const element_view of this.element_views) {
-      element_view.el.remove()
-    }
-
-    for (const element_view of this.element_views) {
-      const is_new = created_elements.has(element_view)
-
+    // Since appending to a DOM node will move the node to the end if it has
+    // already been added appending all the children in order will result in
+    // correct ordering.
+    for (const view of this.element_views) {
+      const is_new = created_views.has(view)
+      const target = view.rendering_target() ?? this.self_target
       if (is_new) {
-        element_view.render_to(this.plot_view.shadow_el)
+        view.render_to(target)
       } else {
-        this.plot_view.shadow_el.append(element_view.el)
+        target.append(view.el)
       }
     }
+
     this.r_after_render()
   }
 
-  override remove(): void {
-    remove_views(this._renderer_views)
-    remove_views(this._element_views)
-    super.remove()
+  override render(): void {
+    super.render()
+
+    for (const element_view of this.element_views) {
+      const target = element_view.rendering_target() ?? this.self_target
+      element_view.render_to(target)
+    }
   }
 
   override connect_signals(): void {
@@ -87,17 +113,14 @@ export abstract class CompositeRendererView extends RendererView {
     })
   }
 
-  private _has_rendered_elements: boolean = false
+  override paint(ctx: Context2d): void {
+    super.paint(ctx)
 
-  override paint(): void {
-    if (!this._has_rendered_elements) {
-      for (const element_view of this.element_views) {
-        element_view.render_to(this.plot_view.shadow_el)
+    if (this.displayed && this.is_renderable) {
+      for (const renderer of this.computed_renderer_views) {
+        renderer.paint(ctx)
       }
-      this._has_rendered_elements = true
     }
-
-    super.paint()
 
     const {displayed} = this
     for (const element_view of this.element_views) {

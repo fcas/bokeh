@@ -7,6 +7,8 @@
 
 # Standard library imports
 import os
+import re
+import sys
 from datetime import date
 
 from sphinx.util import logging
@@ -24,7 +26,7 @@ copyright = f"©{year} {author}."
 
 project = "Bokeh"
 
-version = settings.docs_version() or __version__
+release = version = settings.docs_version() or __version__
 
 # -- Sphinx configuration -----------------------------------------------------
 
@@ -43,25 +45,25 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
-    "bokeh.sphinxext.bokeh_autodoc",
-    "bokeh.sphinxext.bokeh_dataframe",
-    "bokeh.sphinxext.bokeh_color",
-    "bokeh.sphinxext.bokeh_enum",
-    "bokeh.sphinxext.bokeh_example_metadata",
-    "bokeh.sphinxext.bokeh_gallery",
-    "bokeh.sphinxext.bokeh_jinja",
-    "bokeh.sphinxext.bokeh_model",
-    "bokeh.sphinxext.bokeh_options",
-    "bokeh.sphinxext.bokeh_palette",
-    "bokeh.sphinxext.bokeh_palette_group",
     "bokeh.sphinxext.bokeh_plot",
-    "bokeh.sphinxext.bokeh_prop",
-    "bokeh.sphinxext.bokeh_releases",
-    "bokeh.sphinxext.bokeh_roles",
-    "bokeh.sphinxext.bokeh_sampledata_xref",
-    "bokeh.sphinxext.bokeh_settings",
-    "bokeh.sphinxext.bokeh_sitemap",
-    "bokeh.sphinxext.bokehjs_content",
+    "bokeh.sphinxext._internal.bokeh_autodoc",
+    "bokeh.sphinxext._internal.bokeh_dataframe",
+    "bokeh.sphinxext._internal.bokeh_color",
+    "bokeh.sphinxext._internal.bokeh_enum",
+    "bokeh.sphinxext._internal.bokeh_example_metadata",
+    "bokeh.sphinxext._internal.bokeh_gallery",
+    "bokeh.sphinxext._internal.bokeh_jinja",
+    "bokeh.sphinxext._internal.bokeh_model",
+    "bokeh.sphinxext._internal.bokeh_options",
+    "bokeh.sphinxext._internal.bokeh_palette",
+    "bokeh.sphinxext._internal.bokeh_palette_group",
+    "bokeh.sphinxext._internal.bokeh_prop",
+    "bokeh.sphinxext._internal.bokeh_releases",
+    "bokeh.sphinxext._internal.bokeh_roles",
+    "bokeh.sphinxext._internal.bokeh_sampledata_xref",
+    "bokeh.sphinxext._internal.bokeh_settings",
+    "bokeh.sphinxext._internal.bokeh_sitemap",
+    "bokeh.sphinxext._internal.bokehjs_content",
 ]
 
 needs_sphinx = "4.3.2"
@@ -113,12 +115,22 @@ bokeh_example_subdirs = [
 
 bokeh_missing_google_api_key_ok = False
 
-if not bokeh_missing_google_api_key_ok:
-    if "GOOGLE_API_KEY" not in os.environ:
-        raise RuntimeError("\n\nThe GOOGLE_API_KEY environment variable is not set. Set GOOGLE_API_KEY to a valid API key, "
-                           "or set bokeh_missing_google_api_key_ok=True in conf.py to build anyway (with broken GMaps)")
+if "GOOGLE_API_KEY" not in os.environ:
+    print("GOOGLE_API_KEY not found in environment")
 
-bokeh_plot_pyfile_include_dirs = ["docs"]
+    if bokeh_missing_google_api_key_ok:
+        print(
+            "But bokeh_missing_google_api_key_ok set to true in conf.py, so building docs anyway (with broken Google Maps)",
+        )
+    elif os.environ.get("BOKEH_DOCS_CDN") == "local":
+        bokeh_missing_google_api_key_ok = True
+        print("But BOKEH_DOCS_CDN=local, so building docs anyway (with broken Google Maps)")
+    else:
+        raise RuntimeError(
+            "\n\nThe GOOGLE_API_KEY environment variable is not set. Set GOOGLE_API_KEY to a valid API key, "
+            "or to build anyway (with broken Google Maps), set bokeh_missing_google_api_key_ok=True in conf.py "
+            "or set BOKEH_DOCS_CDN=local in your environment.",
+        )
 
 bokeh_sampledata_xref_skiplist = [
     "examples/basic/data/ajax_source.py",
@@ -128,11 +140,14 @@ bokeh_sampledata_xref_skiplist = [
     "examples/models/widgets.py",
 ]
 
+if sys.version_info[:2] < (3, 14):
+    bokeh_sampledata_xref_skiplist.append("examples/interaction/widgets/slider_template_string.py")
+
 copybutton_prompt_text = ">>> "
 
 intersphinx_mapping = {
     "numpy"       : ("https://numpy.org/doc/stable/", None),
-    "pandas"      : ("https://pandas.pydata.org/pandas-docs/stable/", None),
+    "pandas"      : ("https://pandas.pydata.org/docs/", None),
     "python"      : ("https://docs.python.org/3/", None),
     "sphinx"      : ("https://www.sphinx-doc.org/en/master/", None),
     "xyzservices" : ("https://xyzservices.readthedocs.io/en/stable/", None),
@@ -142,9 +157,9 @@ napoleon_include_init_with_doc = True
 
 ogp_site_url = "https://docs.bokeh.org/en/latest/"
 ogp_image = "http://static.bokeh.org/og/logotype-on-hex.png"
-ogp_custom_meta_tags = [
+ogp_custom_meta_tags = (
     '<meta name="image" property="og:image" content="http://static.bokeh.org/og/logotype-on-hex.png">',
-]
+)
 
 pygments_style = "sphinx"
 
@@ -173,7 +188,11 @@ html_title = f"{project} {version} Documentation"
 if "BOKEH_DOCS_VERSION" in os.environ:
     json_url = "https://docs.bokeh.org/switcher.json"
 else:
-    json_url = "_static/switcher.json"
+    json_url = "../switcher.json"
+if "dev" in version or "rc" in version:
+    version_match = "dev-" + re.match(r"\d\.\d+", version).group()
+else:
+    version_match = version
 
 # html_logo configured in navbar-logo.html
 
@@ -183,20 +202,20 @@ html_theme_options = {
         "plausible_analytics_url": "https://plausible.io/js/script.js",
     },
     "external_links": [
-        {"name": "Tutorial",  "url": "https://mybinder.org/v2/gh/bokeh/tutorial/main?filepath=notebooks%2F01_introduction.ipynb"},
+        {"name": "Tutorial",  "url": "https://github.com/bokeh/tutorial/"},
         {"name": "Community", "url": "https://discourse.bokeh.org"},
     ],
     "github_url": "https://github.com/bokeh/bokeh",
     "navbar_align": "left",
     "navbar_end": ["navbar-icon-links"],
     "navbar_start": ["navbar-logo", "version-switcher"],
-    "pygment_light_style": "xcode",
+    "pygments_light_style": "xcode",
     "secondary_sidebar_items": ["page-toc", "edit-this-page"],
     "show_nav_level": 2,
     "show_toc_level": 1,
     "switcher": {
         "json_url": json_url,
-        "version_match": version,
+        "version_match": version_match,
     },
     "use_edit_page_button": False,
     "show_version_warning_banner": True,

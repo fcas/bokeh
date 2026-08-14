@@ -28,9 +28,9 @@ import yaml
 
 # Bokeh imports
 from ..core.has_props import HasProps
-from ..core.types import PathLike
 
 if TYPE_CHECKING:
+    from ..core.types import PathLike
     from ..model import Model
 
 #-----------------------------------------------------------------------------
@@ -150,7 +150,7 @@ class Theme:
     @overload
     def __init__(self, filename: PathLike) -> None: ...
     @overload
-    def __init__(self, json: dict[str, Any]) -> None: ...
+    def __init__(self, *, json: dict[str, Any]) -> None: ...
 
     def __init__(self, filename: PathLike | None = None, json: dict[str, Any] | None = None) -> None:
         if (filename is not None) and (json is not None):
@@ -188,7 +188,7 @@ class Theme:
         self._by_class_cache = {}
 
     def _add_glyph_defaults(self, cls: type[HasProps], props: dict[str, Any]) -> None:
-        from ..models.glyphs import Glyph
+        from ..models.glyph import Glyph
         if issubclass(cls, Glyph):
             if hasattr(cls, "line_alpha"):
                 props.update(self._line_defaults)

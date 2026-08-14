@@ -1,5 +1,6 @@
 import {DataRenderer, DataRendererView} from "./data_renderer"
 import {LineView} from "../glyphs/line"
+import {StepView} from "../glyphs/step"
 import {PatchView} from "../glyphs/patch"
 import {HAreaStepView} from "../glyphs/harea_step"
 import {HAreaView} from "../glyphs/harea"
@@ -18,7 +19,7 @@ import {extend, clone} from "core/util/object"
 import type {HitTestResult} from "core/hittest"
 import type {Geometry} from "core/geometry"
 import type {SelectionManager} from "core/selection_manager"
-import type {IterViews} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import {build_view} from "core/build_views"
 import type {Context2d} from "core/util/canvas"
 import {is_equal} from "core/util/eq"
@@ -69,17 +70,17 @@ export class GlyphRendererView extends DataRendererView {
     return this.glyph
   }
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield this.cds_view
-    yield this.glyph
-    yield this.selection_glyph
-    yield this.nonselection_glyph
-    if (this.hover_glyph != null) {
-      yield this.hover_glyph
-    }
-    yield this.muted_glyph
-    yield this.decimated_glyph
+  override _children_views(): ChildView[] {
+    return [
+      ...super._children_views(),
+      this.cds_view,
+      this.glyph,
+      this.selection_glyph,
+      this.nonselection_glyph,
+      this.hover_glyph,
+      this.muted_glyph,
+      this.decimated_glyph,
+    ]
   }
 
   protected all_indices: Indices
@@ -154,17 +155,6 @@ export class GlyphRendererView extends DataRendererView {
 
   async build_glyph_view<T extends Glyph>(glyph: T): Promise<GlyphView> {
     return build_view(glyph, {parent: this}) as Promise<GlyphView>
-  }
-
-  override remove(): void {
-    this.cds_view.remove()
-    this.glyph.remove()
-    this.selection_glyph.remove()
-    this.nonselection_glyph.remove()
-    this.hover_glyph?.remove()
-    this.muted_glyph.remove()
-    this.decimated_glyph.remove()
-    super.remove()
   }
 
   private _previous_inspected?: {
@@ -325,20 +315,17 @@ export class GlyphRendererView extends DataRendererView {
   }
 
   override get has_webgl(): boolean {
-    return this.glyph.has_webgl
+    return this.glyph.has_webgl()
   }
 
-  protected _paint(): void {
+  protected _paint(ctx: Context2d): void {
     const {has_webgl} = this
 
     this.map_data()
 
     // all_indices is in full data space, indices is converted to subset space by mask_data (that may use the spatial index)
-    const all_indices = [...this.all_indices]
-    let indices = [...this._update_masked_indices()]
-
-    const {ctx} = this.layer
-    ctx.save()
+    const all_indices = this.all_indices.ones()
+    let indices = this._update_masked_indices().ones()
 
     // selected is in full set space
     const {selected} = this.model.data_source
@@ -346,7 +333,7 @@ export class GlyphRendererView extends DataRendererView {
       if (selected.is_empty()) {
         return []
       } else {
-        if (this.glyph instanceof LineView && selected.selected_glyph === this.glyph.model) {
+        if ((this.glyph instanceof LineView || this.glyph instanceof StepView) && selected.selected_glyph === this.glyph.model) {
           return this.model.view.convert_indices_from_subset(indices)
         } else {
           return selected.indices
@@ -381,7 +368,12 @@ export class GlyphRendererView extends DataRendererView {
     })())
 
     // inspected is transformed to subset space
-    const inspected_subset_indices = filter(indices, (i) => inspected_full_indices.has(all_indices[i]))
+    const inspected_subset_indices = (() => {
+      if (inspected_full_indices.size === 0) {
+        return []
+      }
+      return filter(indices, (i) => inspected_full_indices.has(all_indices[i]))
+    })()
 
     const {lod_threshold} = this.plot_model
     let glyph: GlyphView
@@ -409,9 +401,11 @@ export class GlyphRendererView extends DataRendererView {
       indices = [...set]
     }
 
+    ctx.save()
+
     // Render with no selection
     if (selected_full_indices.length == 0) {
-      if (this.glyph instanceof LineView) {
+      if (this.glyph instanceof LineView || this.glyph instanceof StepView) {
         if (this.hover_glyph != null && inspected_subset_indices.length != 0) {
           this.hover_glyph.paint(ctx, this.model.view.convert_indices_from_subset(inspected_subset_indices))
         } else {
@@ -446,8 +440,8 @@ export class GlyphRendererView extends DataRendererView {
       const selected_subset_indices: number[] = new Array()
       const nonselected_subset_indices: number[] = new Array()
 
-      // now, selected is changed to subset space, except for Line glyph
-      if (this.glyph instanceof LineView) {
+      // now, selected is changed to subset space, except for Line/Step glyph
+      if (this.glyph instanceof LineView || this.glyph instanceof StepView) {
         for (const i of all_indices) {
           if (selected_mask.has(i)) {
             selected_subset_indices.push(i)
@@ -468,7 +462,7 @@ export class GlyphRendererView extends DataRendererView {
       nonselection_glyph.paint(ctx, nonselected_subset_indices)
       selection_glyph.paint(ctx, selected_subset_indices)
       if (this.hover_glyph != null) {
-        if (this.glyph instanceof LineView) {
+        if (this.glyph instanceof LineView || this.glyph instanceof StepView) {
           this.hover_glyph.paint(ctx, this.model.view.convert_indices_from_subset(inspected_subset_indices))
         } else {
           this.hover_glyph.paint(ctx, inspected_subset_indices)
@@ -480,17 +474,17 @@ export class GlyphRendererView extends DataRendererView {
   }
 
   get_reference_point(field: string | null, value?: unknown): number {
+    return this._get_reference_point(field, value) ?? 0 // fall back to first index
+  }
+
+  _get_reference_point(field: string | null, value?: unknown): number | undefined | null {
     if (field != null) {
       const array = this.model.data_source.get_column(field)
       if (array != null) {
-        for (const [key, index] of this.model.view.indices_map) {
-          if (array[key] == value) {
-            return index
-          }
-        }
+        return this.model.view.get_reference_point(array, value)
       }
     }
-    return 0
+    return null
   }
 
   draw_legend(ctx: Context2d, x0: number, x1: number, y0: number, y1: number, field: string | null, label: unknown, index: number | null): void {
@@ -501,13 +495,10 @@ export class GlyphRendererView extends DataRendererView {
       if (index == null) {
         return this.get_reference_point(field, label)
       } else {
-        const {indices_map} = this.model.view
-        return indices_map.get(index)
+        return this.model.view.get_subset_index(index)
       }
     })()
-    if (subset_index != null) {
-      this.glyph.draw_legend_for_index(ctx, {x0, x1, y0, y1}, subset_index)
-    }
+    this.glyph.draw_legend_for_index(ctx, {x0, x1, y0, y1}, subset_index)
   }
 
   hit_test(geometry: Geometry): HitTestResult {
@@ -527,34 +518,58 @@ export class GlyphRendererView extends DataRendererView {
 }
 
 export namespace GlyphRenderer {
-  export type Attrs = p.AttrsOf<Props>
+  export type Attrs<
+    BaseGlyph,
+    HoverGlyph = BaseGlyph,
+    NonSelectionGlyph = BaseGlyph,
+    SelectionGlyph = BaseGlyph,
+    MutedGlyph = BaseGlyph,
+  > = p.AttrsOf<Props<BaseGlyph, HoverGlyph, NonSelectionGlyph, SelectionGlyph, MutedGlyph>>
 
-  export type Props = DataRenderer.Props & {
+  export type Props<
+    BaseGlyph,
+    HoverGlyph = BaseGlyph,
+    NonSelectionGlyph = BaseGlyph,
+    SelectionGlyph = BaseGlyph,
+    MutedGlyph = BaseGlyph,
+  > = DataRenderer.Props & {
     data_source: p.Property<ColumnarDataSource>
     view: p.Property<CDSView>
-    glyph: p.Property<Glyph>
-    hover_glyph: p.Property<Glyph | null>
-    nonselection_glyph: p.Property<Glyph | "auto" | null>
-    selection_glyph: p.Property<Glyph | "auto" | null>
-    muted_glyph: p.Property<Glyph | "auto" | null>
+    glyph: p.Property<BaseGlyph>
+    hover_glyph: p.Property<HoverGlyph | null>
+    nonselection_glyph: p.Property<NonSelectionGlyph | "auto" | null>
+    selection_glyph: p.Property<SelectionGlyph | "auto" | null>
+    muted_glyph: p.Property<MutedGlyph | "auto" | null>
     muted: p.Property<boolean>
   }
 }
 
-export interface GlyphRenderer extends GlyphRenderer.Attrs {}
+export interface GlyphRenderer<
+  BaseGlyph extends Glyph = Glyph,
+  HoverGlyph extends Glyph = BaseGlyph,
+  NonSelectionGlyph extends Glyph = BaseGlyph,
+  SelectionGlyph extends Glyph = BaseGlyph,
+  MutedGlyph extends Glyph = BaseGlyph,
+> extends GlyphRenderer.Attrs<BaseGlyph, HoverGlyph, NonSelectionGlyph, SelectionGlyph, MutedGlyph> {}
 
-export class GlyphRenderer extends DataRenderer {
-  declare properties: GlyphRenderer.Props
+export class GlyphRenderer<
+  BaseGlyph extends Glyph = Glyph,
+  HoverGlyph extends Glyph = BaseGlyph,
+  NonSelectionGlyph extends Glyph = BaseGlyph,
+  SelectionGlyph extends Glyph = BaseGlyph,
+  MutedGlyph extends Glyph = BaseGlyph,
+> extends DataRenderer {
+  declare properties: GlyphRenderer.Props<BaseGlyph, HoverGlyph, NonSelectionGlyph, SelectionGlyph, MutedGlyph>
   declare __view_type__: GlyphRendererView
 
-  constructor(attrs?: Partial<GlyphRenderer.Attrs>) {
+  constructor(attrs?: Partial<GlyphRenderer.Attrs<BaseGlyph, HoverGlyph, NonSelectionGlyph, SelectionGlyph, MutedGlyph>>) {
     super(attrs)
   }
 
   static {
     this.prototype.default_view = GlyphRendererView
 
-    this.define<GlyphRenderer.Props>(({Bool, Auto, Or, Ref, Null, Nullable}) => ({
+    this.define<GlyphRenderer.Props<Glyph>>(({Bool, Auto, Or, Ref, Null, Nullable}) => ({
       data_source:        [ Ref(ColumnarDataSource) ],
       view:               [ Ref(CDSView), () => new CDSView() ],
       glyph:              [ Ref(Glyph) ],

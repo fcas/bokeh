@@ -3,16 +3,45 @@
 Ranges and axes
 ===============
 
-.. _ug_basic_axes_setting_ranges:
 
-Setting ranges
---------------
+Axis Ranges
+-----------
+
+Default auto-ranging
+~~~~~~~~~~~~~~~~~~~~
 
 By default, Bokeh attempts to automatically set the data bounds of plots to fit
-snugly around the data. You may, however, need to set a plot's range
-explicitly. To do so, set the ``x_range`` and/or ``y_range`` properties using a
-``Range1d`` object that lets you set the *start* and *end* points of the range
-you want.
+snugly around all the data available. This auto-ranging is performed by the
+``DataRange1d`` models that are the default values for a plot's ``x_range`` and
+``y_range`` properties.
+
+Windowed auto-ranging
+~~~~~~~~~~~~~~~~~~~~~
+
+Sometimes, you may want auto-ranging on one axis to be be based only on what
+is currently inside the viewport defined by the range of the other axis. For
+example, if you are panning through a long timeseries in the x-direction, and
+want the y-axis to adjust its range to fit only what is on the screen.
+
+This can be accomplished by setting the ``window_axis`` property on a plot.
+In the above case, to have the x-axis define the window for auto-ranging on
+the y-axis, you can set:
+
+.. code-block:: python
+
+    p.window_axis = "x"
+
+See :ref:`range_tool.py <example_range_tool_interaction/tools>` for a full
+example.
+
+.. _ug_basic_axes_setting_ranges:
+
+Setting ranges manually
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Other times, you may need to set a plot's range explicitly. To do so, set the
+``x_range`` and/or ``y_range`` properties using a ``Range1d`` object that
+lets you set the *start* and *end* points of the range you want.
 
 .. code-block:: python
 
@@ -99,6 +128,23 @@ to set one or both of the axes to ``"mercator"``.
 .. bokeh-plot:: __REPO__/examples/topics/geo/tile_source.py
    :source-position: above
 
+Timedelta axes
+~~~~~~~~~~~~~~
+
+.. note::
+    The example in this section requires a network connection and depends on
+    the open source Pandas library to present realistic time series data.
+
+For time series data that involves time deltas or intervals, you may want to
+use axes with labels suitable for different time scales.
+
+The |figure| function accepts ``x_axis_type`` and ``y_axis_type`` as arguments.
+To specify a datetime axis, pass ``"timedelta"`` for the value of either of
+these parameters.
+
+.. bokeh-plot:: __REPO__/examples/basic/axes/timedelta_axis.py
+    :source-position: above
+
 
 .. _ug_basic_axes_twin:
 
@@ -119,7 +165,7 @@ adding new glyph methods as well as when adding new axis objects with the
 Fixed location axis
 -------------------
 
-By defatult Bokeh places axes on the sides of plots, but it is possible to
+By default Bokeh places axes on the sides of plots, but it is possible to
 locate axes anywhere along a range by setting their ``fixed_location``
 property:
 

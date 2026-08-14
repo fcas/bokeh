@@ -26,10 +26,10 @@ from typing import TYPE_CHECKING, Any
 # Bokeh imports
 from ...util.dataclasses import Unspecified
 from ...util.serialization import convert_datetime_type, convert_timedelta_type
-from ...util.strings import nice_join
 from .. import enums
 from .color import ALPHA_DEFAULT_HELP, COLOR_DEFAULT_HELP, Color
 from .datetime import Datetime, TimeDelta
+from .descriptor_factory import PropertyDescriptorLike
 from .descriptors import DataSpecPropertyDescriptor, UnitsSpecPropertyDescriptor
 from .either import Either
 from .enum import Enum
@@ -37,6 +37,7 @@ from .instance import Instance
 from .nothing import Nothing
 from .nullable import Nullable
 from .primitive import (
+    Bool,
     Float,
     Int,
     Null,
@@ -44,6 +45,7 @@ from .primitive import (
 )
 from .serialized import NotSerialized
 from .singletons import Undefined
+from .string import Regex
 from .struct import Optional, Struct
 from .vectorization import (
     Expr,
@@ -52,6 +54,7 @@ from .vectorization import (
     Vectorized,
 )
 from .visual import (
+    CSS_LENGTH_RE,
     DashPattern,
     FontSize,
     HatchPatternType,
@@ -60,6 +63,7 @@ from .visual import (
 
 if TYPE_CHECKING:
     from ...core.has_props import HasProps
+    from ...document.events import DocumentPatchedEvent
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -68,10 +72,12 @@ if TYPE_CHECKING:
 __all__ = (
     'AlphaSpec',
     'AngleSpec',
+    'BoolSpec',
     'ColorSpec',
     'DashPatternSpec',
     'DataSpec',
     'DistanceSpec',
+    'FloatSpec',
     'FontSizeSpec',
     'FontStyleSpec',
     'HatchPatternSpec',
@@ -84,6 +90,7 @@ __all__ = (
     'StringSpec',
     'TextAlignSpec',
     'TextBaselineSpec',
+    'UnitsSpec',
 )
 
 #-----------------------------------------------------------------------------
@@ -175,7 +182,7 @@ class DataSpec(Either):
 
     """
 
-    def __init__(self, value_type, default, *, help: str | None = None) -> None:
+    def __init__(self, value_type: Any, default: Any, *, help: str | None = None) -> None:
         super().__init__(
             String,
             value_type,
@@ -200,7 +207,7 @@ class DataSpec(Either):
         self.value_type = self._validate_type_param(value_type)
         self.accepts(Instance("bokeh.models.expressions.Expression"), lambda obj: Expr(obj))
 
-    def transform(self, value: Any):
+    def transform(self, value: Any) -> Any:
         if isinstance(value, dict):
             if "value" in value:
                 return Value(**value)
@@ -211,7 +218,7 @@ class DataSpec(Either):
 
         return super().transform(value)
 
-    def make_descriptors(self, base_name: str):
+    def make_descriptors(self, name: str) -> list[PropertyDescriptorLike[Any]]:
         """ Return a list of ``DataSpecPropertyDescriptor`` instances to
         install on a class, in order to delegate attribute access to this
         property.
@@ -225,7 +232,7 @@ class DataSpec(Either):
         The descriptors returned are collected by the ``MetaHasProps``
         metaclass and added to ``HasProps`` subclasses during class creation.
         """
-        return [ DataSpecPropertyDescriptor(base_name, self) ]
+        return [ DataSpecPropertyDescriptor(name, self) ]
 
     def to_serializable(self, obj: HasProps, name: str, val: Any) -> Vectorized:
         # Check for spec type value
@@ -241,9 +248,17 @@ class DataSpec(Either):
 
         return val
 
+class BoolSpec(DataSpec):
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
+        super().__init__(Bool, default=default, help=help)
+
 class IntSpec(DataSpec):
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(Int, default=default, help=help)
+
+class FloatSpec(DataSpec):
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
+        super().__init__(Float, default=default, help=help)
 
 class NumberSpec(DataSpec):
     """ A |DataSpec| property that accepts numeric and datetime fixed values.
@@ -266,21 +281,31 @@ class NumberSpec(DataSpec):
 
     """
 
-    def __init__(self, default=Undefined, *, help: str | None = None, accept_datetime=True, accept_timedelta=True) -> None:
+    def __init__(self, default: Any = Undefined, *, help: str | None = None, accept_datetime: bool = True, accept_timedelta: bool = True) -> None:
         super().__init__(Float, default=default, help=help)
+
         if accept_timedelta:
             self.accepts(TimeDelta, convert_timedelta_type)
+        else:
+            from ...util.deprecation import deprecated
+
+            deprecated((3, 7, 0), "NumberSpec(..., accept_datetime=False)", "FloatSpec()")
+
         if accept_datetime:
             self.accepts(Datetime, convert_datetime_type)
+        else:
+            from ...util.deprecation import deprecated
 
-class AlphaSpec(NumberSpec):
+            deprecated((3, 7, 0), "NumberSpec(..., accept_timedelta=False)", "FloatSpec()")
 
-    def __init__(self, default=1.0, *, help: str | None = None) -> None:
+class AlphaSpec(FloatSpec):
+
+    def __init__(self, default: Any = 1.0, *, help: str | None = None) -> None:
         help = f"{help or ''}\n{ALPHA_DEFAULT_HELP}"
-        super().__init__(default=default, help=help, accept_datetime=False, accept_timedelta=False)
+        super().__init__(default=default, help=help)
 
 class NullStringSpec(DataSpec):
-    def __init__(self, default=None, *, help: str | None = None) -> None:
+    def __init__(self, default: Any = None, *, help: str | None = None) -> None:
         super().__init__(Nullable(String), default=default, help=help)
 
 class StringSpec(DataSpec):
@@ -298,7 +323,7 @@ class StringSpec(DataSpec):
         m.title = "foo"        # field
 
     """
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(String, default=default, help=help)
 
 class FontSizeSpec(DataSpec):
@@ -322,7 +347,7 @@ class FontSizeSpec(DataSpec):
 
     """
 
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(FontSize, default=default, help=help)
 
     def validate(self, value: Any, detail: bool = True) -> None:
@@ -331,32 +356,32 @@ class FontSizeSpec(DataSpec):
         super().validate(value, detail)
 
         if isinstance(value, str):
-            if len(value) == 0 or value[0].isdigit() and not FontSize._font_size_re.match(value):
+            if len(value) == 0 or (value[0].isdigit() and not CSS_LENGTH_RE.match(value)):
                 msg = "" if not detail else f"{value!r} is not a valid font size value"
                 raise ValueError(msg)
 
 class FontStyleSpec(DataSpec):
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(Enum(enums.FontStyle), default=default, help=help)
 
 class TextAlignSpec(DataSpec):
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(Enum(enums.TextAlign), default=default, help=help)
 
 class TextBaselineSpec(DataSpec):
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(Enum(enums.TextBaseline), default=default, help=help)
 
 class LineJoinSpec(DataSpec):
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(Enum(enums.LineJoin), default=default, help=help)
 
 class LineCapSpec(DataSpec):
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(Enum(enums.LineCap), default=default, help=help)
 
 class DashPatternSpec(DataSpec):
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(DashPattern, default=default, help=help)
 
 class HatchPatternSpec(DataSpec):
@@ -376,7 +401,7 @@ class HatchPatternSpec(DataSpec):
 
     """
 
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         super().__init__(Nullable(HatchPatternType), default=default, help=help)
 
 class MarkerSpec(DataSpec):
@@ -396,8 +421,8 @@ class MarkerSpec(DataSpec):
 
     """
 
-    def __init__(self, default, *, help: str | None = None) -> None:
-        super().__init__(MarkerType, default=default, help=help)
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
+        super().__init__(Either(MarkerType, Regex("^@.*$")), default=default, help=help)
 
 class UnitsSpec(NumberSpec):
     """ A |DataSpec| property that accepts numeric fixed values, and also
@@ -405,8 +430,10 @@ class UnitsSpec(NumberSpec):
 
     """
 
-    def __init__(self, default, units_enum, units_default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, units_enum: Any, units_default: Any, *, help: str | None = None) -> None:
         super().__init__(default=default, help=help)
+
+        from ...util.strings import nice_join
 
         units_type = NotSerialized(Enum(units_enum), default=units_default, help=f"""
         Units to use for the associated property: {nice_join(units_enum)}
@@ -438,7 +465,7 @@ class UnitsSpec(NumberSpec):
     def get_units(self, obj: HasProps, name: str) -> str:
         return getattr(obj, name + "_units")
 
-    def make_descriptors(self, base_name: str):
+    def make_descriptors(self, name: str) -> list[PropertyDescriptorLike[Any]]:
         """ Return a list of ``PropertyDescriptor`` instances to install on a
         class, in order to delegate attribute access to this property.
 
@@ -447,7 +474,7 @@ class UnitsSpec(NumberSpec):
         property as well as the associated units property are returned.
 
         Args:
-            name (str) : the name of the property these descriptors are for
+            base_name (str) : the name of the property these descriptors are for
 
         Returns:
             list[PropertyDescriptor]
@@ -455,9 +482,9 @@ class UnitsSpec(NumberSpec):
         The descriptors returned are collected by the ``MetaHasProps``
         metaclass and added to ``HasProps`` subclasses during class creation.
         """
-        units_name = base_name + "_units"
+        units_name = name + "_units"
         units_props = self._units_type.make_descriptors(units_name)
-        return [*units_props, UnitsSpecPropertyDescriptor(base_name, self, units_props[0])]
+        return [*units_props, UnitsSpecPropertyDescriptor(name, self, units_props[0])]
 
     def to_serializable(self, obj: HasProps, name: str, val: Any) -> Vectorized:
         val = super().to_serializable(obj, name, val)
@@ -474,7 +501,7 @@ class AngleSpec(UnitsSpec):
     Acceptable values for units are ``"deg"``, ``"rad"``, ``"grad"`` and ``"turn"``.
 
     """
-    def __init__(self, default=Undefined, units_default="rad", *, help: str | None = None) -> None:
+    def __init__(self, default: Any = Undefined, units_default: Any = "rad", *, help: str | None = None) -> None:
         super().__init__(default=default, units_enum=enums.AngleUnits, units_default=units_default, help=help)
 
 class DistanceSpec(UnitsSpec):
@@ -484,31 +511,31 @@ class DistanceSpec(UnitsSpec):
     Acceptable values for units are ``"screen"`` and ``"data"``.
 
     """
-    def __init__(self, default=Undefined, units_default="data", *, help: str | None = None) -> None:
+    def __init__(self, default: Any = Undefined, units_default: Any = "data", *, help: str | None = None) -> None:
         super().__init__(default=default, units_enum=enums.SpatialUnits, units_default=units_default, help=help)
 
-    def prepare_value(self, cls, name, value):
+    def prepare_value(self, owner: HasProps | type[HasProps], name: str, value: Any, *, hint: DocumentPatchedEvent | None = None) -> Any:
         try:
             if value < 0:
                 raise ValueError("Distances must be positive!")
         except TypeError:
             pass
-        return super().prepare_value(cls, name, value)
+        return super().prepare_value(owner, name, value, hint=hint)
 
 class NullDistanceSpec(DistanceSpec):
 
-    def __init__(self, default=None, units_default="data", *, help: str | None = None) -> None:
+    def __init__(self, default: Any = None, units_default: Any = "data", *, help: str | None = None) -> None:
         super().__init__(default=default, units_default=units_default, help=help)
         self.value_type = Nullable(Float)
         self._type_params = [Null(), *self._type_params]
 
-    def prepare_value(self, cls, name, value):
+    def prepare_value(self, owner: HasProps | type[HasProps], name: str, value: Any, *, hint: DocumentPatchedEvent | None = None) -> Any:
         try:
             if value is not None and value < 0:
                 raise ValueError("Distances must be positive or None!")
         except TypeError:
             pass
-        return super().prepare_value(cls, name, value)
+        return super().prepare_value(owner, name, value, hint=hint)
 
 class SizeSpec(NumberSpec):
     """ A |DataSpec| property that accepts non-negative numeric fixed values
@@ -516,13 +543,13 @@ class SizeSpec(NumberSpec):
     :class:`~bokeh.models.sources.ColumnDataSource`.
     """
 
-    def prepare_value(self, cls, name, value):
+    def prepare_value(self, owner: HasProps | type[HasProps], name: str, value: Any, *, hint: DocumentPatchedEvent | None = None) -> Any:
         try:
             if value < 0:
                 raise ValueError("Screen sizes must be positive")
         except TypeError:
             pass
-        return super().prepare_value(cls, name, value)
+        return super().prepare_value(owner, name, value, hint=hint)
 
 class ColorSpec(DataSpec):
     """ A |DataSpec| property that accepts |Color| fixed values.
@@ -550,12 +577,12 @@ class ColorSpec(DataSpec):
 
     """
 
-    def __init__(self, default, *, help: str | None = None) -> None:
+    def __init__(self, default: Any, *, help: str | None = None) -> None:
         help = f"{help or ''}\n{COLOR_DEFAULT_HELP}"
         super().__init__(Nullable(Color), default=default, help=help)
 
     @classmethod
-    def isconst(cls, val):
+    def isconst(cls, val: Any) -> bool:
         """ Whether the value is a string color literal.
 
         Checks for a well-formed hexadecimal color value or a named color.
@@ -571,7 +598,7 @@ class ColorSpec(DataSpec):
                ((len(val) == 7 and val[0] == "#") or val in enums.NamedColor)
 
     @classmethod
-    def is_color_tuple_shape(cls, val):
+    def is_color_tuple_shape(cls, val: Any) -> bool:
         """ Whether the value is the correct shape to be a color tuple
 
         Checks for a 3 or 4-tuple of numbers
@@ -583,9 +610,9 @@ class ColorSpec(DataSpec):
             True, if the value could be a color tuple
 
         """
-        return isinstance(val, tuple) and len(val) in (3, 4) and all(isinstance(v, float | int) for v in val)
+        return isinstance(val, tuple) and len(val) in (3, 4) and all(isinstance(v, (float, int)) for v in val)
 
-    def prepare_value(self, cls, name, value):
+    def prepare_value(self, owner: HasProps | type[HasProps], name: str, value: Any, *, hint: DocumentPatchedEvent | None = None) -> Any:
         # Some explanation is in order. We want to accept tuples like
         # (12.0, 100.0, 52.0) i.e. that have "float" byte values. The
         # ColorSpec has a transform to adapt values like this to tuples
@@ -596,7 +623,7 @@ class ColorSpec(DataSpec):
         # have integer RGB components
         if self.is_color_tuple_shape(value):
             value = tuple(int(v) if i < 3 else v for i, v in enumerate(value))
-        return super().prepare_value(cls, name, value)
+        return super().prepare_value(owner, name, value, hint=hint)
 
 #-----------------------------------------------------------------------------
 # Dev API

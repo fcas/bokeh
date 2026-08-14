@@ -1,5 +1,6 @@
 import type {Arrayable, Rect, Box, Interval, Size} from "../types"
 import {ScreenArray} from "../types"
+import type {VAlign, HAlign} from "../enums"
 import type {Equatable, Comparator} from "./eq"
 import {equals} from "./eq"
 import type * as affine from "./affine"
@@ -17,22 +18,47 @@ export function empty(): Rect {
   }
 }
 
-export function positive_x(): Rect {
+export function full(): Rect {
   return {
-    x0:  Number.MIN_VALUE,
+    x0: -Infinity,
     y0: -Infinity,
     x1:  Infinity,
     y1:  Infinity,
   }
 }
 
-export function positive_y(): Rect {
+export function x_range(x0: number, x1: number): Rect {
   return {
-    x0: -Infinity,
-    y0:  Number.MIN_VALUE,
-    x1:  Infinity,
+    x0,
+    y0: -Infinity,
+    x1,
     y1:  Infinity,
   }
+}
+
+export function y_range(y0: number, y1: number): Rect {
+  return {
+    x0: -Infinity,
+    y0,
+    x1:  Infinity,
+    y1,
+  }
+}
+
+export function positive_x(): Rect {
+  return x_range(Number.MIN_VALUE, Infinity)
+}
+
+export function negative_x(): Rect {
+  return x_range(-Infinity, -Number.MIN_VALUE)
+}
+
+export function positive_y(): Rect {
+  return y_range(Number.MIN_VALUE, Infinity)
+}
+
+export function negative_y(): Rect {
+  return y_range(-Infinity, -Number.MIN_VALUE)
 }
 
 function _min(a: number, b: number): number {
@@ -105,10 +131,10 @@ export type VerticalPosition =
 
 export type Position = HorizontalPosition & VerticalPosition
 
-export type CoordinateMapper = {
-  compute(v: number): number
+export type CoordinateMapper<T = number> = {
+  compute(v: T): number
   invert(sv: number): number
-  v_compute(vs: Arrayable<number>): ScreenArray
+  v_compute(vs: Arrayable<T>): ScreenArray
   v_invert(svs: Arrayable<number>): Arrayable<number>
   readonly source_range: Interval
   readonly target_range: Interval
@@ -143,14 +169,45 @@ export class BBox implements Rect, Equatable {
         this.y1 = y1
       }
     } else if ("x" in box) {
-      const {x, y, width, height} = box
+      const {x, y, width, height, origin="top_left"} = box
       if (!(width >= 0 && height >= 0)) {
         throw new Error(`invalid bbox {x: ${x}, y: ${y}, width: ${width}, height: ${height}}`)
       }
-      this.x0 = x
-      this.y0 = y
-      this.x1 = x + width
-      this.y1 = y + height
+      const base_origin = (() => {
+        switch (origin) {
+          case "left":   return "center_left"
+          case "right":  return "center_right"
+          case "top":    return "top_center"
+          case "bottom": return "bottom_center"
+          case "center": return "center_center"
+          default:       return origin
+        }
+      })()
+      const [y_align, x_align] = base_origin.split("_", 2) as [VAlign, HAlign]
+      const y_coeff = (() => {
+        switch (y_align) {
+          case "top":    return 0.0
+          case "center": return 0.5
+          case "bottom": return 1.0
+        }
+      })()
+      const x_coeff = (() => {
+        switch (x_align) {
+          case "left":   return 0.0
+          case "center": return 0.5
+          case "right":  return 1.0
+        }
+      })()
+      const d_width = x_coeff*width
+      const d_height = y_coeff*height
+      const x0 = x - d_width
+      const y0 = y - d_height
+      const x1 = x0 + width
+      const y1 = y0 + height
+      this.x0 = x0
+      this.y0 = y0
+      this.x1 = x1
+      this.y1 = y1
     } else {
       let left: number, right: number
       let top: number, bottom: number
@@ -320,6 +377,11 @@ export class BBox implements Rect, Equatable {
     return {left, right, top, bottom}
   }
 
+  get args(): [x: number, y: number, w: number, h: number] {
+    const {x, y, width, height} = this
+    return [x, y, width, height]
+  }
+
   get x_range(): Interval {
     return {start: this.x0, end: this.x1}
   }
@@ -362,19 +424,19 @@ export class BBox implements Rect, Equatable {
 
   resolve(symbol: string): XY | number {
     switch (symbol) {
-      case "top_left":      return {x: this.left, y: this.top}
-      case "top_center":    return {x: this.hcenter, y: this.top}
-      case "top_right":     return {x: this.right, y: this.top}
+      case "top_left":      return this.top_left
+      case "top_center":    return this.top_center
+      case "top_right":     return this.top_right
 
-      case "center_left":   return {x: this.left, y: this.vcenter}
-      case "center_center": return {x: this.hcenter, y: this.vcenter}
-      case "center_right":  return {x: this.right, y: this.vcenter}
+      case "center_left":   return this.center_left
+      case "center_center": return this.center_center
+      case "center_right":  return this.center_right
 
-      case "bottom_left":   return {x: this.left, y: this.bottom}
-      case "bottom_center": return {x: this.hcenter, y: this.bottom}
-      case "bottom_right":  return {x: this.right, y: this.bottom}
+      case "bottom_left":   return this.bottom_left
+      case "bottom_center": return this.bottom_center
+      case "bottom_right":  return this.bottom_right
 
-      case "center":        return {x: this.hcenter, y: this.vcenter}
+      case "center":        return this.center
 
       case "top":           return this.top
       case "left":          return this.left
@@ -386,6 +448,40 @@ export class BBox implements Rect, Equatable {
 
       default:              return {x: NaN, y: NaN}
     }
+  }
+
+  get top_left(): XY {
+    return {x: this.left, y: this.top}
+  }
+  get top_center(): XY {
+    return {x: this.hcenter, y: this.top}
+  }
+  get top_right(): XY {
+    return {x: this.right, y: this.top}
+  }
+
+  get center_left(): XY {
+    return {x: this.left, y: this.vcenter}
+  }
+  get center_center(): XY {
+    return {x: this.hcenter, y: this.vcenter}
+  }
+  get center_right(): XY {
+    return {x: this.right, y: this.vcenter}
+  }
+
+  get bottom_left(): XY {
+    return {x: this.left, y: this.bottom}
+  }
+  get bottom_center(): XY {
+    return {x: this.hcenter, y: this.bottom}
+  }
+  get bottom_right(): XY {
+    return {x: this.right, y: this.bottom}
+  }
+
+  get center(): XY {
+    return {x: this.hcenter, y: this.vcenter}
   }
 
   round(): BBox {
@@ -400,6 +496,11 @@ export class BBox implements Rect, Equatable {
   relative(): BBox {
     const {width, height} = this
     return new BBox({x: 0, y: 0, width, height})
+  }
+
+  relative_to(to: BBox): BBox {
+    const {x, y, width, height} = this
+    return new BBox({x: x - to.x, y: y - to.y, width, height})
   }
 
   translate(tx: number, ty: number): BBox {
@@ -483,6 +584,60 @@ export class BBox implements Rect, Equatable {
   intersects(that: Rect): boolean {
     return !(that.x1 < this.x0 || that.x0 > this.x1 ||
              that.y1 < this.y0 || that.y0 > this.y1)
+  }
+
+  private _x_percent?: CoordinateMapper
+  get x_percent(): CoordinateMapper {
+    const self = this
+    return this._x_percent ?? (this._x_percent = {
+      compute(x: number): number {
+        return self.left + x*self.width
+      },
+      invert(sx: number): number {
+        return (sx - self.left)/self.width
+      },
+      v_compute(xs: Arrayable<number>): ScreenArray {
+        const {left, width} = self
+        return new ScreenArray(map(xs, (x) => left + x*width))
+      },
+      v_invert(sxs: Arrayable<number>): Arrayable<number> {
+        const {left, width} = self
+        return map(sxs, (sx) => (sx - left)/width)
+      },
+      get source_range(): Interval {
+        return self.x_range
+      },
+      get target_range(): Interval {
+        return self.x_range
+      },
+    })
+  }
+
+  private _y_percent?: CoordinateMapper
+  get y_percent(): CoordinateMapper {
+    const self = this
+    return this._y_percent ?? (this._y_percent = {
+      compute(y: number): number {
+        return self.top + y*self.height
+      },
+      invert(sy: number): number {
+        return (sy - self.top)/self.height
+      },
+      v_compute(ys: Arrayable<number>): ScreenArray {
+        const {top, height} = self
+        return new ScreenArray(map(ys, (y) => top + y*height))
+      },
+      v_invert(sys: Arrayable<number>): Arrayable<number> {
+        const {top, height} = self
+        return map(sys, (sy) => (sy - top)/height)
+      },
+      get source_range(): Interval {
+        return self.y_range
+      },
+      get target_range(): Interval {
+        return self.y_range
+      },
+    })
   }
 
   private _x_screen?: CoordinateMapper

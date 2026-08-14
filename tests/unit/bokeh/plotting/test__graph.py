@@ -16,9 +16,6 @@ import pytest ; pytest
 # Imports
 #-----------------------------------------------------------------------------
 
-# External imports
-import pandas as pd
-
 # Bokeh imports
 from bokeh.core.properties import field
 from bokeh.models import ColumnDataSource, MultiLine, Scatter
@@ -41,6 +38,7 @@ import bokeh.plotting._graph as bpg # isort:skip
 
 class Test_get_graph_kwargs:
     def test_convert_dataframes_to_sources(self) -> None:
+        pd = pytest.importorskip("pandas")
         node_source = pd.DataFrame(data=dict(foo=[]))
         edge_source = pd.DataFrame(data=dict(start=[], end=[], bar=[]))
 
@@ -129,6 +127,16 @@ class Test_get_graph_kwargs:
         assert r.muted_glyph.fill_color == "red"
         assert r.muted_glyph.line_alpha == 0.2
         assert r.muted_glyph.line_color == "blue"
+
+    def test_bad_input(self) -> None:
+        msg = """\
+Failed to auto-convert <class 'int'> to ColumnDataSource.
+ Original error: expected a dict, dataclass, or eager dataframe support by Narwhals, got 42"""
+        with pytest.raises(ValueError, match=msg):
+            bpg.get_graph_kwargs(42, {})
+
+        with pytest.raises(ValueError, match=msg):
+            bpg.get_graph_kwargs({}, 42)
 
 #-----------------------------------------------------------------------------
 # Private API

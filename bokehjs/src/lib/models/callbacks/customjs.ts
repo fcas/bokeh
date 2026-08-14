@@ -61,6 +61,7 @@ export class CustomJS extends Callback {
       // XXX: eval() to work around transpilation to require()
       // https://github.com/microsoft/TypeScript/issues/43329
       const module = await eval(`import("${url}")`)
+      // TODO const module = await import(`${url}`)
       if (isFunction(module.default)) {
         return module.default as ESFunc
       } else {
@@ -101,6 +102,12 @@ export class CustomJS extends Callback {
     }
   }
 
+  async compile(): Promise<void> {
+    if (this._state == null) {
+      this._state = await this._compile()
+    }
+  }
+
   private _state: State | null = null
   async state(): Promise<State> {
     if (this._state == null) {
@@ -111,6 +118,19 @@ export class CustomJS extends Callback {
 
   async execute(obj: Model, data: KV = {}): Promise<unknown> {
     const {func, module} = await this.state()
+    const context = {index}
+    if (module) {
+      return func(to_object(this.args), obj, data, context)
+    } else {
+      return func.call(obj, obj, data, context)
+    }
+  }
+
+  execute_sync(obj: Model, data: KV = {}): unknown {
+    if (this._state == null) {
+      throw new Error(`${this.type} needs to be compiled first`)
+    }
+    const {func, module} = this._state
     const context = {index}
     if (module) {
       return func(to_object(this.args), obj, data, context)

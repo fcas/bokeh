@@ -25,7 +25,7 @@ import {Grid} from "core/layout"
 import {HStack, VStack, NodeLayout} from "core/layout/alignments"
 import {BorderLayout} from "core/layout/border"
 import {SidePanel} from "core/layout/side_panel"
-import type {IterViews} from "core/build_views"
+import type {ChildView} from "core/build_views"
 import {build_view} from "core/build_views"
 import {BBox} from "core/util/bbox"
 import {isString} from "core/util/types"
@@ -63,10 +63,8 @@ export abstract class BaseColorBarView extends AnnotationView {
     return this._orientation
   }
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield this._axis_view
-    yield this._title_view
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), this._axis_view, this._title_view]
   }
 
   override initialize(): void {
@@ -135,12 +133,6 @@ export abstract class BaseColorBarView extends AnnotationView {
     this._frame_view = await build_view(this._frame, {parent})
     this._axis_view = await build_view(this._axis, {parent})
     this._title_view = await build_view(this._title, {parent})
-  }
-
-  override remove(): void {
-    this._title_view.remove()
-    this._axis_view.remove()
-    super.remove()
   }
 
   protected _apply_axis_properties(): void {
@@ -486,13 +478,12 @@ export abstract class BaseColorBarView extends AnnotationView {
 
   protected abstract _paint_colors(ctx: Context2d, bbox: BBox): void
 
-  protected _paint(): void {
-    const {ctx} = this.layer
+  protected _paint(ctx: Context2d): void {
     ctx.save()
     this._paint_bbox(ctx, this._inner_layout.bbox)
     this._paint_colors(ctx, this._inner_layout.center_panel.bbox)
-    this._title_view.paint()
-    this._axis_view.paint()
+    this._title_view.paint(ctx)
+    this._axis_view.paint(ctx)
     ctx.restore()
   }
 
@@ -510,14 +501,11 @@ export abstract class BaseColorBarView extends AnnotationView {
     }
 
     ctx.save()
-    if (this.visuals.background_fill.doit) {
-      this.visuals.background_fill.set_value(ctx)
-      ctx.fillRect(x, y, width, height)
-    }
-    if (this.visuals.border_line.doit) {
-      this.visuals.border_line.set_value(ctx)
-      ctx.strokeRect(x, y, width, height)
-    }
+    ctx.beginPath()
+    ctx.rect(x, y, width, height)
+    this.visuals.background_fill.apply(ctx)
+    this.visuals.background_hatch.apply(ctx)
+    this.visuals.border_line.apply(ctx)
     ctx.restore()
   }
 }
@@ -532,7 +520,6 @@ export namespace BaseColorBar {
     title_standoff: p.Property<number>
     width: p.Property<number | "auto">
     height: p.Property<number | "auto">
-    scale_alpha: p.Property<number>
     ticker: p.Property<Ticker | "auto">
     formatter: p.Property<TickFormatter | "auto">
     major_label_overrides: p.Property<LabelOverrides>
@@ -553,7 +540,8 @@ export namespace BaseColorBar {
     mixins.MinorTickLine  &
     mixins.BorderLine     &
     mixins.BarLine        &
-    mixins.BackgroundFill
+    mixins.BackgroundFill &
+    mixins.BackgroundHatch
 
   export type Visuals = Annotation.Visuals & {
     major_label_text: visuals.Text
@@ -563,12 +551,13 @@ export namespace BaseColorBar {
     border_line: visuals.Line
     bar_line: visuals.Line
     background_fill: visuals.Fill
+    background_hatch: visuals.Hatch
   }
 }
 
 export interface BaseColorBar extends BaseColorBar.Attrs {}
 
-export class BaseColorBar extends Annotation {
+export abstract class BaseColorBar extends Annotation {
   declare properties: BaseColorBar.Props
   declare __view_type__: BaseColorBarView
 
@@ -585,16 +574,16 @@ export class BaseColorBar extends Annotation {
       ["border_",      mixins.Line],
       ["bar_",         mixins.Line],
       ["background_",  mixins.Fill],
+      ["background_",  mixins.Hatch],
     ])
 
-    this.define<BaseColorBar.Props>(({Alpha, Float, Str, Tuple, Or, Ref, Auto, Nullable}) => ({
+    this.define<BaseColorBar.Props>(({Float, Str, Tuple, Or, Ref, Auto, Nullable}) => ({
       location:              [ Or(Anchor, Tuple(Float, Float)), "top_right" ],
       orientation:           [ Or(Orientation, Auto), "auto" ],
       title:                 [ Nullable(Or(Str, Ref(BaseText))), null ],
       title_standoff:        [ Float, 2 ],
       width:                 [ Or(Float, Auto), "auto" ],
       height:                [ Or(Float, Auto), "auto" ],
-      scale_alpha:           [ Alpha, 1.0 ],
       ticker:                [ Or(Ref(Ticker), Auto), "auto" ],
       formatter:             [ Or(Ref(TickFormatter), Auto), "auto" ],
       major_label_overrides: [ LabelOverrides, new Map() ],

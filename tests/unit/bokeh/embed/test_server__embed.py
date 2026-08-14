@@ -19,9 +19,6 @@ import pytest ; pytest
 # Standard library imports
 import json
 
-# External imports
-import bs4
-
 # Module under test
 import bokeh.embed.server as bes # isort:skip
 
@@ -33,7 +30,7 @@ import bokeh.embed.server as bes # isort:skip
 def test_plot() -> None:
     from bokeh.plotting import figure
     test_plot = figure()
-    test_plot.circle([1, 2], [2, 3])
+    test_plot.scatter([1, 2], [2, 3])
     return test_plot
 
 #-----------------------------------------------------------------------------
@@ -61,12 +58,13 @@ class TestServerDocument:
         assert 'resources=none' in r
 
     def test_general(self) -> None:
+        bs4 = pytest.importorskip("bs4")
         url = "http://localhost:8081/foo/bar/sliders"
         r = bes.server_document(url=url)
         assert 'bokeh-app-path=/foo/bar/sliders' in r
         assert 'bokeh-absolute-url=http://localhost:8081/foo/bar/sliders' in r
         html = bs4.BeautifulSoup(r, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         assert len(scripts) == 1
         script = scripts[0]
         attrs = script.attrs
@@ -76,11 +74,12 @@ class TestServerDocument:
         assert request in script.string
 
     def test_script_attrs_arguments_provided(self) -> None:
+        bs4 = pytest.importorskip("bs4")
         url = "http://localhost:5006"
         r = bes.server_document(arguments=dict(foo=10))
         assert 'foo=10' in r
         html = bs4.BeautifulSoup(r, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         assert len(scripts) == 1
         script = scripts[0]
         attrs = script.attrs
@@ -90,12 +89,13 @@ class TestServerDocument:
         assert request in script.string
 
     def test_script_attrs_url_provided_absolute_resources(self) -> None:
+        bs4 = pytest.importorskip("bs4")
         url = "http://localhost:8081/foo/bar/sliders"
         r = bes.server_document(url=url)
         assert 'bokeh-app-path=/foo/bar/sliders' in r
         assert 'bokeh-absolute-url=http://localhost:8081/foo/bar/sliders' in r
         html = bs4.BeautifulSoup(r, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         assert len(scripts) == 1
         script = scripts[0]
         attrs = script.attrs
@@ -105,11 +105,12 @@ class TestServerDocument:
         assert request in script.string
 
     def test_script_attrs_url_provided(self) -> None:
+        bs4 = pytest.importorskip("bs4")
         url = "http://localhost:8081/foo/bar/sliders"
         r = bes.server_document(url=url, relative_urls=True)
         assert 'bokeh-app-path=/foo/bar/sliders' in r
         html = bs4.BeautifulSoup(r, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         assert len(scripts) == 1
         script = scripts[0]
         attrs = script.attrs
@@ -117,6 +118,14 @@ class TestServerDocument:
         divid = attrs['id']
         request = f"xhr.open('GET', \"{url}/autoload.js?bokeh-autoload-element={divid}&bokeh-app-path=/foo/bar/sliders\", true);"
         assert request in script.string
+
+    def test_root_relative_url(self) -> None:
+        url = "/bkapp"
+        r = bes.server_document(url=url, relative_urls=True)
+
+        assert f'xhr.open(\'GET\', "{url}/autoload.js?' in r
+        assert "bokeh-app-path=/bkapp" in r
+        assert "bokeh-absolute-url" not in r
 
     @pytest.mark.parametrize("with_credentials", [True, False])
     def test_with_credentials(self, with_credentials):
@@ -134,10 +143,11 @@ class TestServerSession:
         assert isinstance(r, str)
 
     def test_script_attrs_session_id_provided(self, test_plot) -> None:
+        bs4 = pytest.importorskip("bs4")
         url = "http://localhost:5006"
         r = bes.server_session(test_plot, session_id='fakesession')
         html = bs4.BeautifulSoup(r, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         assert len(scripts) == 1
         script = scripts[0]
         attrs = script.attrs
@@ -162,10 +172,11 @@ class TestServerSession:
         assert 'resources=none' in r
 
     def test_model_none(self) -> None:
+        bs4 = pytest.importorskip("bs4")
         url = "http://localhost:5006"
         r = bes.server_session(None, session_id='fakesession')
         html = bs4.BeautifulSoup(r, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         assert len(scripts) == 1
         script = scripts[0]
         attrs = script.attrs
@@ -176,10 +187,11 @@ class TestServerSession:
         assert 'xhr.setRequestHeader("Bokeh-Session-Id", "fakesession")' in script.string
 
     def test_general(self, test_plot) -> None:
+        bs4 = pytest.importorskip("bs4")
         url = "http://localhost:5006"
         r = bes.server_session(test_plot, session_id='fakesession')
         html = bs4.BeautifulSoup(r, "html.parser")
-        scripts = html.findAll(name='script')
+        scripts = html.find_all(name='script')
         assert len(scripts) == 1
         script = scripts[0]
         attrs = script.attrs

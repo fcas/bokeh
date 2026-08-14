@@ -13,6 +13,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportArgumentType=false, reportReturnType=false, reportAssignmentType=false, reportAttributeAccessIssue=false, reportGeneralTypeIssues=false, reportOperatorIssue=false, reportCallIssue=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ log = logging.getLogger(__name__)
 # Standard library imports
 import math
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -31,14 +34,12 @@ from typing import (
     Iterator,
     Literal,
     Sequence,
-    TypeAlias,
-    TypeVar,
     overload,
 )
 
 # Bokeh imports
-from .core.enums import Location, LocationType, SizingModeType
-from .core.property.singletons import Undefined, UndefinedType
+from .core.enums import Location
+from .core.property.singletons import Undefined
 from .models import (
     Column,
     CopyTool,
@@ -57,8 +58,12 @@ from .models import (
     ToolProxy,
     UIElement,
 )
-from .util.dataclasses import dataclass
-from .util.warnings import warn
+
+if TYPE_CHECKING:
+    from .core.enums import LocationType, SizingModeType
+    from .core.property.singletons import UndefinedType
+
+    type ToolbarOptions = Literal["logo", "autohide", "active_drag", "active_inspect", "active_scroll", "active_tap", "active_multi"]
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -72,9 +77,6 @@ __all__ = (
     'row',
     'Spacer',
 )
-
-if TYPE_CHECKING:
-    ToolbarOptions = Literal["logo", "autohide", "active_drag", "active_inspect", "active_scroll", "active_tap", "active_multi"]
 
 #-----------------------------------------------------------------------------
 # General API
@@ -187,23 +189,56 @@ def layout(*args: UIElement, children: list[UIElement] | None = None, sizing_mod
     _children = _parse_children_arg(*args, children=children)
     return _create_grid(_children, sizing_mode, **kwargs)
 
+
+@overload
 def gridplot(
-        children: list[list[UIElement | None]], *,
-        sizing_mode: SizingModeType | None = None,
-        toolbar_location: LocationType | None = "above",
-        ncols: int | None = None,
-        width: int | None = None,
-        height: int | None = None,
-        toolbar_options: dict[ToolbarOptions, Any] | None = None,
-        merge_tools: bool = True) -> GridPlot:
+    children: list[UIElement | None],
+    *,
+    sizing_mode: SizingModeType | None = None,
+    toolbar_location: LocationType | None = "above",
+    ncols: int,
+    width: int | None = None,
+    height: int | None = None,
+    toolbar_options: dict[ToolbarOptions, Any] | None = None,
+    merge_tools: bool = True,
+) -> GridPlot:
+    ...
+
+
+@overload
+def gridplot(
+    children: list[list[UIElement | None]],
+    *,
+    sizing_mode: SizingModeType | None = None,
+    toolbar_location: LocationType | None = "above",
+    ncols: None = None,
+    width: int | None = None,
+    height: int | None = None,
+    toolbar_options: dict[ToolbarOptions, Any] | None = None,
+    merge_tools: bool = True,
+) -> GridPlot:
+    ...
+
+
+def gridplot(
+    children: list[UIElement | None] | list[list[UIElement | None]],
+    *,
+    sizing_mode: SizingModeType | None = None,
+    toolbar_location: LocationType | None = "above",
+    ncols: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    toolbar_options: dict[ToolbarOptions, Any] | None = None,
+    merge_tools: bool = True,
+) -> GridPlot:
     ''' Create a grid of plots rendered on separate canvases.
 
     The ``gridplot`` function builds a single toolbar for all the plots in the
-    grid. ``gridplot`` is designed to layout a set of plots. For general
+    grid. ``gridplot`` is designed to lay out a set of plots. For general
     grid layout, use the :func:`~bokeh.layouts.layout` function.
 
     Args:
-        children (list of lists of |Plot|): An array of plots to display in a
+        children (list or list of lists of |Plot|): An array of plots to display in a
             grid, given as a list of lists of Plot objects. To leave a position
             in the grid empty, pass None for that position in the children list.
             OR list of |Plot| if called with ncols.
@@ -295,7 +330,7 @@ def gridplot(
                 raise ValueError("Only UIElement and LayoutDOM items can be inserted into a grid")
 
     def merge(cls: type[Tool], group: list[Tool]) -> Tool | ToolProxy | None:
-        if issubclass(cls, SaveTool | CopyTool | ExamineTool | FullscreenTool):
+        if issubclass(cls, (SaveTool, CopyTool, ExamineTool, FullscreenTool)):
             return cls()
         else:
             return None
@@ -308,22 +343,30 @@ def gridplot(
     if merge_tools:
         tools = group_tools(tools, merge=merge)
 
+    def map_to_proxy(active_tool: Tool | Literal["auto"] | None) -> ToolProxy | Tool:
+        if isinstance(active_tool, Tool):
+            for tool_or_proxy in tools:
+                if isinstance(tool_or_proxy, ToolProxy) and active_tool in tool_or_proxy.tools:
+                    return tool_or_proxy
+        return active_tool
+
     logos = [ toolbar.logo for toolbar in toolbars ]
     autohides = [ toolbar.autohide for toolbar in toolbars ]
-    active_drags = [ toolbar.active_drag for toolbar in toolbars ]
-    active_inspects = [ toolbar.active_inspect for toolbar in toolbars ]
-    active_scrolls = [ toolbar.active_scroll for toolbar in toolbars ]
-    active_taps = [ toolbar.active_tap for toolbar in toolbars ]
-    active_multis = [ toolbar.active_multi for toolbar in toolbars ]
+    active_drags = [ map_to_proxy(toolbar.active_drag) for toolbar in toolbars ]
+    active_inspects = [ map_to_proxy(toolbar.active_inspect) for toolbar in toolbars ] # TODO list[Tool]
+    active_scrolls = [ map_to_proxy(toolbar.active_scroll) for toolbar in toolbars ]
+    active_taps = [ map_to_proxy(toolbar.active_tap) for toolbar in toolbars ]
+    active_multis = [ map_to_proxy(toolbar.active_multi) for toolbar in toolbars ]
 
-    V = TypeVar("V")
-    def assert_unique(values: list[V], name: ToolbarOptions) -> V | UndefinedType:
+    def assert_unique[V](values: list[V], name: ToolbarOptions) -> V | UndefinedType:
         if name in toolbar_options:
             return toolbar_options[name]
         n = len(set(values))
         if n == 0:
             return Undefined
         elif n > 1:
+            from .util.warnings import warn
+
             warn(f"found multiple competing values for 'toolbar.{name}' property; using the latest value")
         return values[-1]
 
@@ -513,26 +556,26 @@ def grid(children: Any = [], sizing_mode: SizingModeType | None = None, nrows: i
                 ncols = math.ceil(N/nrows)
             layout = col([ row(children[i:i+ncols]) for i in range(0, N, ncols) ])
         else:
-            def traverse(children: list[LayoutDOM], level: int = 0):
+            def traverse_list(children: list[LayoutDOM], level: int = 0):
                 if isinstance(children, list):
                     container = col if level % 2 == 0 else row
-                    return container([ traverse(child, level+1) for child in children ])
+                    return container([ traverse_list(child, level+1) for child in children ])
                 else:
                     return children
 
-            layout = traverse(children)
+            layout = traverse_list(children)
     elif isinstance(children, LayoutDOM):
         def is_usable(child: LayoutDOM) -> bool:
             return _has_auto_sizing(child) and child.spacing == 0
 
-        def traverse(item: LayoutDOM, top_level: bool = False):
+        def traverse_layout(item: LayoutDOM, top_level: bool = False):
             if isinstance(item, FlexBox) and (top_level or is_usable(item)):
                 container = col if isinstance(item, Column) else row
-                return container(list(map(traverse, item.children)))
+                return container(list(map(traverse_layout, item.children)))
             else:
                 return item
 
-        layout = traverse(children, top_level=True)
+        layout = traverse_layout(children, top_level=True)
     elif isinstance(children, str):
         raise NotImplementedError
     else:
@@ -554,17 +597,16 @@ def grid(children: Any = [], sizing_mode: SizingModeType | None = None, nrows: i
 # Dev API
 #-----------------------------------------------------------------------------
 
-T = TypeVar("T", bound=Tool)
-MergeFn: TypeAlias = Callable[[type[T], list[T]], Tool | ToolProxy | None]
+type MergeFn[T] = Callable[[type[T], list[T]], Tool | ToolProxy | None]
+
+@dataclass
+class ToolEntry:
+    tool: Tool
+    props: Any
 
 def group_tools(tools: list[Tool | ToolProxy], *, merge: MergeFn[Tool] | None = None,
         ignore: set[str] | None = None) -> list[Tool | ToolProxy]:
     """ Group common tools into tool proxies. """
-    @dataclass
-    class ToolEntry:
-        tool: Tool
-        props: Any
-
     by_type: defaultdict[type[Tool], list[ToolEntry]] = defaultdict(list)
     computed: list[Tool | ToolProxy] = []
 
@@ -576,10 +618,8 @@ def group_tools(tools: list[Tool | ToolProxy], *, merge: MergeFn[Tool] | None = 
             computed.append(tool)
         else:
             props = tool.properties_with_values()
-            for attr in ignore:
-                if attr in props:
-                    del props[attr]
-            by_type[tool.__class__].append(ToolEntry(tool, props))
+            filtered_props = {k: v for k, v in props.items() if k not in ignore}
+            by_type[tool.__class__].append(ToolEntry(tool, filtered_props))
 
     for cls, entries in by_type.items():
         if merge is not None:
@@ -588,18 +628,19 @@ def group_tools(tools: list[Tool | ToolProxy], *, merge: MergeFn[Tool] | None = 
                 computed.append(merged)
                 continue
 
-        while entries:
-            head, *tail = entries
+        items: list[ToolEntry | None] = list(entries)
+        for i, head in enumerate(items):
+            if head is None:
+                continue
+            items[i] = None
             group: list[Tool] = [head.tool]
-            for item in list(tail):
-                if item.props == head.props:
+            for j in range(i + 1, len(items)):
+                item = items[j]
+                if item is not None and item.props == head.props:
                     group.append(item.tool)
-                    entries.remove(item)
-            entries.remove(head)
+                    items[j] = None
 
-            if len(group) == 1:
-                computed.append(group[0])
-            elif merge is not None and (tool := merge(cls, group)) is not None:
+            if merge is not None and (tool := merge(cls, group)) is not None:
                 computed.append(tool)
             else:
                 computed.append(ToolProxy(tools=group))
@@ -613,8 +654,7 @@ def group_tools(tools: list[Tool | ToolProxy], *, merge: MergeFn[Tool] | None = 
 def _has_auto_sizing(item: LayoutDOM) -> bool:
     return item.sizing_mode is None and item.width_policy == "auto" and item.height_policy == "auto"
 
-L = TypeVar("L", bound=LayoutDOM)
-def _parse_children_arg(*args: L | list[L], children: list[L] | None = None) -> list[L]:
+def _parse_children_arg[L: LayoutDOM](*args: L | list[L], children: list[L] | None = None) -> list[L]:
     # Set-up Children from args or kwargs
     if len(args) > 0 and children is not None:
         raise ValueError("'children' keyword cannot be used with positional arguments")
@@ -660,9 +700,7 @@ def _create_grid(iterable: Iterable[UIElement | list[UIElement]], sizing_mode: S
     else:
         return row(children=return_list, sizing_mode=sizing_mode, **kwargs)
 
-I = TypeVar("I")
-
-def _chunks(l: Sequence[I], ncols: int) -> Iterator[Sequence[I]]:
+def _chunks[T](l: Sequence[T], ncols: int) -> Iterator[Sequence[T]]:
     """Yield successive n-sized chunks from list, l."""
     assert isinstance(ncols, int), "ncols must be an integer"
     for i in range(0, len(l), ncols):

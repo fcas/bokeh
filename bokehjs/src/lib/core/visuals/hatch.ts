@@ -10,11 +10,14 @@ import {dict} from "../util/object"
 export interface Hatch extends Readonly<mixins.Hatch> {}
 export class Hatch extends VisualProperties {
   protected _hatch_image: CanvasImageSource | null
+  protected _hatch_svg: CanvasImageSource | null
   protected _update_iteration: number = 0
 
   override update(): void {
+    super.update()
     this._update_iteration++
     this._hatch_image = null
+    this._hatch_svg = null
 
     if (!this.doit) {
       return
@@ -28,6 +31,10 @@ export class Hatch extends VisualProperties {
 
     const finalize = (image: CanvasImageSource) => {
       this._hatch_image = image
+    }
+
+    const finalize_svg = (image_svg: CanvasImageSource) => {
+      this._hatch_svg = image_svg
     }
 
     const textures = dict(this.get_hatch_extra())
@@ -50,6 +57,9 @@ export class Hatch extends VisualProperties {
       const layer = this.obj.canvas.create_layer()
       const image = get_pattern(layer, pattern, color, alpha, scale, weight)
       finalize(image)
+      const svg_layer = this.obj.canvas.create_layer_svg()
+      const image_svg = get_pattern(svg_layer, pattern, color, alpha, scale, weight)
+      finalize_svg(image_svg)
     }
   }
 
@@ -61,11 +71,18 @@ export class Hatch extends VisualProperties {
     return !(color == null || alpha == 0 || pattern == " " || pattern == "blank" || pattern == null)
   }
 
-  apply(ctx: Context2d, rule?: CanvasFillRule): boolean {
+  apply(ctx: Context2d, path_or_rule?: Path2D | CanvasFillRule, rule: CanvasFillRule = "nonzero"): boolean {
     const {doit} = this
     if (doit) {
       this.set_value(ctx)
-      ctx.layer.undo_transform(() => ctx.fill(rule))
+      ctx.layer.undo_transform(() => {
+        if (path_or_rule instanceof Path2D) {
+          const path = path_or_rule
+          ctx.fill(path, rule)
+        } else {
+          ctx.fill(path_or_rule ?? rule)
+        }
+      })
     }
     return doit
   }
@@ -99,6 +116,22 @@ export class Hatch extends VisualProperties {
         case "repeat_y":  return "repeat-y"
         case "no_repeat": return "no-repeat"
       }
+    }
+  }
+
+  declare ComputedValues: {
+    scale:   number
+    pattern: string
+  }
+
+  computed_values(): this["ComputedValues"] {
+    let pattern = ""
+    if (this._hatch_svg !== null && this._hatch_svg instanceof SVGElement) {
+      pattern = `data:image/svg+xml;base64,${btoa(new XMLSerializer().serializeToString(this._hatch_svg))}`
+    }
+    return {
+      scale: this.get_hatch_scale(),
+      pattern,
     }
   }
 
@@ -230,11 +263,18 @@ export class HatchScalar extends VisualUniforms {
     return this._static_doit
   }
 
-  apply(ctx: Context2d, rule?: CanvasFillRule): boolean {
+  apply(ctx: Context2d, path_or_rule?: Path2D | CanvasFillRule, rule: CanvasFillRule = "nonzero"): boolean {
     const {doit} = this
     if (doit) {
       this.set_value(ctx)
-      ctx.layer.undo_transform(() => ctx.fill(rule))
+      ctx.layer.undo_transform(() => {
+        if (path_or_rule instanceof Path2D) {
+          const path = path_or_rule
+          ctx.fill(path, rule)
+        } else {
+          ctx.fill(path_or_rule ?? rule)
+        }
+      })
     }
     return doit
   }
@@ -395,11 +435,18 @@ export class HatchVector extends VisualUniforms {
     return true
   }
 
-  apply(ctx: Context2d, i: number, rule?: CanvasFillRule): boolean {
+  apply(ctx: Context2d, i: number, path_or_rule?: Path2D | CanvasFillRule, rule: CanvasFillRule = "nonzero"): boolean {
     const doit = this.v_doit(i)
     if (doit) {
       this.set_vectorize(ctx, i)
-      ctx.layer.undo_transform(() => ctx.fill(rule))
+      ctx.layer.undo_transform(() => {
+        if (path_or_rule instanceof Path2D) {
+          const path = path_or_rule
+          ctx.fill(path, rule)
+        } else {
+          ctx.fill(path_or_rule ?? rule)
+        }
+      })
     }
     return doit
   }

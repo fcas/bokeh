@@ -38,15 +38,24 @@ log = logging.getLogger(__name__)
 # Standard library imports
 from contextlib import contextmanager
 from os.path import basename, splitext
-from types import ModuleType
-from typing import Any, Callable, ClassVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    ClassVar,
+    Generator,
+)
 
 # Bokeh imports
-from ...core.types import PathLike
-from ...document import Document
 from ...io.doc import curdoc, patch_curdoc
-from .code_runner import CodeRunner
+from .code_runner import CodeRunner, _hold_process_globals
 from .handler import Handler
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
+    from ...core.types import PathLike
+    from ...document import Document
 
 #-----------------------------------------------------------------------------
 # Globals and constants
@@ -154,9 +163,8 @@ class CodeHandler(Handler):
         # paths to custom models resolver.
         doc.modules.add(module)
 
-        with _monkeypatch_io(self._loggers):
-            with patch_curdoc(doc):
-                self._runner.run(module, self._make_post_doc_check(doc))
+        with patch_curdoc(doc), _hold_process_globals(), _monkeypatch_io(self._loggers):
+            self._runner.run(module, self._make_post_doc_check(doc))
 
     def url_path(self) -> str | None:
         ''' The last path component for the basename of the configured filename.
@@ -191,15 +199,17 @@ class CodeHandler(Handler):
 # code should be calling these functions, and we're only making a best effort to
 # warn people so no big deal if we fail.
 @contextmanager
-def _monkeypatch_io(loggers: dict[str, Callable[..., None]]) -> dict[str, Any]:
+def _monkeypatch_io(loggers: dict[str, Callable[..., None]]) -> Generator[None]:
     import bokeh.io as io
     old: dict[str, Any] = {}
     for f in CodeHandler._io_functions:
         old[f] = getattr(io, f)
         setattr(io, f, loggers[f])
-    yield
-    for f in old:
-        setattr(io, f, old[f])
+    try:
+        yield
+    finally:
+        for f in old:
+            setattr(io, f, old[f])
 
 #-----------------------------------------------------------------------------
 # Code

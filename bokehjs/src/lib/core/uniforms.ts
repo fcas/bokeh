@@ -11,6 +11,7 @@ export abstract class Uniform<T = number> implements Equatable {
   abstract select(indices: Indices): Uniform<T>
   abstract [equals](that: this, cmp: Comparator): boolean
   abstract map<U>(fn: (v: T) => U): Uniform<U>
+  abstract unique(): T[]
 
   is_Scalar(): this is UniformScalar<T> {
     return this.is_scalar
@@ -49,6 +50,10 @@ export class UniformScalar<T> extends Uniform<T> {
   map<U>(fn: (v: T) => U): UniformScalar<U> {
     return new UniformScalar(fn(this.value), this.length)
   }
+
+  unique(): T[] {
+    return [this.value]
+  }
 }
 
 export class UniformVector<T> extends Uniform<T> {
@@ -80,6 +85,10 @@ export class UniformVector<T> extends Uniform<T> {
   map<U>(fn: (v: T) => U): UniformVector<U> {
     return new UniformVector(arrayable.map(this.array, fn))
   }
+
+  unique(): T[] {
+    return [...new Set(this.array)]
+  }
 }
 
 export class ColorUniformVector extends UniformVector<number> {
@@ -100,6 +109,10 @@ export class ColorUniformVector extends UniformVector<number> {
       yield this.get(i)
     }
   }
+
+  copy_buffer(): ArrayBufferLike {
+    return this.array.buffer.slice()
+  }
 }
 
 export function min(u: Uniform<number>): number {
@@ -108,4 +121,12 @@ export function min(u: Uniform<number>): number {
 
 export function max(u: Uniform<number>): number {
   return u.is_Scalar() ? u.value : arrayable.max((u as UniformVector<number>).array)
+}
+
+export function some<T>(u: Uniform<T>, predicate: (item: T) => boolean): boolean {
+  return u.is_Scalar() ? predicate(u.value) : arrayable.some((u as UniformVector<T>).array, predicate)
+}
+
+export function every<T>(u: Uniform<T>, predicate: (item: T) => boolean): boolean {
+  return u.is_Scalar() ? predicate(u.value) : arrayable.every((u as UniformVector<T>).array, predicate)
 }

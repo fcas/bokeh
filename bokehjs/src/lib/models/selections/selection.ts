@@ -4,7 +4,7 @@ import type {SelectionMode} from "core/enums"
 import {union, intersection, difference, symmetric_difference} from "core/util/array"
 import {merge} from "core/util/object"
 import type {Glyph, GlyphView} from "../glyphs/glyph"
-import {Arrayable, Int, Mapping} from "core/kinds"
+import {Arrayable, Int, Mapping, List, Struct} from "core/kinds"
 import {map} from "core/util/arrayable"
 
 export const OpaqueIndices = Arrayable(Int)
@@ -13,13 +13,11 @@ export type OpaqueIndices = typeof OpaqueIndices["__type__"]
 export const MultiIndices = Mapping(Int, OpaqueIndices)
 export type MultiIndices = typeof MultiIndices["__type__"]
 
-export type ImageIndex = {
-  index: number
-  i: number
-  j: number
-  flat_index: number
-}
-export type ImageIndices = ImageIndex[]
+export const ImageIndex = Struct({index: Int, i: Int, j: Int, flat_index: Int})
+export type ImageIndex = typeof ImageIndex["__type__"]
+
+export const ImageIndices = List(ImageIndex)
+export type ImageIndices = typeof ImageIndices["__type__"]
 
 export namespace Selection {
   export type Attrs = p.AttrsOf<Props>
@@ -28,7 +26,7 @@ export namespace Selection {
     indices: p.Property<OpaqueIndices>
     line_indices: p.Property<OpaqueIndices>
     multiline_indices: p.Property<MultiIndices>
-    image_indices: p.Property<ImageIndex[]>
+    image_indices: p.Property<ImageIndices>
     view: p.Property<GlyphView | null>
     selected_glyphs: p.Property<Glyph[]>
   }
@@ -48,12 +46,12 @@ export class Selection extends Model {
   }
 
   static {
-    this.define<Selection.Props>(({Int, List, Struct}) => ({
+    this.define<Selection.Props>({
       indices:           [ OpaqueIndices, [] ],
       line_indices:      [ OpaqueIndices, [] ],
       multiline_indices: [ MultiIndices, new Map() ],
-      image_indices:     [ List(Struct({index: Int, i: Int, j: Int, flat_index: Int})), [] ],
-    }))
+      image_indices:     [ ImageIndices, [] ],
+    })
 
     this.internal<Selection.Props>(({List, AnyRef, Nullable}) => ({
       selected_glyphs:   [ List(AnyRef()), [] ],
@@ -73,6 +71,10 @@ export class Selection extends Model {
     switch (mode) {
       case "replace": {
         this.update_through_replacement(selection)
+        break
+      }
+      case "toggle": {
+        this.update_through_toggle(selection)
         break
       }
       case "append": {
@@ -131,7 +133,7 @@ export class Selection extends Model {
   }
 
   is_empty(): boolean {
-    return this.indices.length == 0 && this.line_indices.length == 0 && this.image_indices.length == 0
+    return this.indices.length == 0 && this.line_indices.length == 0 && this.image_indices.length == 0 && this.selected_glyphs.length == 0
   }
 
   protected _union_image_indices(...collection: ImageIndices[]): ImageIndices {
@@ -170,6 +172,17 @@ export class Selection extends Model {
     this.image_indices = other.image_indices
     this.view = other.view
     this.selected_glyphs = other.selected_glyphs
+  }
+
+  update_through_toggle(other: Selection): void {
+    // note the order of arguments when comparing with update_through_subtraction()
+    this.indices = difference(other.indices, this.indices)
+    // TODO: think through and fix any logic below
+    this.selected_glyphs = union(other.selected_glyphs, this.selected_glyphs)
+    this.line_indices = union(other.line_indices, this.line_indices)
+    this.image_indices = this._union_image_indices(this.image_indices, other.image_indices) // TODO
+    this.view = other.view
+    this.multiline_indices = merge(other.multiline_indices, this.multiline_indices)
   }
 
   update_through_union(other: Selection): void {

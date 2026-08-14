@@ -8,14 +8,15 @@ import {settings} from "core/settings"
 import type {Context2d} from "core/util/canvas"
 import {DOMComponentView} from "core/dom_view"
 import {Model} from "../../model"
-import type {Anchor} from "core/enums"
-import type {ViewStorage, IterViews} from "core/build_views"
+import type {Anchor, WindowAxis} from "core/enums"
+import type {ViewStorage, ChildView} from "core/build_views"
 import {build_views} from "core/build_views"
 import {logger} from "core/logging"
 import type {Arrayable, Rect, FloatArray} from "core/types"
 import {ScreenArray, Indices} from "core/types"
-import {isString} from "core/util/types"
+import {isArrayable, isString} from "core/util/types"
 import {RaggedArray} from "core/util/ragged_array"
+import {every} from "core/util/array"
 import {inplace_map} from "core/util/arrayable"
 import {inplace, project_xy} from "core/util/projections"
 import {is_equal, EqNotImplemented} from "core/util/eq"
@@ -54,8 +55,13 @@ export abstract class GlyphView extends DOMComponentView {
 
   async load_glglyph?(): Promise<typeof BaseGLGlyph>
 
-  get has_webgl(): boolean {
-    return this.glglyph != null
+  has_webgl(): this is {glglyph: BaseGLGlyph} {
+    return this.glglyph != null && this._can_use_webgl
+  }
+
+  private _can_use_webgl: boolean = false
+  protected _compute_can_use_webgl(): boolean {
+    return true
   }
 
   private _index: SpatialIndex | null = null
@@ -94,9 +100,8 @@ export abstract class GlyphView extends DOMComponentView {
 
   readonly decorations: ViewStorage<Decoration> = new Map()
 
-  override *children(): IterViews {
-    yield* super.children()
-    yield* this.decorations.values()
+  override _children_views(): ChildView[] {
+    return [...super._children_views(), ...this.decorations.values()]
   }
 
   override async lazy_initialize(): Promise<void> {
@@ -119,7 +124,7 @@ export abstract class GlyphView extends DOMComponentView {
   }
 
   paint(ctx: Context2d, indices: number[], data?: Partial<Glyph.Data>): void {
-    if (this.glglyph != null) {
+    if (this.has_webgl()) {
       this.glglyph.render(ctx, indices, this.base ?? this)
     } else if (this.canvas.webgl != null && settings.force_webgl) {
       throw new Error(`${this} doesn't support webgl rendering`)
@@ -142,8 +147,36 @@ export abstract class GlyphView extends DOMComponentView {
     return bounds
   }
 
-  bounds(): Rect {
-    return this._bounds(this.index.bbox)
+  bounds(window_axis: WindowAxis = "none"): Rect {
+    switch (window_axis) {
+      case "none": {
+        return this._bounds(this.index.bbox)
+      }
+      case "x": {
+        const x_range = this.renderer.coordinates.x_source
+        if (isNaN(x_range.start) || isNaN(x_range.end)) {
+          return this._bounds(this.index.bbox)
+        }
+        const hit_box = bbox.x_range(x_range.start, x_range.end)
+        const {x0, y0, x1, y1} = this.index.bounds(hit_box)
+        if (!isFinite(y0+y1)) {
+          return this._bounds(this.index.bbox)
+        }
+        return this._bounds({x0, y0, x1, y1})
+      }
+      case "y": {
+        const y_range = this.renderer.coordinates.y_source
+        if (isNaN(y_range.start) || isNaN(y_range.end)) {
+          return this._bounds(this.index.bbox)
+        }
+        const hit_box = bbox.y_range(y_range.start, y_range.end)
+        const {x0, y0, x1, y1} = this.index.bounds(hit_box)
+        if (!isFinite(x0+x1)) {
+          return this._bounds(this.index.bbox)
+        }
+        return this._bounds({x0, y0, x1, y1})
+      }
+    }
   }
 
   log_bounds(): Rect {
@@ -317,14 +350,48 @@ export abstract class GlyphView extends DOMComponentView {
     })
   }
 
-  protected _can_inherit_from<T>(prop: p.Property<T>, base: this): boolean {
+  /**
+   * Determine if this view can inherit a property value from the base glyph.
+   *
+   * This enables selection/hover/muted glyphs to inherit properties from the base
+   * glyph when not explicitly overridden, which is critical when a derived glyph
+   * only overrides some properties (e.g., radius) but should inherit others
+   * (e.g., start_angle, end_angle).
+   *
+   * Inheritance occurs when either:
+   * 1. The derived property value equals the base value (original behavior), OR
+   * 2. The derived property value equals its default (new behavior)
+   *
+   * Example (case 2):
+   *   Base glyph: start_angle: {value: 0}
+   *   Selection glyph: (unspecified) → gets default {field: "start_angle"}
+   *   Without inheritance: would try to read missing field → rendering fails
+   *   With inheritance: inherits {value: 0} from base → renders correctly ✓
+   *
+   * @param prop - The property to check for inheritance
+   * @param base - The base glyph view to potentially inherit from
+   * @returns true if the property should be inherited from base
+   */
+  protected _can_inherit_from<T>(prop: p.Property<T>, base: this | null): boolean {
+    if (base == null) {
+      return false
+    }
+
     const base_prop = base.model.property(prop.attr)
 
     const value = prop.get_value()
     const base_value = base_prop.get_value()
 
     try {
-      return is_equal(value, base_value)
+      if (is_equal(value, base_value)) {
+        return true
+      }
+      // If the selection glyph's property has its default value, inherit from base
+      // This handles cases like: base glyph has start_angle={value:0}, selection glyph
+      // doesn't specify start_angle (gets default {field:"start_angle"}), but should
+      // inherit the base value instead of trying to read a non-existent field
+      const default_value = prop.default_value(this.model)
+      return is_equal(value, default_value)
     } catch (error) {
       if (error instanceof EqNotImplemented) {
         return false
@@ -354,10 +421,24 @@ export abstract class GlyphView extends DOMComponentView {
       visual.update()
     }
 
-    this.glglyph?.set_visuals_changed()
+    if (this.has_webgl()) {
+      this.glglyph.set_visuals_changed()
+    }
   }
 
   protected _transform_array<T>(prop: p.BaseCoordinateSpec<T>, array: Arrayable<unknown>) {
+    // examine just the top level of a 2-d array to validate
+    // that every subitem is an array of some kind, as expected
+    if (prop instanceof p.CoordinateSeqSpec) {
+      // work around issues with empty data sources (see #14424)
+      const indeterminate_length = this.renderer.data_source.get_value().get_length() == null
+      if (!indeterminate_length && !every(array, isArrayable)) {
+        const msg = `expected a 2-d array for ${this.model.type}.${prop.attr}`
+        logger.error(msg)
+        throw new Error(msg)
+      }
+    }
+
     const {x_source, y_source} = this.renderer.coordinates
     const range = prop.dimension == "x" ? x_source : y_source
 
@@ -435,7 +516,13 @@ export abstract class GlyphView extends DOMComponentView {
       decoration.marking.set_data(source, indices)
     }
 
-    this.glglyph?.set_data_changed()
+    if (this.glglyph != null) {
+      this._can_use_webgl = this._compute_can_use_webgl()
+    }
+
+    if (this.has_webgl()) {
+      this.glglyph.set_data_changed()
+    }
 
     if (base == null) {
       this.index_data()
@@ -502,7 +589,9 @@ export abstract class GlyphView extends DOMComponentView {
     }
 
     this._map_data()
-    this.glglyph?.set_data_mapped()
+    if (this.has_webgl()) {
+      this.glglyph.set_data_mapped()
+    }
   }
 
   // This is where specs not included in coords are computed, e.g. radius.

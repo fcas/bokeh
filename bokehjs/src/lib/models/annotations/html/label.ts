@@ -4,6 +4,7 @@ import {CoordinateUnits, AngleUnits} from "core/enums"
 import {TextBox} from "core/graphics"
 import type {Size} from "core/layout"
 import {SideLayout} from "core/layout/side_panel"
+import type {Context2d} from "core/util/canvas"
 import * as mixins from "core/property_mixins"
 import type * as p from "core/properties"
 
@@ -37,7 +38,7 @@ export class HTMLLabelView extends TextAnnotationView {
     return {width, height}
   }
 
-  protected _paint(): void {
+  protected _paint(ctx: Context2d): void {
     const {angle, angle_units} = this.model
     const rotation = compute_angle(angle, angle_units)
 
@@ -48,30 +49,24 @@ export class HTMLLabelView extends TextAnnotationView {
 
     let sx = (() => {
       switch (this.model.x_units) {
-        case "canvas":
-          return this.model.x
-        case "screen":
-          return panel.bbox.xview.compute(this.model.x)
-        case "data":
-          return xscale.compute(this.model.x)
+        case "canvas": return this.model.x
+        case "screen": return panel.bbox.xview.compute(this.model.x)
+        case "data":   return xscale.compute(this.model.x)
       }
     })()
 
     let sy = (() => {
       switch (this.model.y_units) {
-        case "canvas":
-          return this.model.y
-        case "screen":
-          return panel.bbox.yview.compute(this.model.y)
-        case "data":
-          return yscale.compute(this.model.y)
+        case "canvas": return this.model.y
+        case "screen": return panel.bbox.yview.compute(this.model.y)
+        case "data":   return yscale.compute(this.model.y)
       }
     })()
 
     sx += this.model.x_offset
     sy -= this.model.y_offset
 
-    this._paint_text(this.layer.ctx, this.model.text, sx, sy, rotation)
+    this._paint_text(ctx, this.model.text, sx, sy, rotation)
   }
 }
 

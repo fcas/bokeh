@@ -33,6 +33,7 @@ from bokeh.models import (
     DataRange1d,
     FactorRange,
     GlyphRenderer,
+    Grid,
     Label,
     LinearAxis,
     LinearScale,
@@ -77,7 +78,7 @@ class TestPlotLegendProperty:
         assert isinstance(x, bmp._list_attr_splat)
         assert len(x) == 1
 
-    def test_warnign(self) -> None:
+    def test_warning(self) -> None:
         plot = figure(tools='')
         with pytest.warns(UserWarning) as warns:
             plot.legend.location = "above"
@@ -272,6 +273,45 @@ def test_plot_add_layout_adds_axis_to_renderers_and_side_renderers() -> None:
     assert axis in plot.left
 
 
+def test_plot_add_layout_moves_an_existing_renderer() -> None:
+    plot = figure()
+    axis = LinearAxis()
+
+    plot.add_layout(axis, 'left')
+    assert axis in plot.left
+    assert axis not in plot.right
+    assert axis not in plot.above
+    assert axis not in plot.below
+    assert axis not in plot.center
+
+    plot.add_layout(axis, 'above')
+    assert axis not in plot.left
+    assert axis not in plot.right
+    assert axis in plot.above
+    assert axis not in plot.below
+    assert axis not in plot.center
+
+def test_plot_add_layout_moves_an_existing_renderer_added_manually() -> None:
+    plot = figure()
+    axis = LinearAxis()
+    grid = Grid()
+
+    plot.left = [axis, grid, axis]
+    assert grid in plot.left
+    assert axis in plot.left
+    assert axis not in plot.right
+    assert axis not in plot.above
+    assert axis not in plot.below
+    assert axis not in plot.center
+
+    plot.add_layout(axis, 'above')
+    assert grid in plot.left
+    assert axis not in plot.left
+    assert axis not in plot.right
+    assert axis in plot.above
+    assert axis not in plot.below
+    assert axis not in plot.center
+
 def test_sizing_mode_property_is_fixed_by_default() -> None:
     plot = figure()
     assert plot.sizing_mode is None
@@ -435,6 +475,16 @@ def test_Plot_add_tools() -> None:
 
     with pytest.raises(ValueError):
         plot.add_tools(0)
+
+def test_Plot_hold_restores_after_exception() -> None:
+    plot = Plot()
+
+    with pytest.raises(RuntimeError):
+        with plot.hold(render=True):
+            assert plot.hold_render is True
+            raise RuntimeError("boom")
+
+    assert plot.hold_render is False
 
 def test_remove_tools_single():
     pan = PanTool()

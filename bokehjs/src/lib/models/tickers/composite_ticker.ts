@@ -24,8 +24,8 @@ export class CompositeTicker extends ContinuousTicker {
   }
 
   static {
-    this.define<CompositeTicker.Props>(({List, Ref}) => ({
-      tickers: [ List(Ref(ContinuousTicker)), [] ],
+    this.define<CompositeTicker.Props>(({NonEmptyList, Ref}) => ({
+      tickers: [ NonEmptyList(Ref(ContinuousTicker)) ],
     }))
   }
 
@@ -52,6 +52,10 @@ export class CompositeTicker extends ContinuousTicker {
 
   get_best_ticker(data_low: number, data_high: number, desired_n_ticks: number): ContinuousTicker {
     const data_range = data_high - data_low
+    if (data_range == 0) {
+      return this.tickers[0]
+    }
+
     const ideal_interval = this.get_ideal_interval(data_low, data_high, desired_n_ticks)
     const ticker_ndxs = [
       sorted_index(this.min_intervals, ideal_interval) - 1,
@@ -84,8 +88,8 @@ export class CompositeTicker extends ContinuousTicker {
     return best_ticker.get_interval(data_low, data_high, desired_n_ticks)
   }
 
-  override get_ticks_no_defaults(data_low: number, data_high: number, cross_loc: number, desired_n_ticks: number): TickSpec<number> {
+  override get_ticks_no_defaults(data_low: number, data_high: number, cross_loc: number, desired_n_ticks: number, num_minor_ticks: number): TickSpec<number> {
     const best_ticker = this.get_best_ticker(data_low, data_high, desired_n_ticks)
-    return best_ticker.get_ticks_no_defaults(data_low, data_high, cross_loc, desired_n_ticks)
+    return best_ticker.get_ticks_no_defaults(data_low, data_high, cross_loc, desired_n_ticks, num_minor_ticks)
   }
 }

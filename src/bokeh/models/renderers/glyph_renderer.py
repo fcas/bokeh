@@ -12,6 +12,8 @@
 #-----------------------------------------------------------------------------
 from __future__ import annotations
 
+# pyright: reportAbstractUsage=false, reportArgumentType=false, reportAttributeAccessIssue=false
+
 import logging # isort:skip
 log = logging.getLogger(__name__)
 
@@ -27,19 +29,16 @@ from typing import TYPE_CHECKING, Any, Literal
 from bokeh.core.property.vectorization import Field
 
 # Bokeh imports
-from ...core.properties import (
-    Auto,
-    Bool,
-    Either,
-    Instance,
-    InstanceDefault,
-    Nullable,
-    Required,
-)
+from ...core.property.auto import Auto
+from ...core.property.either import Either
+from ...core.property.instance import Instance, InstanceDefault
+from ...core.property.nullable import Nullable
+from ...core.property.primitive import Bool
+from ...core.property.required import Required
 from ...core.validation import error
 from ...core.validation.errors import BAD_COLUMN_NAME, CDSVIEW_FILTERS_WITH_CONNECTED
 from ..filters import AllIndices
-from ..glyphs import ConnectedXYGlyph, Glyph
+from ..glyph import ConnectedXYGlyph, Glyph
 from ..graphics import Decoration, Marking
 from ..sources import (
     CDSView,
@@ -71,7 +70,7 @@ class GlyphRenderer(DataRenderer):
     '''
 
     # explicit __init__ to support Init signatures
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
     @error(CDSVIEW_FILTERS_WITH_CONNECTED)
@@ -190,13 +189,8 @@ class GlyphRenderer(DataRenderer):
         '''
         from ...core.property.vectorization import Field
         from ..annotations import ColorBar
-        from ..glyphs import (
-            FillGlyph,
-            Image,
-            ImageStack,
-            LineGlyph,
-            TextGlyph,
-        )
+        from ..glyph import FillGlyph, LineGlyph, TextGlyph
+        from ..glyphs import Image, ImageStack
         from ..mappers import ColorMapper
 
         if isinstance(self.glyph, FillGlyph):
@@ -217,7 +211,7 @@ class GlyphRenderer(DataRenderer):
                 raise ValueError("expected text_color to be a field with a ColorMapper transform")
             return ColorBar(color_mapper=text_color.transform, **kwargs)
 
-        elif isinstance(self.glyph, Image | ImageStack):
+        elif isinstance(self.glyph, (Image, ImageStack)):
             return ColorBar(color_mapper=self.glyph.color_mapper, **kwargs)
 
         else:

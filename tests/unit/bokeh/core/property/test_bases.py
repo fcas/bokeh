@@ -22,7 +22,6 @@ from unittest.mock import MagicMock, patch
 
 # External imports
 import numpy as np
-import pandas as pd
 
 # Bokeh imports
 from bokeh.core.has_props import HasProps
@@ -121,7 +120,7 @@ class TestProperty:
         for x in [1, 1.2, "a", np.arange(4), None, False, True, {}, []]:
                 assert p.matches(x, x) is True
                 assert p.matches(x, "junk") is False
-        out, err = capsys.readouterr()
+        _, err = capsys.readouterr()
         assert err == ""
 
     def test_matches_compatible_arrays(self, capsys: Capture) -> None:
@@ -133,7 +132,7 @@ class TestProperty:
         for x in [1, 1.2, "a", np.arange(4), None, False]:
                 assert p.matches(a, x) is False
                 assert p.matches(x, b) is False
-        out, err = capsys.readouterr()
+        _, err = capsys.readouterr()
         assert err == ""
 
     def test_matches_incompatible_arrays(self, capsys: Capture) -> None:
@@ -141,9 +140,9 @@ class TestProperty:
         a = np.arange(5)
         b = np.arange(5).astype(str)
         assert p.matches(a, b) is False
-        out, err = capsys.readouterr()
+        _, _err = capsys.readouterr()
         # no way to suppress FutureWarning in this case
-        # assert err == ""
+        # assert _err == ""
 
     def test_matches_dicts_with_array_values(self, capsys: Capture) -> None:
         p = bcpb.Property()
@@ -159,7 +158,7 @@ class TestProperty:
         assert p.matches(d1, dict(foo=np.arange(11))) is False
         assert p.matches(d1, dict(bar=np.arange(10))) is False
         assert p.matches(d1, dict(bar=10)) is False
-        out, err = capsys.readouterr()
+        _, err = capsys.readouterr()
         assert err == ""
 
     def test_matches_non_dict_containers_with_array_false(self, capsys: Capture) -> None:
@@ -174,10 +173,11 @@ class TestProperty:
         assert p.matches(t1, t1) is True  # because object identity
         assert p.matches(t1, t2) is False
 
-        out, err = capsys.readouterr()
+        _, err = capsys.readouterr()
         assert err == ""
 
     def test_matches_dicts_with_series_values(self, capsys: Capture) -> None:
+        pd = pytest.importorskip("pandas")
         p = bcpb.Property()
         d1 = pd.DataFrame(dict(foo=np.arange(10)))
         d2 = pd.DataFrame(dict(foo=np.arange(10)))
@@ -191,10 +191,11 @@ class TestProperty:
         assert p.matches(d1.foo, np.arange(11)) is False
         assert p.matches(d1.foo, np.arange(10)+1) is False
         assert p.matches(d1.foo, 10) is False
-        out, err = capsys.readouterr()
+        _, err = capsys.readouterr()
         assert err == ""
 
     def test_matches_dicts_with_index_values(self, capsys: Capture) -> None:
+        pd = pytest.importorskip("pandas")
         p = bcpb.Property()
         d1 = pd.DataFrame(dict(foo=np.arange(10)))
         d2 = pd.DataFrame(dict(foo=np.arange(10)))
@@ -208,7 +209,7 @@ class TestProperty:
         assert p.matches(d1.index, np.arange(11)) is False
         assert p.matches(d1.index, np.arange(10)+1) is False
         assert p.matches(d1.index, 10) is False
-        out, err = capsys.readouterr()
+        _, err = capsys.readouterr()
         assert err == ""
 
     def test_validation_on(self) -> None:
@@ -233,6 +234,27 @@ class TestProperty:
 
         p.prepare_value(hp, "foo", 10)
         assert mock_hv.called
+
+    def test_pandas_na(self):
+        pd = pytest.importorskip("pandas")
+        # Property.matches handles this as False could change in the future.
+        # pd.NA raises a TypeError when bool(pd.NA == pd.NA)
+        assert bcpb.Property().matches(pd.NA, pd.NA) is False
+        assert bcpb.Property().matches({"name": pd.NA}, {"name": 1}) is False
+
+    def test_nan(self):
+        # Property.matches handles this as False could change in the future.
+        assert bcpb.Property().matches(np.nan, np.nan) is False
+        assert bcpb.Property().matches({"name": np.nan}, {"name": np.nan}) is False
+        assert bcpb.Property().matches(np.array([np.nan]), np.array([np.nan])) is False
+
+    def test_nat(self):
+        # Property.matches handles this as False could change in the future.
+        nat = np.datetime64("NAT", "ms")
+        assert np.isnat(nat)
+        assert bcpb.Property().matches(nat, nat) is False
+        assert bcpb.Property().matches({"name": nat}, {"name": nat}) is False
+        assert bcpb.Property().matches(np.array([nat]), np.array([nat])) is False
 
 #-----------------------------------------------------------------------------
 # Dev API

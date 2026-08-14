@@ -1,17 +1,12 @@
 @import "./_mixins.less";
 
 :host {
-  // TODO: shared with tool_button.less
-  --button-width: 30px;
-  --button-height: 30px;
-  --button-color: lightgray;
-}
-
-:host {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   .no-user-select();
+  pointer-events: all;
+  background-color: var(--background-color);
 }
 
 :host(.bk-inner) {
@@ -76,17 +71,18 @@
 /// Overflow button
 
 .bk-tool-overflow {
-  color: gray;
+  color: var(--icon-color);
   display: flex;
   align-items: center;
+  background-color: var(--background-color);
 }
 
 .bk-tool-overflow:hover {
-  background-color: rgba(192, 192, 192, 0.15);
+  background-color: var(--hover-color);
 }
 
 .bk-tool-overflow:focus, .bk-tool-overflow:focus-visible {
-  outline: 1px dotted var(--active-tool-highlight);
+  outline: var(--outline-width) var(--outline-style) var(--highlight-color);
   outline-offset: -1px;
 }
 
